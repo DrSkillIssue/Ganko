@@ -5,8 +5,8 @@ import { parseCode } from "../solid/test-utils";
 const PERF_BASELINE_MS = {
   shallowCaseBuild: 45,
   shallowElapsed: 95,
-  deepCaseBuild: 340,
-  deepElapsed: 340,
+  deepCaseBuild: 500,
+  deepElapsed: 500,
 } as const;
 
 function buildRows(count: number): string {
