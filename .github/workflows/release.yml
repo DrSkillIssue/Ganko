@@ -31,8 +31,17 @@ jobs:
       - name: Publish to npm
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          cd packages/ganko && npm publish --access public --provenance
-          cd ../lsp && npm publish --access public --provenance
+          for pkg in packages/ganko packages/lsp; do
+            NAME=$(node -p "require('./$pkg/package.json').name")
+            VERSION=$(node -p "require('./$pkg/package.json').version")
+            PUBLISHED=$(npm view "$NAME@$VERSION" version 2>/dev/null || echo "")
+            if [ "$PUBLISHED" = "$VERSION" ]; then
+              echo "$NAME@$VERSION already published, skipping"
+            else
+              echo "Publishing $NAME@$VERSION"
+              cd "$pkg" && npm publish --access public --provenance && cd -
+            fi
+          done
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
