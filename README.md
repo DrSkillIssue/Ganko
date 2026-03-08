@@ -18,11 +18,56 @@ Ganko builds a typed graph of your program first (reactivity, scopes, JSX, CSS c
 
 **Cross-File JSX + CSS** (30 rules) — Correlates JSX elements with CSS selectors: layout shift detection (CLS-triggering transitions, conditional display collapse, unsized replaced elements, stateful box-model shifts), classList geometry toggles, fill-image parent sizing, undefined CSS class references, and unused custom properties across file boundaries.
 
+## Installation
+
+### LSP Server (for editors)
+
+```bash
+npm i -g @drskillissue/ganko-lsp
+```
+
+This installs the `ganko` binary, which serves as both the language server and CLI linter.
+
+### Editor Setup
+
+#### VS Code
+
+Install `ganko-vscode` from the VS Code marketplace. It bundles the LSP server — no separate install required.
+
+#### OpenCode
+
+Install the LSP globally, then add to `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "lsp": {
+    "ganko": {
+      "command": ["ganko", "--stdio"],
+      "extensions": [
+        ".ts", ".js", ".tsx", ".jsx",
+        ".css", ".less", ".sass", ".scss"
+      ]
+    }
+  }
+}
+```
+
+#### Neovim (nvim-lspconfig)
+
+```lua
+vim.lsp.start({
+  name = "ganko",
+  cmd = { "ganko", "--stdio" },
+  filetypes = { "typescript", "javascript", "typescriptreact", "javascriptreact", "css", "scss", "less", "sass" },
+  root_dir = vim.fs.dirname(vim.fs.find({ "tsconfig.json", "package.json" }, { upward = true })[1]),
+})
+```
+
+#### Other Editors
+
+Any editor with LSP support can use ganko. Point it at `ganko --stdio` — the server communicates via JSON-RPC over stdio.
+
 ## Usage
-
-### VS Code Extension
-
-Install `ganko-vscode` from the VS Code marketplace. It bundles the LSP server and provides real-time diagnostics, go-to-definition, references, rename, hover, completions, and more.
 
 ### CLI Linter
 
@@ -61,7 +106,6 @@ export default [
 ### Requirements
 
 - Node.js >= 22.0.0
-- Bun >= 1.3.10 (for running the CLI entrypoint)
 - TypeScript >= 5.9.3
 
 ## Rules
