@@ -1,0 +1,47 @@
+{
+  "name": "ganko-monorepo",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --cwd packages/shared build && bun run --cwd packages/ganko build && bun run --cwd packages/lsp build && bun run --cwd packages/vscode build",
+    "test": "bun run --cwd packages/ganko test",
+    "tsc": "bun run --cwd packages/shared tsc && bun run --cwd packages/ganko tsc && bun run --cwd packages/lsp tsc && bun run --cwd packages/vscode tsc",
+    "lint": "eslint --max-warnings=0",
+    "ci": "bun run build && bun run test && bun run lint && bun run tsc && bun run --cwd packages/ganko generate:check",
+    "clean": "bun -e \"import { readdir, rm } from 'node:fs/promises'; import { resolve } from 'node:path'; const root = process.cwd(); const entries = await readdir(resolve(root, 'packages'), { withFileTypes: true }); for (const entry of entries) { if (!entry.isDirectory()) continue; await rm(resolve(root, 'packages', entry.name, 'dist'), { recursive: true, force: true }); }\"",
+    "rebuild": "bun run clean && bun install && bun run build",
+    "package": "bun run build && bun run --cwd packages/vscode package",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@tsconfig/bun": "^1.0.10",
+    "@types/bun": "^1.3.10",
+    "@types/node": "^25.3.5",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/scope-manager": "^8.56.1",
+    "@typescript-eslint/types": "^8.56.1",
+    "@typescript-eslint/utils": "^8.56.1",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
+    "ganko": "workspace:^",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18",
+    "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "bun@1.3.10"
+}

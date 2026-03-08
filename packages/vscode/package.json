@@ -1,0 +1,3023 @@
+{
+  "name": "ganko-vscode",
+  "private": true,
+  "displayName": "Solid.js Language Support",
+  "description": "Language support for Solid.js - diagnostics, go-to-definition, references, and more",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "ganko",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DrSkillIssue/ganko.git",
+    "directory": "packages/vscode"
+  },
+  "keywords": [
+    "solid",
+    "solidjs",
+    "jsx",
+    "typescript",
+    "lsp",
+    "language-server"
+  ],
+  "engines": {
+    "vscode": ">=1.105.0",
+    "node": ">=22.0.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:css",
+    "onLanguage:scss",
+    "onLanguage:sass",
+    "onLanguage:less",
+    "workspaceContains:**/*.tsx",
+    "workspaceContains:**/*.jsx"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Solid LSP executes code analysis that requires workspace trust."
+    }
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Solid.js",
+      "properties": {
+        "solid.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Solid.js language server"
+        },
+        "solid.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns to exclude from analysis (e.g. [\"backend/**\", \"scripts/**\"]). Matched relative to workspace root."
+        },
+        "solid.logLevel": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warning",
+            "error",
+            "critical",
+            "off"
+          ],
+          "default": "info",
+          "description": "Log level for the Solid language server. Messages below this severity are suppressed.",
+          "enumDescriptions": [
+            "Show all messages including finest-grained trace output",
+            "Show debug messages and above",
+            "Show informational messages and above",
+            "Show warnings and above",
+            "Show errors and above",
+            "Show only critical errors",
+            "Disable all logging"
+          ]
+        },
+        "solid.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Solid language server"
+        },
+        "solid.accessibilityPolicy": {
+          "type": "string",
+          "enum": [
+            "wcag-aa",
+            "wcag-aaa",
+            "mobile-first",
+            "dense-ui",
+            "large-text"
+          ],
+          "default": "wcag-aa",
+          "description": "Accessibility policy template for CSS and JSX style linting. Controls minimum font sizes, touch targets, spacing, and contrast thresholds.",
+          "enumDescriptions": [
+            "WCAG 2.2 Level AA — legal compliance baseline (24px touch targets, 4.5:1 contrast, 16px body text)",
+            "WCAG 2.2 Level AAA — enhanced accessibility (44px touch targets, 7:1 contrast)",
+            "Touch-optimized mobile — Apple HIG + Material Design 3 (48px touch targets, 16px button text)",
+            "Data-dense desktop — dashboards, admin panels, IDEs (13px body text, 24px touch targets)",
+            "Low vision / elderly — exceeds AAA (24px body text, 48px touch targets, 10:1 contrast)"
+          ]
+        },
+        "solid.eslintConfig.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Read rule configuration from eslint.config.{mjs,js,cjs} file in workspace root"
+        },
+        "solid.eslintConfig.path": {
+          "type": "string",
+          "description": "Custom path to ESLint config file (relative to workspace root). If not set, uses auto-discovery."
+        },
+        "solid.lsp.env": {
+          "type": "object",
+          "default": {},
+          "description": "Environment variables to pass to the LSP server process",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "solid.rules.avoid-conditional-spreads": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional spread operators that create empty objects. Patterns like `...(condition ? {...} : {})` are fragile and create unnecessary object creations.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-non-null-assertions": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow non-null assertion operator (`!`). Use optional chaining, nullish coalescing, or proper type narrowing instead. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-object-assign": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow Object.assign(). Prefer object spread syntax or structuredClone() for copying objects. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-object-spread": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow object spread operators that break Solid's fine-grained reactivity. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-type-casting": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow type casting methods that bypass TypeScript's type safety. Includes unnecessary casts, double assertions, casting to any, type predicates, and unsafe generic assertions. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-unsafe-type-annotations": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow `any` and `unknown` in value-level type annotation positions (parameters, returns, variables, properties)\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.event-handlers": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce naming DOM element event handlers consistently and prevent Solid's analysis from misunderstanding whether a prop should be an event handler. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.missing-jsdoc-comments": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require JSDoc comments on functions with appropriate tags for parameters, return values, and throws.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-ai-slop-comments": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow comments containing specified forbidden words or phrases. Useful for enforcing comment style guidelines and detecting AI-generated boilerplate. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-array-handlers": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow array handlers in JSX event properties.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-banner-comments": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow banner-style comments with repeated separator characters. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-destructure": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow destructuring props in Solid components. Props must be accessed via property access (props.x) to preserve reactivity.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-inline-imports": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow inline type imports. Import types at the top of the file for clarity and maintainability.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.string-concat-in-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow string concatenation with += inside loops. Use array.push() and .join() instead.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.css-no-outline-none-without-focus-visible": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow removing outline without explicit focus-visible replacement.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.css-policy-contrast": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce minimum contrast ratio between foreground and background colors per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-policy-spacing": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce minimum letter-spacing, word-spacing, and paragraph spacing per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-policy-touch-target": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce minimum interactive element sizes per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-policy-typography": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce minimum font sizes and line heights per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-require-reduced-motion-override": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require reduced-motion override for animated selectors.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-discrete-transition": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow transitions on discrete CSS properties.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.css-no-empty-keyframes": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow empty @keyframes rules.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-layout-property-animation": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow animating layout-affecting properties.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-transition-all": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow transition: all and transition-property: all.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-unknown-animation-name": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow animation names that do not match declared keyframes.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-unused-keyframes": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow unused @keyframes declarations.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.declaration-no-overridden-within-rule": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow duplicate declarations of the same property within a single rule block.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.media-query-overlap-conflict": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conflicting declarations in partially overlapping media queries.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-descending-specificity-conflict": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow lower-specificity selectors after higher-specificity selectors for the same property.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-layer-order-inversion": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow source-order assumptions that are inverted by layer precedence.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-redundant-override-pairs": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow declarations that are deterministically overridden in the same selector context.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-unreferenced-component-class": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect CSS classes that are never referenced by static JSX class attributes.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-classlist-boolean-values": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require classList values to be boolean-like expressions.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-classlist-no-accessor-reference": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow passing accessor references directly as classList values.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-classlist-no-constant-literals": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow classList entries with constant true/false values.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-classlist-static-keys": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require classList keys to be static and non-computed.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-layout-classlist-geometry-toggle": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Flag classList-driven class toggles that map to layout-affecting CSS geometry changes.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-layout-fill-image-parent-must-be-sized": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require stable parent size and positioning for fill-image component usage.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-layout-picture-source-ratio-consistency": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require consistent intrinsic aspect ratios across <picture> sources and fallback image.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-layout-unstable-style-toggle": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Flag dynamic inline style values on layout-sensitive properties that can trigger CLS.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-no-duplicate-class-token-class-classlist": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow duplicate class tokens between class and classList on the same JSX element.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-no-undefined-css-class": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect undefined CSS class names in JSX\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-style-kebab-case-keys": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require kebab-case keys in JSX style object literals.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-style-no-function-values": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow function values in JSX style objects.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-style-no-unused-custom-prop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect inline style custom properties that are never consumed by CSS var() references.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.jsx-style-policy": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce accessibility policy thresholds on inline JSX style objects.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-animation-layout-property": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow keyframe animations that mutate layout-affecting properties and can trigger CLS.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-box-sizing-toggle-with-chrome": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional box-sizing mode toggles when box chrome contributes to geometry shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-conditional-display-collapse": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional display collapse in flow without reserved geometry.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-conditional-offset-shift": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional non-zero block-axis offsets that can trigger layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-conditional-white-space-wrap-shift": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional white-space wrapping mode toggles that can trigger CLS.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-content-visibility-no-intrinsic-size": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require intrinsic size reservation when using content-visibility auto to avoid late layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-dynamic-slot-no-reserved-space": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require reserved block space for dynamic content containers to avoid layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-font-swap-instability": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require metric overrides for swapping webfonts to reduce layout shifts during font load.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-overflow-anchor-instability": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow overflow-anchor none on dynamic or scrollable containers prone to visible layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-overflow-mode-toggle-instability": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow conditional overflow mode switches that can introduce scrollbar-induced layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-scrollbar-gutter-instability": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require stable scrollbar gutters for scrollable containers to reduce layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-sibling-alignment-outlier": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect vertical alignment outliers between sibling elements in shared layout containers.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-stateful-box-model-shift": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow stateful selector changes that alter element geometry and trigger layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-transition-layout-property": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow transitions that animate layout-affecting geometry properties.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-layout-unsized-replaced-element": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require stable reserved geometry for replaced media elements to prevent layout shifts.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-custom-property-cycle": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow cycles in custom property references.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.css-no-hardcoded-z-index": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow hardcoded positive z-index literals.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-legacy-vh-100": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow 100vh in viewport sizing declarations.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-z-index-requires-positioned-context": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require positioned context when using z-index.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-important": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow !important declarations.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-unresolved-custom-properties": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow unresolved custom property references.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-unused-custom-properties": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow unused CSS custom properties.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-complex-selectors": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow deep selectors that are expensive to match.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-duplicate-selectors": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow duplicate selector blocks.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-id-selectors": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow ID selectors.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.selector-max-attribute-and-universal": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow selectors with attribute or universal selectors beyond configured limits.\n\nDefault severity: `off`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (off)"
+          ]
+        },
+        "solid.rules.selector-max-specificity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow selectors that exceed a specificity threshold.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-empty-rule": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow empty CSS rules.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.css-no-unknown-container-name": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow unknown named containers in @container queries.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.css-no-unused-container-name": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow unused named containers.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.layer-requirement-for-component-rules": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require style rules to be inside @layer when the file defines layers.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.components-return-once": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow early returns in components. Solid components only run once, and so conditionals should be inside JSX. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-no-duplicate-props": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow passing the same prop twice in JSX. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-no-script-url": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow javascript: URLs. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-no-undef": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow references to undefined variables in JSX. Handles custom directives.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.jsx-uses-vars": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect imported components and directives that are never used in JSX.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-innerhtml": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow usage of the innerHTML attribute, which can lead to security vulnerabilities. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-unknown-namespaces": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce using only Solid-specific namespaced attribute names (i.e. `'on:'` in `<div on:click={...} />`).\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.show-truthy-conversion": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect <Show when={expr}> where expr is not explicitly boolean, which may have unexpected truthy/falsy behavior. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.suspense-boundary-missing": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect missing fallback props on Suspense/ErrorBoundary, and lazy components without Suspense wrapper.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.validate-jsx-nesting": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Validates that HTML elements are nested according to the HTML5 specification.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-arguments-object": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow arguments object (use rest parameters instead).\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-chained-array-methods": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Flags chained array methods creating 3+ intermediate arrays, or filter().map() pattern.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-defensive-copy-for-scalar-stat": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow defensive array copies passed into scalar statistic calls.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-delete-operator": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow delete operator on objects (causes V8 deoptimization).\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-function-allocation-in-hot-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow creating closures inside loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-hidden-class-transition": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Suggest consistent object shapes to avoid V8 hidden class transitions.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-intermediate-map-copy": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow temporary Map allocations that are copied key-for-key into another Map.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-megamorphic-property-access": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Avoid property access on `any` or wide union types to prevent V8 deoptimization.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-quadratic-pair-comparison": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow nested for-loops over the same collection creating O(n²) pair comparison.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-quadratic-spread": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow spreading accumulator in reduce callbacks (O(n²) complexity).\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.avoid-repeated-indexof-check": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow 3+ .indexOf() calls on the same array variable in one function.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-slice-sort-pattern": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow .slice().sort() and .slice().reverse() chains. Use .toSorted()/.toReversed().\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-sparse-arrays": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow new Array(n) without fill (creates holey array).\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.avoid-spread-sort-map-join-pipeline": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow [...iterable].sort().map().join() pipelines on hot paths.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.bounded-worklist-traversal": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect queue/worklist traversals with unbounded growth and no guard.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.closure-captured-scope": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect closures returned from scopes containing large allocations that may be retained.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.closure-dom-circular": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect event handler property assignments that create closure-DOM circular references.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.create-root-dispose": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect createRoot with unused dispose parameter.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.detached-dom-reference": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect DOM query results stored in module-scoped variables that may hold detached nodes.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.effect-outside-root": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect reactive computations created outside a reactive root (no Owner).\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.finalization-registry-leak": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect FinalizationRegistry.register() where heldValue references the target.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-char-array-materialization": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow split(\"\"), Array.from(str), or [...str] in parsing loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-double-pass-delimiter-count": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow split-based delimiter counting followed by additional split passes.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-full-split-in-hot-parse": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow full split() materialization inside hot string parsing loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-heavy-parser-constructor-in-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow constructing heavy parsing helpers inside loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-abort-controller": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect AbortController in effects without abort() in onCleanup.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-animation-frame": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect requestAnimationFrame in effects without cancelAnimationFrame in onCleanup.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-event-listener": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect addEventListener in effects without removeEventListener in onCleanup.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-observer": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect Observer APIs in effects without disconnect() in onCleanup.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-subscription": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect WebSocket/EventSource/BroadcastChannel in effects without close() in onCleanup.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-leaked-timer": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect setInterval/setTimeout in effects without onCleanup to clear them.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-loop-string-plus-equals": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow repeated string += accumulation in parsing loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-multipass-split-pipeline": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow multipass split/map/filter pipelines in parsing code.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-per-char-substring-scan": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow per-character substring/charAt scanning patterns in loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-repeated-token-normalization": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow repeated trim/lower/upper normalization chains on the same token in one function.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-rescan-indexof-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow repeated indexOf/includes scans from start in parsing loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-rest-slice-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow repeated self-slice reassignment loops in string parsing code.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-shift-splice-head-consume": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow shift/splice(0,1) head-consume patterns in loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-write-only-index": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect index structures that are written but never queried by key.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-charcode-over-regex-test": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Prefer charCodeAt() range checks over regex .test() for single-character classification.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-index-scan-over-string-iterator": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Prefer index-based string scanning over for-of iteration in ASCII parser code.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-lazy-property-access": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Suggests moving property access after early returns when not used immediately.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-map-lookup-over-linear-scan": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow repeated linear scans over fixed literal collections in hot paths.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-map-over-object-dictionary": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Suggest Map for dictionary-like objects with dynamic keys.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-precompiled-regex": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Prefer hoisting regex literals to module-level constants to avoid repeated compilation.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-set-has-over-equality-chain": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow 4+ guard-style equality checks against string literals on the same variable. Use a Set.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-set-lookup-in-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow linear search methods (.includes/.indexOf) on arrays inside loops.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.recursive-timer": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect setTimeout that recursively calls its enclosing function.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.self-referencing-store": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect setStore() where the value argument references the store itself.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.unbounded-collection": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect module-scoped Map/Set/Array that only grow without removal.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.unbounded-signal-accumulation": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect signal setters that accumulate data without truncation via spread+append pattern.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.async-tracked": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow async functions in tracked scopes (createEffect, createMemo, etc.)\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.children-helper-misuse": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect misuse of the children() helper that causes unnecessary re-computation or breaks reactivity\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.cleanup-scope": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect onCleanup called outside of a valid reactive scope\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.derived-signal": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect functions that capture reactive values but are called in untracked contexts\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.effect-as-memo": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect createEffect that only sets a derived signal value, which should be createMemo instead *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.effect-as-mount": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect createEffect/createRenderEffect with no reactive dependencies that should be onMount instead *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.inline-component": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect component functions defined inside other components, which causes remount on every parent update\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-top-level-signal-call": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow calling signals at component top-level (captures stale snapshots)\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.ref-early-access": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect accessing refs before they are assigned (before mount)\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.resource-access-unchecked": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect accessing resource data without checking loading/error state.\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.resource-refetch-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect refetch() calls inside createEffect which can cause infinite loops\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.signal-call": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require signals to be called as functions when used in tracked contexts *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.signal-in-loop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect problematic signal usage inside For/Index loop callbacks\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.store-reactive-break": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect patterns that break store reactivity: spreading stores, top-level property extraction, or destructuring\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.transition-pending-unchecked": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect useTransition usage without handling the isPending state\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.batch-optimization": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Suggest using batch() when multiple signal setters are called in the same synchronous scope *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.imports": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce consistent imports from \"solid-js\", \"solid-js/web\", and \"solid-js/store\".\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.index-vs-for": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Suggest <For> for object arrays and <Index> for primitive arrays. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.no-react-deps": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow usage of dependency arrays in `createEffect`, `createMemo`, and `createRenderEffect`. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.no-react-specific-props": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow usage of React-specific `className`/`htmlFor` props, which were deprecated in v1.4.0. *(fixable)*\n\nDefault severity: `error`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (error)"
+          ]
+        },
+        "solid.rules.prefer-for": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce using Solid's `<For />` component for mapping an array to JSX elements. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-memo-complex-styles": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce extracting complex style computations to createMemo for better approach. Complex inline style objects are rebuilt on every render, which can impact approach.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.prefer-show": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce using Solid's `<Show />` component for conditionally showing content. Solid's compiler covers this case, so it's a stylistic rule only. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.self-closing-comp": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Disallow extra closing tags for components without children. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
+        "solid.rules.style-prop": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Require CSS properties in the `style` prop to be valid and kebab-cased (ex. 'font-size'), not camel-cased (ex. 'fontSize') like in React, and that property values with dimensions are strings, not numbers with implicit 'px' units. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "solid.restartServer",
+        "title": "Solid: Restart Language Server",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "solid.showReactiveGraph",
+        "title": "Solid: Show Reactive Graph",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "solid.showOutput",
+        "title": "Solid: Show Output Channel",
+        "icon": "$(output)"
+      },
+      {
+        "command": "solid.showMemoryUsage",
+        "title": "Solid: Show Memory Usage",
+        "icon": "$(dashboard)"
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "solidSignal",
+        "superType": "variable",
+        "description": "A Solid.js signal (createSignal)"
+      },
+      {
+        "id": "solidStore",
+        "superType": "variable",
+        "description": "A Solid.js store (createStore, createMutable)"
+      },
+      {
+        "id": "solidMemo",
+        "superType": "variable",
+        "description": "A Solid.js memo (createMemo)"
+      },
+      {
+        "id": "solidDerived",
+        "superType": "variable",
+        "description": "A Solid.js derived reactive value"
+      },
+      {
+        "id": "solidProps",
+        "superType": "parameter",
+        "description": "A Solid.js component props parameter"
+      },
+      {
+        "id": "solidResource",
+        "superType": "variable",
+        "description": "A Solid.js resource (createResource)"
+      },
+      {
+        "id": "solidAccessor",
+        "superType": "variable",
+        "description": "A Solid.js accessor (createDeferred, createSelector, children, from)"
+      },
+      {
+        "id": "solidEffect",
+        "superType": "function",
+        "description": "A Solid.js computation primitive (createEffect, createMemo, etc.)"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "reactive",
+        "description": "Indicates a reactive value"
+      },
+      {
+        "id": "tracked",
+        "description": "Indicates a tracked access (signal read creates a dependency)"
+      },
+      {
+        "id": "declaration",
+        "description": "Indicates a declaration site for a reactive construct"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "solid.restartServer",
+          "when": "editorLangId =~ /typescriptreact|javascriptreact|typescript|javascript/"
+        },
+        {
+          "command": "solid.showReactiveGraph",
+          "when": "editorLangId =~ /typescriptreact|javascriptreact/"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "generate": "bun run scripts/generate-package-json.ts",
+    "build": "tsup",
+    "clean": "bun -e \"import { rm } from 'node:fs/promises'; await Promise.all(['dist', 'node_modules'].map((p) => rm(p, { recursive: true, force: true })));\"",
+    "lint": "eslint src",
+    "dev": "tsup --watch",
+    "package": "bun run generate && vsce package --no-dependencies && code-insiders --install-extension ganko-vscode-0.1.0.vsix --force",
+    "tsc": "tsc --noEmit",
+    "publish:vsce": "vsce publish --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "@ganko/shared": "workspace:^",
+    "ganko": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.105.0",
+    "@vscode/vsce": "^3.7.1",
+    "@ganko/lsp": "workspace:^"
+  }
+}

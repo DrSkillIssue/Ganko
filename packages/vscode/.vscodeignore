@@ -1,0 +1,30 @@
+# Source files (only dist is needed)
+.vscode/**
+src/**
+*.ts
+!dist/**
+
+# Config files
+tsconfig.json
+tsup.config.ts
+
+# Node modules
+node_modules/**
+
+# Build artifacts
+*.tsbuildinfo
+*.vsix
+
+# Test files
+test/**
+**/*.test.ts
+**/*.spec.ts
+
+# Development files
+.eslintrc*
+.prettierrc*
+.editorconfig
+AGENTS.md
+STYLE_GUIDE.md
+bun.lockb
+bun.lock

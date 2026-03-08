@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report a bug in ganko, the LSP server, or the VS Code extension
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - ganko
+        - "@ganko/lsp"
+        - "@ganko/shared"
+        - ganko-vscode
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal code or steps to reproduce the issue.
+      render: typescript
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node.js version, OS, editor version (if VS Code extension).
+      placeholder: |
+        Node.js: 22.x
+        OS: macOS 15
+        VS Code: 1.105.0
+    validations:
+      required: false

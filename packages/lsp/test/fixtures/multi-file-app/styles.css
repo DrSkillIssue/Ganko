@@ -1,0 +1,37 @@
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.count {
+  font-size: 1.5rem;
+  min-width: 3ch;
+  text-align: center;
+}
+
+.btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-secondary {
+  background: #6b7280;
+  color: white;
+}
+
+.custom-counter {
+  display: flex;
+  gap: 4px;
+}

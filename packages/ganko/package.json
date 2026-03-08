@@ -1,0 +1,91 @@
+{
+  "name": "ganko",
+  "version": "0.1.0",
+  "description": "Static analysis SDK for Solid.js — graphs, rules, ESLint adapter",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/index.d.ts",
+        "require": "./dist/index.d.cts"
+      },
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./rules-manifest": {
+      "types": {
+        "import": "./dist/rules-manifest.d.ts",
+        "require": "./dist/rules-manifest.d.cts"
+      },
+      "import": "./dist/rules-manifest.js",
+      "require": "./dist/rules-manifest.cjs"
+    },
+    "./eslint-plugin": {
+      "types": {
+        "import": "./dist/eslint-plugin.d.ts",
+        "require": "./dist/eslint-plugin.d.cts"
+      },
+      "import": "./dist/eslint-plugin.js",
+      "require": "./dist/eslint-plugin.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "solid", "solidjs", "lint", "linter", "static-analysis",
+    "eslint", "eslint-plugin", "css", "reactivity", "typescript"
+  ],
+  "publishConfig": {
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrSkillIssue/ganko.git",
+    "directory": "packages/ganko"
+  },
+  "homepage": "https://github.com/DrSkillIssue/ganko",
+  "bugs": "https://github.com/DrSkillIssue/ganko/issues",
+  "scripts": {
+    "generate:manifest": "bun run scripts/generate-rules-manifest.ts",
+    "generate:check": "bun run scripts/generate-rules-manifest.ts --check",
+    "generate:readmes": "bun run scripts/generate-rule-readmes.ts",
+    "generate": "bun run generate:manifest && bun run generate:readmes",
+    "build": "bun run generate && tsup",
+    "dev": "tsup --watch",
+    "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ganko/shared": "workspace:^",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/typescript-estree": "^8.56.1",
+    "@typescript-eslint/utils": "^8.56.1",
+    "postcss": "^8.5.8",
+    "postcss-safe-parser": "^7.0.1",
+    "postcss-scss": "^4.0.9",
+    "postcss-value-parser": "^4.2.0",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@typescript-eslint/rule-tester": "^8.56.1"
+  },
+  "author": "DrSkillIssue",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

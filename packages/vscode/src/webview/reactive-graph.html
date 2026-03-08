@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{{NONCE}}' https://cdn.jsdelivr.net/npm/mermaid@11/; style-src 'unsafe-inline';">
+  <title>Reactive Graph</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--vscode-font-family);
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      overflow: hidden;
+      height: 100vh;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-sideBar-background);
+      flex-shrink: 0;
+    }
+    .toolbar h1 {
+      font-size: 16px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .toolbar button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      padding: 8px 16px;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .toolbar button:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    .viewport {
+      flex: 1;
+      overflow: hidden;
+      cursor: grab;
+      position: relative;
+    }
+    .viewport.dragging { cursor: grabbing; }
+    .canvas {
+      transform-origin: 0 0;
+      position: absolute;
+      top: 0;
+      left: 0;
+      padding: 32px;
+    }
+    .zoom-controls {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 10;
+    }
+    .zoom-controls button {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .zoom-controls button:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--vscode-descriptionForeground);
+    }
+    .error {
+      color: var(--vscode-errorForeground);
+      padding: 24px;
+    }
+    .layout { display: flex; flex-direction: column; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="toolbar">
+      <h1>Reactive Dependency Graph</h1>
+      <button id="btn-fit" title="Fit to viewport">Fit</button>
+      <button id="btn-copy">Copy Mermaid</button>
+      <button id="btn-download">Download SVG</button>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="canvas" id="canvas">
+        <div id="graph" class="loading">Loading graph...</div>
+      </div>
+      <div class="zoom-controls">
+        <button id="btn-zoom-in" title="Zoom in">+</button>
+        <button id="btn-zoom-out" title="Zoom out">&minus;</button>
+      </div>
+    </div>
+  </div>
+
+  <script nonce="{{NONCE}}" type="module">
+    let mermaid;
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+      mermaid = mod.default;
+    } catch {
+      document.getElementById('graph').innerHTML =
+        '<div class="error">Failed to load Mermaid library. Check your internet connection or proxy settings.</div>';
+      document.getElementById('graph').classList.remove('loading');
+      throw new Error('Mermaid CDN unavailable');
+    }
+
+    const mermaidCode = `{{MERMAID_CODE}}`;
+
+    const isDark = document.body.getAttribute('data-vscode-theme-kind')?.includes('dark')
+      || document.body.classList.contains('vscode-dark')
+      || getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim().match(/^#[0-3]/);
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? 'base' : 'default',
+      securityLevel: 'strict',
+      fontSize: 18,
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true,
+        curve: 'basis',
+        nodeSpacing: 60,
+        rankSpacing: 80,
+        padding: 24,
+      },
+      themeVariables: isDark ? {
+        primaryColor: '#1e5080',
+        primaryTextColor: '#ffffff',
+        primaryBorderColor: '#60ccff',
+        lineColor: '#60ccff',
+        secondaryColor: '#1e3a52',
+        tertiaryColor: '#1a2836',
+        background: '#1e1e1e',
+        mainBkg: '#1e5080',
+        nodeBorder: '#60ccff',
+        clusterBkg: '#1a2836',
+        titleColor: '#ffffff',
+        edgeLabelBackground: '#2d2d2d',
+        nodeTextColor: '#ffffff',
+        textColor: '#ffffff',
+      } : {},
+    });
+
+    const viewport = document.getElementById('viewport');
+    const canvas = document.getElementById('canvas');
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    function applyTransform() {
+      canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+
+    function fitToViewport() {
+      const svg = canvas.querySelector('svg');
+      if (!svg) return;
+      const vw = viewport.clientWidth;
+      const vh = viewport.clientHeight;
+      const sw = svg.width.baseVal.value || svg.getBoundingClientRect().width / scale;
+      const sh = svg.height.baseVal.value || svg.getBoundingClientRect().height / scale;
+      if (sw === 0 || sh === 0) return;
+      const pad = 48;
+      scale = Math.max(0.35, Math.min((vw - pad) / sw, (vh - pad) / sh, 1.5));
+      panX = (vw - sw * scale) / 2;
+      panY = Math.max(20, (vh - sh * scale) / 2);
+      applyTransform();
+    }
+
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const next = Math.max(0.1, Math.min(5, scale * factor));
+      panX = mx - (mx - panX) * (next / scale);
+      panY = my - (my - panY) * (next / scale);
+      scale = next;
+      applyTransform();
+    }, { passive: false });
+
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      startX = e.clientX - panX;
+      startY = e.clientY - panY;
+      viewport.classList.add('dragging');
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      panX = e.clientX - startX;
+      panY = e.clientY - startY;
+      applyTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      viewport.classList.remove('dragging');
+    });
+
+    document.getElementById('btn-zoom-in').addEventListener('click', () => {
+      scale = Math.min(5, scale * 1.3);
+      applyTransform();
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', () => {
+      scale = Math.max(0.1, scale / 1.3);
+      applyTransform();
+    });
+    document.getElementById('btn-fit').addEventListener('click', fitToViewport);
+
+    function patchSvgStyles(container) {
+      if (!isDark) return;
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+
+      const EDGE = '#60ccff';
+      const NODE_STROKE = '#60ccff';
+      const NODE_FILL = '#1e5080';
+      const TEXT = '#ffffff';
+
+      // Catch all edge paths — Mermaid v11 uses varying class combos
+      svg.querySelectorAll('path.flowchart-link, .edgePath path, .edge path').forEach(p => {
+        p.style.stroke = EDGE;
+        p.style.strokeWidth = '2px';
+        p.style.fill = 'none';
+      });
+
+      // Arrow markers — both in <defs> and inline
+      svg.querySelectorAll('.arrowMarkerPath, marker path').forEach(p => {
+        p.style.fill = EDGE;
+        p.style.stroke = EDGE;
+      });
+
+      svg.querySelectorAll('.node rect, .node circle, .node polygon').forEach(el => {
+        el.style.stroke = NODE_STROKE;
+        el.style.strokeWidth = '3px';
+        el.style.fill = NODE_FILL;
+      });
+      svg.querySelectorAll('.label-container').forEach(el => {
+        el.style.stroke = NODE_STROKE;
+        el.style.strokeWidth = '3px';
+        el.style.fill = NODE_FILL;
+      });
+
+      svg.querySelectorAll('.nodeLabel, .edgeLabel, span, tspan, text').forEach(el => {
+        el.style.color = TEXT;
+        el.style.fill = TEXT;
+      });
+
+      svg.querySelectorAll('.edgeLabel rect, .labelBkg').forEach(el => {
+        el.style.fill = '#1e293b';
+        el.style.opacity = '0.9';
+      });
+    }
+
+    async function renderGraph() {
+      const graphDiv = document.getElementById('graph');
+      try {
+        const { svg } = await mermaid.render('mermaid-graph', mermaidCode);
+        graphDiv.innerHTML = svg;
+        graphDiv.classList.remove('loading');
+        patchSvgStyles(graphDiv);
+        requestAnimationFrame(fitToViewport);
+      } catch (error) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error';
+        errorDiv.textContent = 'Failed to render graph: ' + error.message;
+        graphDiv.replaceChildren(errorDiv);
+        graphDiv.classList.remove('loading');
+      }
+    }
+
+    renderGraph();
+
+    document.getElementById('btn-copy').addEventListener('click', () => {
+      navigator.clipboard.writeText(mermaidCode).then(() => {
+        const btn = document.getElementById('btn-copy');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy Mermaid'; }, 1500);
+      }).catch(() => {
+        const btn = document.getElementById('btn-copy');
+        btn.textContent = 'Copy failed';
+        setTimeout(() => { btn.textContent = 'Copy Mermaid'; }, 1500);
+      });
+    });
+
+    /* SVG download via VS Code messaging API.
+       Direct blob: URL navigation is blocked by webview sandbox. */
+    const vscode = acquireVsCodeApi();
+    document.getElementById('btn-download').addEventListener('click', () => {
+      const svg = document.querySelector('#graph svg');
+      if (!svg) return;
+      const svgData = new XMLSerializer().serializeToString(svg);
+      vscode.postMessage({ type: 'download-svg', data: svgData });
+    });
+  </script>
+</body>
+</html>

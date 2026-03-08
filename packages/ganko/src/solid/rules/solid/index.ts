@@ -1,0 +1,11 @@
+// solid rules - self-registering on import
+export { preferMemoComplexStyles } from "./prefer-memo-complex-styles"
+export { batchOptimization } from "./batch-optimization"
+export { indexVsFor } from "./index-vs-for"
+export { preferShow } from "./prefer-show"
+export { selfClosingComp } from "./self-closing-comp"
+export { styleProp } from "./style-prop"
+export { preferFor } from "./prefer-for"
+export { imports } from "./imports"
+export { noReactDeps } from "./no-react-deps"
+export { noReactSpecificProps } from "./no-react-specific-props"

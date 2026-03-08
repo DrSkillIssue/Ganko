@@ -1,0 +1,61 @@
+{
+  "name": "@ganko/lsp",
+  "version": "0.1.0",
+  "description": "Language server and CLI linter for Solid.js projects",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ganko": "./dist/entry.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "solid", "solidjs", "lsp", "language-server", "linter", "cli"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrSkillIssue/ganko.git",
+    "directory": "packages/lsp"
+  },
+  "homepage": "https://github.com/DrSkillIssue/ganko/tree/main/packages/lsp",
+  "bugs": "https://github.com/DrSkillIssue/ganko/issues",
+  "scripts": {
+    "build": "tsup",
+    "clean": "bun -e \"import { rm } from 'node:fs/promises'; await Promise.all(['dist', 'node_modules'].map((p) => rm(p, { recursive: true, force: true })));\"",
+    "lint": "eslint src",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ganko/shared": "workspace:^",
+    "ganko": "workspace:^",
+    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/project-service": "^8.56.1",
+    "@typescript-eslint/utils": "^8.56.1",
+    "typescript": "^5.9.3",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "author": "DrSkillIssue",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

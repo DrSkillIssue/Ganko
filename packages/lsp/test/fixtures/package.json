@@ -1,0 +1,8 @@
+{
+  "name": "ganko-fixtures",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "solid-js": "*"
+  }
+}

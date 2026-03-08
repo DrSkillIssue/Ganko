@@ -1,0 +1,62 @@
+/**
+ * ganko
+ *
+ * Language Server Protocol implementation for Solid.js.
+ * Provides real-time diagnostics, cross-file analysis, and IDE features.
+ *
+ * @example
+ * ```typescript
+ * // Start the LSP server
+ * import { createServer, startServer } from "ganko"
+ * const ctx = createServer()
+ * startServer(ctx)
+ *
+ * // Or use programmatically
+ * import { createProject } from "ganko"
+ * import { SolidPlugin, CSSPlugin } from "ganko"
+ * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin, CSSPlugin] })
+ * const diagnostics = project.run(["App.tsx"])
+ * ```
+ */
+
+// Re-export types from ganko
+export type { Diagnostic, Fix, FixOperation } from "ganko";
+
+// Project management
+export { createProject } from "./core/project";
+export type { Project, ProjectConfig } from "./core/project";
+
+// TypeScript Project Service
+export {
+  createTypeScriptProjectService,
+  type TypeScriptProjectService,
+  type ProjectServiceOptions,
+} from "./core/project-service";
+
+// Server exports
+export { createServer, startServer, main } from "./server/connection";
+export { buildServerCapabilities } from "./server/capabilities";
+
+// Handler exports
+export {
+  handlePrepareRename,
+  handleRename,
+  handleReferences,
+  handleDefinition,
+  handleHover,
+  handleCompletion,
+  handleCodeAction,
+  handleSignatureHelp,
+  handleDocumentHighlight,
+  handleLinkedEditingRanges,
+  handleFoldingRanges,
+  handleSelectionRange,
+} from "./server/handlers";
+
+export type { HandlerContext } from "./server/handlers";
+
+// Logger
+export { createLspLogger, createCliLogger, noopLogger, type Logger, type LeveledLogger } from "./core/logger";
+
+// CLI exports
+export { runLint } from "./cli/lint";

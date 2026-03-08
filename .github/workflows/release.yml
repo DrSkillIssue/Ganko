@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions: {}
+
+jobs:
+  release:
+    if: github.repository_owner == 'DrSkillIssue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+
+      - run: bun run build
+
+      - run: bun run test
+
+      - name: Create Release PR or Publish
+        id: changesets
+        uses: changesets/action@v1.7.0
+        with:
+          version: bun run changeset:version
+          publish: bun run changeset:publish
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+
+      - name: Wait for npm propagation
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION=$(node -p "require('./packages/ganko/package.json').version")
+          for i in $(seq 1 30); do
+            PUBLISHED=$(npm view ganko version 2>/dev/null || echo "")
+            if [ "$PUBLISHED" = "$VERSION" ]; then
+              echo "ganko@$VERSION is live on npm"
+              break
+            fi
+            echo "Attempt $i/30: waiting for ganko@$VERSION (got: ${PUBLISHED:-none})"
+            sleep 10
+          done
+
+      - name: Publish VS Code Extension
+        if: steps.changesets.outputs.published == 'true'
+        run: bun run --cwd packages/vscode publish:vsce
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_TOKEN }}

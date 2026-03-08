@@ -1,0 +1,131 @@
+import type { TSESTree as T } from "@typescript-eslint/utils"
+import type { SolidGraph } from "../../impl"
+import type { VariableEntity } from "../../entities"
+import { getContainingFunction, getScopeFor, getVariableByNameInScope, typeIncludesString } from "../../queries"
+import { isStringExpression } from "../../util"
+
+const STRING_FLAGS = 402653316
+
+const PARSE_NAME_HINTS = [
+  "parse",
+  "scan",
+  "token",
+  "lex",
+  "decode",
+  "delimiter",
+  "csv",
+  "tsv",
+  "header",
+] as const
+
+const PARSE_PATH_HINTS = [
+  "/parser/",
+  "/tokenizer/",
+  "/lexer/",
+  "/parsing/",
+  "-parser.",
+  "-lexer.",
+] as const
+
+const ASCII_HINTS = ["ascii", "latin1"] as const
+
+export function isLikelyStringParsingContext(graph: SolidGraph, node: T.Node): boolean {
+  if (hasAnyHint(graph.file.toLowerCase(), PARSE_PATH_HINTS)) return true
+
+  const fn = getContainingFunction(graph, node)
+  if (!fn) return false
+  const name = `${fn.name ?? ""} ${fn.variableName ?? ""}`.toLowerCase()
+  return hasAnyHint(name, PARSE_NAME_HINTS)
+}
+
+export function isAsciiParsingContext(graph: SolidGraph, node: T.Node): boolean {
+  const path = graph.file.toLowerCase()
+  if (hasAnyHint(path, ASCII_HINTS)) return true
+
+  const fn = getContainingFunction(graph, node)
+  if (!fn) return false
+  const name = `${fn.name ?? ""} ${fn.variableName ?? ""}`.toLowerCase()
+  return hasAnyHint(name, ASCII_HINTS)
+}
+
+export function isStringLikeVariable(_graph: SolidGraph, variable: VariableEntity): boolean {
+  if (variable.type && (variable.type.flags & STRING_FLAGS) !== 0) return true
+
+  for (let i = 0; i < variable.declarations.length; i++) {
+    const declaration = variable.declarations[i]
+    if (!declaration) continue;
+    if (declaration.type !== "Identifier") continue
+
+    if (hasStringAnnotation(declaration)) return true
+
+    const parent = declaration.parent
+    if (!parent) continue
+
+    if (parent.type === "VariableDeclarator" && parent.init && isStringExpression(parent.init)) {
+      return true
+    }
+
+    if (parent.type === "AssignmentPattern" && isStringExpression(parent.right)) {
+      return true
+    }
+  }
+
+  for (let i = 0; i < variable.assignments.length; i++) {
+    const assignment = variable.assignments[i]
+    if (!assignment) continue;
+    if (assignment.operator !== null) continue
+    if (isStringExpression(assignment.value)) return true
+  }
+
+  return false
+}
+
+export function isStringLikeReceiver(
+  graph: SolidGraph,
+  node: T.Node,
+  variable: VariableEntity | null,
+): boolean {
+  if (variable && isStringLikeVariable(graph, variable)) return true
+  if (node.type === "Identifier") {
+    const resolved = resolveVariableForIdentifier(graph, node)
+    if (resolved && isStringLikeVariable(graph, resolved)) return true
+  }
+  if (typeIncludesString(graph, node)) return true
+  if (node.type === "Literal" && typeof node.value === "string") return true
+  if (node.type === "TemplateLiteral") return true
+
+  return false
+}
+
+export function resolveVariableForIdentifier(
+  graph: SolidGraph,
+  node: T.Identifier,
+): VariableEntity | null {
+  const scope = getScopeFor(graph, node)
+  return getVariableByNameInScope(graph, node.name, scope)
+}
+
+function hasStringAnnotation(node: T.Identifier): boolean {
+  const annotation = node.typeAnnotation
+  if (!annotation) return false
+  const typeNode = annotation.typeAnnotation
+
+  if (typeNode.type === "TSStringKeyword") return true
+  if (typeNode.type !== "TSUnionType") return false
+
+  for (let i = 0; i < typeNode.types.length; i++) {
+    const t = typeNode.types[i];
+    if (!t) continue;
+    if (t.type === "TSStringKeyword") return true
+  }
+  return false
+}
+
+function hasAnyHint(text: string, hints: readonly string[]): boolean {
+  for (let i = 0; i < hints.length; i++) {
+    const hint = hints[i];
+    if (!hint) continue;
+    if (text.includes(hint)) return true
+  }
+  return false
+}

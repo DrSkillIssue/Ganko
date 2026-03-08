@@ -1,0 +1,21 @@
+{
+  "extends": "@tsconfig/bun/tsconfig.json",
+  "compilerOptions": {
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": false,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": [
+    "packages/shared",
+    "packages/ganko",
+    "packages/lsp",
+    "packages/vscode"
+  ],
+  "exclude": ["**/dist", "**/dist.*", "**/test/fixtures"]
+}

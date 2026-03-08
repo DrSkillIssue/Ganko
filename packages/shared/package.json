@@ -1,0 +1,52 @@
+{
+  "name": "@ganko/shared",
+  "version": "0.1.0",
+  "description": "Shared protocol types for the ganko toolchain",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/index.d.mts",
+        "require": "./dist/index.d.ts"
+      },
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "solid", "solidjs", "lint", "lsp", "shared", "types", "protocol"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrSkillIssue/ganko.git",
+    "directory": "packages/shared"
+  },
+  "homepage": "https://github.com/DrSkillIssue/ganko/tree/main/packages/shared",
+  "bugs": "https://github.com/DrSkillIssue/ganko/issues",
+  "scripts": {
+    "build": "tsup",
+    "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
+    "tsc": "tsc --noEmit"
+  },
+  "author": "DrSkillIssue",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}
