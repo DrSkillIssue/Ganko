@@ -24,7 +24,11 @@ Lint Options:
   --max-warnings <n>       Exit with error if warnings exceed n
   --exclude <glob>         Glob pattern to exclude (repeatable)
   --log-level <level>      Log level: trace, debug, info, warning, error, critical, off (default: off)
+  --log-file <path>        Write logs to file (in addition to stderr)
   --verbose, -v            Shorthand for --log-level debug
+
+Server Options:
+  --log-file <path>        Write server logs to file (for debugging)
 
 The language server communicates via JSON-RPC over stdio.
 Configure your editor to use this as an external language server.`;

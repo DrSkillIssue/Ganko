@@ -101,6 +101,31 @@ export function formatError(err: Error | undefined): string {
   return err.stack ?? err.message;
 }
 
+/**
+ * Create a read-only Logger that prepends a tag to every message.
+ *
+ * Delegates all calls to the underlying logger — `enabled` and `level`
+ * reflect the underlying logger's state, so `setLevel()` on the root
+ * propagates automatically.
+ *
+ * @param logger - Underlying logger to delegate to
+ * @param prefix - Component name (e.g. "analyzer", "gc", "memory")
+ * @returns A Logger that prepends `[prefix] ` to all messages
+ */
+export function prefixLogger(logger: Logger, prefix: string): Logger {
+  const tag = `[${prefix}] `;
+  return {
+    get enabled() { return logger.enabled; },
+    get level() { return logger.level; },
+    trace(message: string) { logger.trace(tag + message); },
+    debug(message: string) { logger.debug(tag + message); },
+    info(message: string) { logger.info(tag + message); },
+    warning(message: string) { logger.warning(tag + message); },
+    error(message: string, err?: Error) { logger.error(tag + message, err); },
+    critical(message: string, err?: Error) { logger.critical(tag + message, err); },
+  };
+}
+
 /** Adapter for environment-specific log output. */
 export interface LogWriter {
   trace(message: string): void

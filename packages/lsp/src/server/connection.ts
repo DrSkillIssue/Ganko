@@ -60,7 +60,8 @@ import {
   handleDidSave,
   flushPendingChanges,
 } from "./handlers/document";
-import { createLspLogger, type Logger, type LeveledLogger } from "../core/logger";
+import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
+import { createLogger, prefixLogger } from "@drskillissue/ganko-shared";
 import { parseLogLevel } from "@drskillissue/ganko-shared";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
@@ -358,14 +359,28 @@ function createGuardedHandler<P, R>(
   };
 }
 
+/** Options for server creation. */
+interface CreateServerOptions {
+  /** Path to a log file for debugging. Writes to both LSP connection and file when set. */
+  readonly logFile?: string | undefined
+}
+
 /**
  * Create the LSP server.
  *
+ * @param options - Optional server configuration
  * @returns Server context
  */
-export function createServer(): ServerContext {
+export function createServer(options?: CreateServerOptions): ServerContext {
   const connection = createConnection(ProposedFeatures.all);
-  const log = createLspLogger(connection);
+
+  let log: LeveledLogger;
+  if (options?.logFile !== undefined) {
+    const file = createFileWriter(options.logFile);
+    log = createLogger(createCompositeWriter(createLspWriter(connection), file.writer));
+  } else {
+    log = createLogger(createLspWriter(connection));
+  }
 
   log.info("ganko server starting");
 
@@ -380,9 +395,9 @@ export function createServer(): ServerContext {
 
   const astCache = new Map<string, CachedAST>();
   const diagCache = new Map<string, readonly Diagnostic[]>();
-  const graphCache = new GraphCache(log);
-  const gcTimer = new GcTimer(log);
-  const memoryWatcher = new MemoryWatcher(log);
+  const graphCache = new GraphCache(prefixLogger(log, "cache"));
+  const gcTimer = new GcTimer(prefixLogger(log, "gc"));
+  const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
@@ -497,9 +512,11 @@ function setupLifecycleHandlers(context: ServerContext): void {
   });
 
   connection.onInitialized(async (params) => {
+    const t0 = performance.now();
     await handleInitialized(params, serverState, connection, context);
     context.memoryWatcher.start();
     context.log.debug("Memory watcher started");
+    connection.tracer.log(`initialized: project setup completed in ${(performance.now() - t0).toFixed(1)}ms`);
   });
 
   connection.onShutdown(() => {
@@ -609,6 +626,7 @@ function setupDocumentHandlers(context: ServerContext): void {
     const project = context.project;
     if (!project) return;
 
+    const t0 = performance.now();
     const changes = flushPendingChanges(documentState);
     if (context.log.enabled) context.log.debug(`processChangesCallback: ${changes.length} changes`);
     const paths: string[] = new Array(changes.length);
@@ -632,6 +650,9 @@ function setupDocumentHandlers(context: ServerContext): void {
     }
 
     context.rediagnoseAffected(paths, diagnosed);
+    context.connection.tracer.log(
+      `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
   }
 
   documents.onDidOpen(async (event) => {
@@ -868,10 +889,14 @@ function publishFileDiagnostics(
   const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
   const docInfo = context.documentState.openDocuments.get(uri);
 
+  const elapsed = (performance.now() - t0).toFixed(1);
   if (context.log.enabled) context.log.debug(
     `publishFileDiagnostics: ${key} kind=${kind} crossFile=${includeCrossFile} `
     + `single=${singleFile.length} cross=${crossFile.length} total=${rawDiagnostics.length} `
-    + `elapsed=${performance.now() - t0}ms`,
+    + `elapsed=${elapsed}ms`,
+  );
+  context.connection.tracer.log(
+    `publishFileDiagnostics ${key}: ${rawDiagnostics.length} diagnostics in ${elapsed}ms`,
   );
 
   const params: PublishDiagnosticsParams = { uri, diagnostics };
@@ -883,6 +908,14 @@ function publishFileDiagnostics(
  * CLI entry point - create and start the server.
  */
 export function main(): void {
-  const context = createServer();
+  const args = process.argv.slice(2);
+  let logFile: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--log-file" && args[i + 1] !== undefined) {
+      logFile = args[i + 1];
+      break;
+    }
+  }
+  const context = createServer({ logFile });
   startServer(context);
 }

@@ -30,6 +30,7 @@ export {
   noopLogger,
   parseLogLevel,
   createLogger,
+  prefixLogger,
   type LogLevel,
   type Logger,
   type LeveledLogger,
