@@ -51,6 +51,7 @@ Structured logger with runtime-adjustable level thresholds.
 | `LogLevel` | type | `"trace" \| "debug" \| "info" \| "warning" \| "error" \| "critical" \| "off"` |
 | `noopLogger` | const | Silent logger (tests, disabled contexts) |
 | `createLogger(writer, level?)` | fn | Create a `LeveledLogger` backed by a `LogWriter` |
+| `prefixLogger(logger, prefix)` | fn | Wrap a `Logger` so all messages are prefixed with `[prefix]` |
 | `parseLogLevel(raw, fallback)` | fn | Validate a string into `LogLevel` |
 
 ### Path (`path`)

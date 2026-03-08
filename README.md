@@ -34,38 +34,101 @@ This installs the `ganko` binary, which serves as both the language server and C
 
 Install `ganko-vscode` from the VS Code marketplace. It bundles the LSP server — no separate install required.
 
+#### Neovim (0.11+)
+
+Add to `~/.config/nvim/init.lua`:
+
+```lua
+vim.lsp.config("ganko", {
+  cmd = { "ganko", "--stdio" },
+  filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact", "css", "scss", "sass", "less" },
+  root_markers = { "package.json", "tsconfig.json", ".git" },
+})
+vim.lsp.enable("ganko")
+```
+
 #### OpenCode
 
-Install the LSP globally, then add to `~/.config/opencode/opencode.json`:
+Add to `~/.config/opencode/opencode.json` (or `opencode.json` in project root):
 
-```json
+```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "lsp": {
     "ganko": {
       "command": ["ganko", "--stdio"],
-      "extensions": [
-        ".ts", ".js", ".tsx", ".jsx",
-        ".css", ".less", ".sass", ".scss"
-      ]
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".sass", ".less"]
     }
   }
 }
 ```
 
-#### Neovim (nvim-lspconfig)
+#### Helix
 
-```lua
-vim.lsp.start({
-  name = "ganko",
-  cmd = { "ganko", "--stdio" },
-  filetypes = { "typescript", "javascript", "typescriptreact", "javascriptreact", "css", "scss", "less", "sass" },
-  root_dir = vim.fs.dirname(vim.fs.find({ "tsconfig.json", "package.json" }, { upward = true })[1]),
-})
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.ganko]
+command = "ganko"
+args = ["--stdio"]
+
+[[language]]
+name = "typescript"
+language-servers = ["typescript-language-server", "ganko"]
+
+[[language]]
+name = "tsx"
+language-servers = ["typescript-language-server", "ganko"]
+
+[[language]]
+name = "javascript"
+language-servers = ["typescript-language-server", "ganko"]
+
+[[language]]
+name = "jsx"
+language-servers = ["typescript-language-server", "ganko"]
+
+[[language]]
+name = "css"
+language-servers = ["vscode-css-language-server", "ganko"]
+
+[[language]]
+name = "scss"
+language-servers = ["vscode-css-language-server", "ganko"]
+```
+
+#### Sublime Text
+
+Install the [LSP](https://packagecontrol.io/packages/LSP) package, then add to `LSP.sublime-settings`:
+
+```json
+{
+  "clients": {
+    "ganko": {
+      "enabled": true,
+      "command": ["ganko", "--stdio"],
+      "selector": "source.ts | source.tsx | source.js | source.jsx | source.css | source.scss | source.sass | source.less"
+    }
+  }
+}
+```
+
+#### Emacs (eglot)
+
+```elisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '((typescript-ts-mode tsx-ts-mode js-ts-mode js-mode css-mode scss-mode)
+                 . ("ganko" "--stdio"))))
+
+(dolist (hook '(typescript-ts-mode-hook tsx-ts-mode-hook js-ts-mode-hook
+               js-mode-hook css-mode-hook scss-mode-hook))
+  (add-hook hook #'eglot-ensure))
 ```
 
 #### Other Editors
 
-Any editor with LSP support can use ganko. Point it at `ganko --stdio` — the server communicates via JSON-RPC over stdio.
+Any editor with LSP support can use ganko. Launch `ganko --stdio` — the server communicates via JSON-RPC over stdio.
 
 ## Usage
 
@@ -366,7 +429,7 @@ Rule severity can be overridden in three places (highest precedence first):
 
 The CLI also accepts `--exclude` patterns and reads global `ignores` from ESLint config.
 
-See the [ganko README](packages/ganko/README.md) and [ganko-vscode README](packages/ganko-vscode/README.md) for configuration details.
+See the [ganko README](packages/ganko/README.md) and [ganko-vscode README](packages/vscode/README.md) for configuration details.
 
 ## Development Setup
 
