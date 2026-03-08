@@ -19,7 +19,6 @@
 
 import {
   createConnection,
-  TextDocuments,
   ProposedFeatures,
   FileChangeType,
   type Connection,
@@ -30,7 +29,8 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
 
 import { parseContent, GraphCache } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
 import type { Project } from "../core/project";
@@ -245,8 +245,8 @@ function runDiagnostics(
 export interface ServerContext {
   /** LSP connection */
   readonly connection: Connection
-  /** Text document manager */
-  readonly documents: TextDocuments<TextDocument>
+  /** Text document manager — only stores documents matching supported extensions */
+  readonly documents: FilteredTextDocuments
   /** Logger routed through connection.console (supports runtime level changes) */
   readonly log: LeveledLogger
   /** Server lifecycle state */
@@ -369,7 +369,14 @@ export function createServer(): ServerContext {
 
   log.info("ganko server starting");
 
-  const documents = new TextDocuments(TextDocument);
+  const supportedExtensions = new Set<string>(ALL_EXTENSIONS);
+
+  const documents = new FilteredTextDocuments(TextDocument, (uri: string) => {
+    if (uri.endsWith(".d.ts")) return false;
+    const dotIdx = uri.lastIndexOf(".");
+    if (dotIdx < 0) return false;
+    return supportedExtensions.has(uri.slice(dotIdx));
+  });
 
   const astCache = new Map<string, CachedAST>();
   const diagCache = new Map<string, readonly Diagnostic[]>();
