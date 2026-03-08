@@ -8,6 +8,7 @@
 import { readdirSync } from "node:fs";
 import { join, relative, matchesGlob } from "node:path";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import type { Logger } from "@drskillissue/ganko-shared";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".output", "coverage"]);
 
@@ -51,11 +52,13 @@ function scanDir(
   excludes: readonly string[],
   solidFiles: Set<string>,
   cssFiles: Set<string>,
+  log?: Logger,
 ): void {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
+    if (log?.enabled) log.trace(`fileIndex: scanDir error reading ${dir}`);
     return;
   }
 
@@ -69,7 +72,7 @@ function scanDir(
       if (entry.name.startsWith(".")) continue;
       const childDir = join(dir, entry.name);
       if (hasExcludes && isExcluded(relative(rootPath, childDir), excludes)) continue;
-      scanDir(childDir, rootPath, excludes, solidFiles, cssFiles);
+      scanDir(childDir, rootPath, excludes, solidFiles, cssFiles, log);
       continue;
     }
     if (entry.isFile()) {
@@ -86,11 +89,13 @@ function scanDir(
  * @param rootPath - Project root directory
  * @param excludes - Glob patterns matched against paths relative to rootPath
  */
-export function createFileIndex(rootPath: string, excludes: readonly string[] = []): FileIndex {
+export function createFileIndex(rootPath: string, excludes: readonly string[] = [], log?: Logger): FileIndex {
   const solidFiles = new Set<string>();
   const cssFiles = new Set<string>();
 
-  scanDir(rootPath, rootPath, excludes, solidFiles, cssFiles);
+  const t0 = performance.now();
+  scanDir(rootPath, rootPath, excludes, solidFiles, cssFiles, log);
+  if (log?.enabled) log.debug(`fileIndex: scanned ${rootPath} → ${solidFiles.size} solid, ${cssFiles.size} css in ${(performance.now() - t0).toFixed(1)}ms`);
 
   return {
     get solidFiles() { return solidFiles; },

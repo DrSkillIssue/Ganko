@@ -83,7 +83,7 @@ export class MemoryWatcher {
 
     if (rssGrew || heapGrew) {
       const reason = rssGrew && heapGrew ? "rss+heap" : rssGrew ? "rss" : "heap";
-      if (this.log.enabled) this.log.info(`[memory] growth(${reason}): ${snapshotToLogLine(snapshot)}`);
+      if (this.log.enabled) this.log.info(`growth(${reason}): ${snapshotToLogLine(snapshot)}`);
     }
   }
 }

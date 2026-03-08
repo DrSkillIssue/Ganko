@@ -19,6 +19,7 @@ export function handleInlayHint(
   params: InlayHintParams,
   ctx: HandlerContext,
 ): InlayHint[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -46,5 +47,6 @@ export function handleInlayHint(
     result.push(item);
   }
 
+  if (log.enabled) log.trace(`inlayHint: ${result.length} hints for ${path}`);
   return result.length > 0 ? result : null;
 }

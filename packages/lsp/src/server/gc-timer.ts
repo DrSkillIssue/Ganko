@@ -56,6 +56,6 @@ export class GcTimer {
 
     if (!this.log.enabled) return;
     const snapshot = takeMemorySnapshot();
-    this.log.debug(`GC completed | ${snapshotToLogLine(snapshot)}`);
+    this.log.debug(`completed | ${snapshotToLogLine(snapshot)}`);
   }
 }

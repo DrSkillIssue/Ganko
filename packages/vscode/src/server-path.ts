@@ -8,7 +8,7 @@ import fs from "node:fs";
 
 /** Find the bundled ganko server module, or null if missing. */
 export function findServerModule(extensionPath: string): string | null {
-  const bundled = path.join(extensionPath, "dist", "server", "dist", "entry.mjs");
+  const bundled = path.join(extensionPath, "dist", "server", "dist", "entry.js");
   if (fs.existsSync(bundled)) return bundled;
   return null;
 }

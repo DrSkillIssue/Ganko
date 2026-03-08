@@ -3,7 +3,7 @@
  *
  * Each command is a one-liner delegating to the appropriate module.
  */
-import { window, commands, type ExtensionContext, type OutputChannel } from "vscode";
+import { window, commands, type ExtensionContext, type LogOutputChannel } from "vscode";
 import type { Logger } from "./log";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { showReactiveGraph } from "./reactive-graph";
@@ -13,7 +13,7 @@ import type { MemoryUsageResult } from "./protocol";
 export function registerCommands(
   context: ExtensionContext,
   log: Logger,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
   getClient: () => LanguageClient | null,
   restartClient: () => Promise<void>,
 ): void {

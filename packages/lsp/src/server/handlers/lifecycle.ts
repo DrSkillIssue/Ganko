@@ -158,7 +158,7 @@ export async function handleInitialized(
     const { log } = context;
 
     if (state.useESLintConfig) {
-      const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath)
+      const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
         .catch((err: unknown) => {
           if (log.enabled) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
           return EMPTY_ESLINT_RESULT;
@@ -169,7 +169,7 @@ export async function handleInitialized(
 
     state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
 
-    const fileIndex = createFileIndex(state.rootPath, effectiveExclude(state));
+    const fileIndex = createFileIndex(state.rootPath, effectiveExclude(state), log);
     context.fileIndex = fileIndex;
     if (log.enabled) log.debug(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
@@ -341,7 +341,7 @@ export async function reloadESLintConfig(
   const noChange: ESLintReloadOutcome = { overridesChanged: false, ignoresChanged: false };
   if (!state.useESLintConfig || !state.rootPath) return noChange;
 
-  const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath)
+  const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
     .catch((err: unknown) => {
       if (log.enabled) log.warning(`Failed to reload ESLint config: ${err instanceof Error ? err.message : String(err)}`);
       return EMPTY_ESLINT_RESULT;

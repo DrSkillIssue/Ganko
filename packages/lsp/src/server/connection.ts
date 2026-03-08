@@ -19,7 +19,6 @@
 
 import {
   createConnection,
-  TextDocuments,
   ProposedFeatures,
   FileChangeType,
   type Connection,
@@ -30,7 +29,8 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
 
 import { parseContent, GraphCache } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
 import type { Project } from "../core/project";
@@ -60,7 +60,8 @@ import {
   handleDidSave,
   flushPendingChanges,
 } from "./handlers/document";
-import { createLspLogger, type Logger, type LeveledLogger } from "../core/logger";
+import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
+import { createLogger, prefixLogger } from "@drskillissue/ganko-shared";
 import { parseLogLevel } from "@drskillissue/ganko-shared";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
@@ -110,10 +111,13 @@ function createHandlerContext(
   graphCache: GraphCache,
   astCache: Map<string, CachedAST>,
   diagCache: Map<string, readonly Diagnostic[]>,
+  handlerLog: Logger,
 ): HandlerContext {
   /* All HandlerContext methods receive paths already canonicalized by
      uriToPath() in the caller. No redundant canonicalPath() calls. */
   return {
+    log: handlerLog,
+
     getLanguageService(path) {
       return project.getLanguageService(path);
     },
@@ -185,6 +189,7 @@ function collectAffectedPaths(
   changed: readonly string[],
   state: DocumentState,
   exclude?: ReadonlySet<string>,
+  logger?: Logger,
 ): string[] {
   const needed = new Set<FileKind>();
   for (let i = 0, len = changed.length; i < len; i++) {
@@ -203,6 +208,7 @@ function collectAffectedPaths(
     if (exclude !== undefined && exclude.has(p)) continue;
     if (needed.has(classifyFile(p))) out.push(p);
   }
+  if (logger?.enabled) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
   return out;
 }
 
@@ -227,8 +233,10 @@ function runDiagnostics(
   logger?: Logger,
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
+  if (logger?.enabled) logger.trace(`runDiagnostics: ${key}`);
   const diagnostics = runSingleFileDiagnostics(project, key, content, overrides, logger);
   diagCache.set(key, diagnostics);
+  if (logger?.enabled) logger.trace(`runDiagnostics: ${key} → ${diagnostics.length} diagnostics`);
   return diagnostics;
 }
 
@@ -245,8 +253,8 @@ function runDiagnostics(
 export interface ServerContext {
   /** LSP connection */
   readonly connection: Connection
-  /** Text document manager */
-  readonly documents: TextDocuments<TextDocument>
+  /** Text document manager — only stores documents matching supported extensions */
+  readonly documents: FilteredTextDocuments
   /** Logger routed through connection.console (supports runtime level changes) */
   readonly log: LeveledLogger
   /** Server lifecycle state */
@@ -358,24 +366,45 @@ function createGuardedHandler<P, R>(
   };
 }
 
+/** Options for server creation. */
+interface CreateServerOptions {
+  /** Path to a log file for debugging. Writes to both LSP connection and file when set. */
+  readonly logFile?: string | undefined
+}
+
 /**
  * Create the LSP server.
  *
+ * @param options - Optional server configuration
  * @returns Server context
  */
-export function createServer(): ServerContext {
+export function createServer(options?: CreateServerOptions): ServerContext {
   const connection = createConnection(ProposedFeatures.all);
-  const log = createLspLogger(connection);
+
+  let log: LeveledLogger;
+  if (options?.logFile !== undefined) {
+    const file = createFileWriter(options.logFile);
+    log = createLogger(createCompositeWriter(createLspWriter(connection), file.writer));
+  } else {
+    log = createLogger(createLspWriter(connection));
+  }
 
   log.info("ganko server starting");
 
-  const documents = new TextDocuments(TextDocument);
+  const supportedExtensions = new Set<string>(ALL_EXTENSIONS);
+
+  const documents = new FilteredTextDocuments(TextDocument, (uri: string) => {
+    if (uri.endsWith(".d.ts")) return false;
+    const dotIdx = uri.lastIndexOf(".");
+    if (dotIdx < 0) return false;
+    return supportedExtensions.has(uri.slice(dotIdx));
+  });
 
   const astCache = new Map<string, CachedAST>();
   const diagCache = new Map<string, readonly Diagnostic[]>();
-  const graphCache = new GraphCache(log);
-  const gcTimer = new GcTimer(log);
-  const memoryWatcher = new MemoryWatcher(log);
+  const graphCache = new GraphCache(prefixLogger(log, "cache"));
+  const gcTimer = new GcTimer(prefixLogger(log, "gc"));
+  const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
@@ -399,7 +428,7 @@ export function createServer(): ServerContext {
 
     setProject(project) {
       context.project = project;
-      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache);
+      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
@@ -428,7 +457,7 @@ export function createServer(): ServerContext {
       if (!project) return;
       if (changed.length === 0) return;
 
-      const affected = collectAffectedPaths(changed, context.documentState, exclude);
+      const affected = collectAffectedPaths(changed, context.documentState, exclude, log);
       if (affected.length > 0) {
         if (log.enabled) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
       }
@@ -490,9 +519,11 @@ function setupLifecycleHandlers(context: ServerContext): void {
   });
 
   connection.onInitialized(async (params) => {
+    const t0 = performance.now();
     await handleInitialized(params, serverState, connection, context);
     context.memoryWatcher.start();
     context.log.debug("Memory watcher started");
+    connection.tracer.log(`initialized: project setup completed in ${(performance.now() - t0).toFixed(1)}ms`);
   });
 
   connection.onShutdown(() => {
@@ -539,7 +570,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (eslintConfigChanged && context.project) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState));
+        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
         context.rediagnoseAll();
@@ -562,7 +593,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (result === "rebuild-index") {
       if (serverState.rootPath) {
         const excludes = effectiveExclude(serverState);
-        const fileIndex = createFileIndex(serverState.rootPath, excludes);
+        const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
         context.fileIndex = fileIndex;
         if (context.log.enabled) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
       }
@@ -573,7 +604,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (result === "reload-eslint") {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState));
+        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (!outcome.overridesChanged && !outcome.ignoresChanged) return;
     }
@@ -602,6 +633,7 @@ function setupDocumentHandlers(context: ServerContext): void {
     const project = context.project;
     if (!project) return;
 
+    const t0 = performance.now();
     const changes = flushPendingChanges(documentState);
     if (context.log.enabled) context.log.debug(`processChangesCallback: ${changes.length} changes`);
     const paths: string[] = new Array(changes.length);
@@ -625,6 +657,9 @@ function setupDocumentHandlers(context: ServerContext): void {
     }
 
     context.rediagnoseAffected(paths, diagnosed);
+    context.connection.tracer.log(
+      `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
   }
 
   documents.onDidOpen(async (event) => {
@@ -861,10 +896,14 @@ function publishFileDiagnostics(
   const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
   const docInfo = context.documentState.openDocuments.get(uri);
 
+  const elapsed = (performance.now() - t0).toFixed(1);
   if (context.log.enabled) context.log.debug(
     `publishFileDiagnostics: ${key} kind=${kind} crossFile=${includeCrossFile} `
     + `single=${singleFile.length} cross=${crossFile.length} total=${rawDiagnostics.length} `
-    + `elapsed=${performance.now() - t0}ms`,
+    + `elapsed=${elapsed}ms`,
+  );
+  context.connection.tracer.log(
+    `publishFileDiagnostics ${key}: ${rawDiagnostics.length} diagnostics in ${elapsed}ms`,
   );
 
   const params: PublishDiagnosticsParams = { uri, diagnostics };
@@ -876,6 +915,14 @@ function publishFileDiagnostics(
  * CLI entry point - create and start the server.
  */
 export function main(): void {
-  const context = createServer();
+  const args = process.argv.slice(2);
+  let logFile: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--log-file" && args[i + 1] !== undefined) {
+      logFile = args[i + 1];
+      break;
+    }
+  }
+  const context = createServer({ logFile });
   startServer(context);
 }

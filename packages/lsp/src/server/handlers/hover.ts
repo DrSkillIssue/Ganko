@@ -20,6 +20,7 @@ export function handleHover(
   params: HoverParams,
   ctx: HandlerContext,
 ): Hover | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -32,11 +33,9 @@ export function handleHover(
   const display = ts.displayPartsToString(info.displayParts);
   if (!display) return null;
 
-  // Only provide hover when we can add Solid-specific info.
-  // VS Code's built-in TS service already shows type info for everything —
-  // returning the same thing here produces duplicate hover panels.
   const kind = detectReactiveKind(display);
   if (!kind) return null;
+  if (log.enabled) log.trace(`hover: reactive kind=${kind} at ${path}:${params.position.line}:${params.position.character}`);
 
   const parts: string[] = [];
   parts.push(`**${kind}** (Solid.js)`);

@@ -21,9 +21,8 @@ import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
-import { createCliLogger, noopLogger, type Logger } from "../core/logger";
-import { parseLogLevel } from "@drskillissue/ganko-shared";
-import type { LogLevel } from "@drskillissue/ganko-shared";
+import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
+import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
 
 function die(message: string): never {
   process.stderr.write(message + "\n");
@@ -50,6 +49,8 @@ interface LintOptions {
   readonly cwd: string
   /** Log level for stderr output */
   readonly logLevel: LogLevel
+  /** Path to log file (writes to both stderr and file when set) */
+  readonly logFile: string | undefined
 }
 
 /**
@@ -67,6 +68,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let noEslintConfig = false;
   let maxWarnings = -1;
   let logLevel: LogLevel = "off";
+  let logFile: string | undefined;
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -124,6 +126,16 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       continue;
     }
 
+    if (arg === "--log-file") {
+      const next = args[i + 1];
+      if (next === undefined || next.startsWith("-")) {
+        die("--log-file requires a file path argument.");
+      }
+      logFile = resolve(cwd, next);
+      i++;
+      continue;
+    }
+
     if (arg === "--max-warnings") {
       const next = args[i + 1];
       const parsed = Number(next);
@@ -153,7 +165,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile };
 }
 
 /** Glob metacharacters — presence means the arg is a pattern, not a literal path. */
@@ -305,7 +317,19 @@ function commonAncestor(files: readonly string[]): string {
 export async function runLint(args: readonly string[]): Promise<void> {
   const options = parseLintArgs(args);
   const cwd = options.cwd;
-  const log: Logger = options.logLevel !== "off" ? createCliLogger(options.logLevel) : noopLogger;
+
+  const fileHandle = options.logFile !== undefined && options.logLevel !== "off"
+    ? createFileWriter(options.logFile)
+    : undefined;
+
+  let log: Logger;
+  if (options.logLevel === "off") {
+    log = noopLogger;
+  } else if (fileHandle !== undefined) {
+    log = createLogger(createCompositeWriter(createStderrWriter(), fileHandle.writer), options.logLevel);
+  } else {
+    log = createLogger(createStderrWriter(), options.logLevel);
+  }
 
   if (log.enabled) log.info(`cwd: ${cwd}`);
   if (log.enabled) log.info(`args: ${JSON.stringify(options)}`);
@@ -318,16 +342,20 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   if (hasExplicitTargets) {
     resolvedTargets = resolveFiles(options.files, cwd, options.exclude);
-    projectRoot = findProjectRoot(commonAncestor(resolvedTargets));
+    if (log.enabled) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
+    const ancestor = commonAncestor(resolvedTargets);
+    projectRoot = findProjectRoot(ancestor);
+    if (log.enabled) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
   } else {
     projectRoot = findProjectRoot(cwd);
+    if (log.enabled) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
   }
 
   if (log.enabled) log.info(`project root: ${projectRoot}`);
 
   const eslintResult = options.noEslintConfig
     ? EMPTY_ESLINT_RESULT
-    : await loadESLintConfig(projectRoot, options.eslintConfig).catch(() => EMPTY_ESLINT_RESULT);
+    : await loadESLintConfig(projectRoot, options.eslintConfig, log).catch(() => EMPTY_ESLINT_RESULT);
 
   if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores`);
 
@@ -339,7 +367,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     resolvedTargets = resolveFiles(options.files, cwd, effectiveExclude);
   }
 
-  const fileIndex = createFileIndex(projectRoot, effectiveExclude);
+  const fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
   if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
   const filesToLint = resolvedTargets ?? fileIndex.allFiles();
@@ -398,6 +426,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       try {
         content = readFileSync(path, "utf-8");
       } catch {
+        if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
         continue;
       }
 
@@ -493,6 +522,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   } finally {
     project.dispose();
+    if (fileHandle !== undefined) await fileHandle.close();
   }
 
   process.exit(exitCode);

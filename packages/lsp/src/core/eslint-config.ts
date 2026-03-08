@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult } from "@drskillissue/ganko-shared";
+import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult, Logger } from "@drskillissue/ganko-shared";
 import { ESLINT_CONFIG_FILENAMES, NUMERIC_SEVERITY, SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
 import { getRule } from "@drskillissue/ganko";
 
@@ -203,15 +203,26 @@ function processExport(exported: Record<string, FlatConfigObject>): ESLintConfig
 export async function loadESLintConfig(
   rootPath: string,
   explicitPath?: string,
+  log?: Logger,
 ): Promise<ESLintConfigResult> {
   const configPath = findConfigFile(rootPath, explicitPath);
-  if (!configPath) return EMPTY_ESLINT_RESULT;
+  if (!configPath) {
+    if (log?.enabled) log.debug(`eslintConfig: no config file found in ${rootPath}`);
+    return EMPTY_ESLINT_RESULT;
+  }
 
+  if (log?.enabled) log.debug(`eslintConfig: loading ${configPath}`);
   const url = pathToFileURL(configPath).href + `?t=${Date.now()}`;
-  const mod = await import(url);
-  const exported = mod.default ?? mod;
-
-  return processExport(exported);
+  try {
+    const mod = await import(url);
+    const exported = mod.default ?? mod;
+    const result = processExport(exported);
+    if (log?.enabled) log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
+    return result;
+  } catch (e) {
+    if (log?.enabled) log.warning(`eslintConfig: failed to load ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
+    return EMPTY_ESLINT_RESULT;
+  }
 }
 
 /**

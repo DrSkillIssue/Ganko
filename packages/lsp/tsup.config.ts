@@ -30,7 +30,7 @@ export default defineConfig([
   },
   {
     entry: ["src/cli/entry.ts"],
-    format: ["esm"],
+    format: ["cjs"],
     dts: false,
     clean: false,
     sourcemap: true,

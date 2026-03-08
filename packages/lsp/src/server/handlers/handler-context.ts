@@ -9,6 +9,7 @@
 import type ts from "typescript";
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
+import type { Logger } from "@drskillissue/ganko-shared";
 
 /** Combined result from a single TS service lookup. */
 export interface TSFileInfo {
@@ -18,6 +19,8 @@ export interface TSFileInfo {
 
 /** Context passed to all LSP handlers */
 export interface HandlerContext {
+  /** Scoped logger for handler-level tracing. */
+  readonly log: Logger
   /** Get TypeScript language service for a file */
   getLanguageService(path: string): ts.LanguageService | null
   /** Get TypeScript source file */

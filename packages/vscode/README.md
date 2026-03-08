@@ -112,24 +112,6 @@ The extension shows language server state in the status bar:
 
 Click the status bar item to open the output channel.
 
-## Architecture
-
-```
-src/
-  extension.ts          Entry point and lifecycle orchestration
-  client.ts             LanguageClient setup, restart throttling, state handling
-  config.ts             VS Code config -> LSP settings mapping
-  commands.ts           Command registration
-  reactive-graph.ts     Reactive graph webview integration
-  status-bar.ts         Status bar state mapping
-  server-path.ts        Bundled server discovery
-  log.ts                OutputChannel-backed logger
-  protocol.ts           Custom request/response types
-  vscode-types.ts       VS Code contribution type definitions
-  webview/
-    reactive-graph.html Webview template
-```
-
 ## Development
 
 ### Build
@@ -137,7 +119,7 @@ src/
 ```bash
 # From monorepo root
 bun install
-bun run --cwd packages/ganko-vscode build
+bun run --cwd packages/vscode build
 ```
 
 ### Local Testing
@@ -145,7 +127,7 @@ bun run --cwd packages/ganko-vscode build
 1. Build the extension:
 
    ```bash
-   bun run --cwd packages/ganko-vscode build
+   bun run --cwd packages/vscode build
    ```
 
 2. Open this repository in VS Code.
@@ -155,10 +137,10 @@ bun run --cwd packages/ganko-vscode build
 ### Package
 
 ```bash
-bun run --cwd packages/ganko-vscode package
+bun run --cwd packages/vscode package
 ```
 
-This produces a `.vsix` file in `packages/ganko-vscode/`.
+This produces a `.vsix` file in `packages/vscode/`.
 
 ## Workspace Trust
 

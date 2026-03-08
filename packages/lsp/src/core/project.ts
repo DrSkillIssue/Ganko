@@ -50,12 +50,15 @@ export interface Project {
  * Create a project.
  */
 export function createProject(config: ProjectConfig): Project {
+  const log = config.log;
+  if (log?.enabled) log.debug(`createProject: ${config.plugins.length} plugins, root=${config.rootPath}${config.rules ? `, ${Object.keys(config.rules).length} rule overrides` : ""}`);
+
   let runner: Runner = config.rules !== undefined
     ? createRunner({ plugins: config.plugins, rules: config.rules })
     : createRunner({ plugins: config.plugins });
 
   const tsOptions: ProjectServiceOptions = { tsconfigRootDir: config.rootPath };
-  if (config.log !== undefined) tsOptions.log = config.log;
+  if (log !== undefined) tsOptions.log = log;
   const tsService: TypeScriptProjectService = createTypeScriptProjectService(tsOptions);
 
   return {

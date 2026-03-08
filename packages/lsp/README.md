@@ -1,6 +1,6 @@
 # ganko
 
-Language Server Protocol (LSP) server for Solid.js projects. `ganko` powers diagnostics and editor intelligence for Solid and CSS files, including cross-file analysis.
+Language Server Protocol (LSP) server for Solid.js projects. `ganko` powers diagnostics and editor intelligence for TypeScript/Solid and CSS files, including cross-file analysis.
 
 ## Features
 
@@ -16,6 +16,42 @@ Supported source extensions:
 - Solid/TS/JS: `.tsx`, `.jsx`, `.ts`, `.js`, `.mts`, `.cts`, `.mjs`, `.cjs`
 - Styles: `.css`, `.scss`, `.sass`, `.less`
 
+## Installation
+
+```bash
+npm i -g @drskillissue/ganko-lsp
+```
+
+This installs the `ganko` binary, which serves as both the language server and CLI linter.
+
+## Editor Setup
+
+### VS Code
+
+Install `ganko-vscode` from the VS Code marketplace. It bundles the LSP server — no separate install required.
+
+### OpenCode
+
+Within `opencode.json`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "ganko": {
+      "command": ["ganko", "--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".sass", ".less"]
+    }
+  }
+}
+```
+
+> NOTE: You must restart opencode and LSP will **NOT** show until a file matching the above extension is read.
+
+### Other Editors
+
+Any editor with LSP support can use ganko. Launch `ganko --stdio` — the server communicates via JSON-RPC over stdio.
+
 ## CLI Usage
 
 ### Language Server
@@ -26,6 +62,9 @@ npx ganko
 
 # If installed globally
 ganko
+
+# Write server logs to a file (for debugging)
+ganko --log-file /tmp/ganko.log
 
 # CLI helpers
 ganko --help
@@ -72,109 +111,11 @@ ganko lint --no-eslint-config
 | `--exclude <glob>` | Exclude files matching glob pattern (repeatable) |
 | `--verbose`, `-v` | Enable debug-level log output |
 | `--log-level <level>` | Set log level: `trace`, `debug`, `info`, `warning`, `error`, `critical`, `off` |
+| `--log-file <path>` | Write logs to a file (in addition to stderr) |
 
 Exit codes: `0` clean, `1` errors found (or warnings exceeded `--max-warnings`), `2` invalid arguments.
 
-Note: the bundled CLI entrypoint uses `#!/usr/bin/env bun`, so `bun` must be available on `PATH` when invoking `ganko` directly.
-
-## Editor Integration
-
-### VS Code
-
-Use the `ganko-vscode` extension, which bundles and configures this server.
-
-### Neovim
-
-```lua
-local lspconfig = require('lspconfig')
-local configs = require('lspconfig.configs')
-
-configs.solid_lsp = {
-  default_config = {
-    cmd = { 'ganko' },
-    filetypes = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact', 'css', 'scss', 'sass', 'less' },
-    root_dir = lspconfig.util.root_pattern('package.json', 'tsconfig.json', 'eslint.config.mjs', 'eslint.config.js', 'eslint.config.cjs'),
-  },
-}
-
-lspconfig.solid_lsp.setup{}
-```
-
-### Other Editors
-
-Use stdio transport and launch `ganko` (or `npx ganko`) as your language server command.
-
-## Programmatic API
-
-### Server
-
-```typescript
-import { createServer, startServer, main, buildServerCapabilities } from "@drskillissue/ganko";
-
-const server = createServer();
-startServer(server);
-
-// CLI-style startup
-main();
-
-const capabilities = buildServerCapabilities();
-```
-
-### Project (without LSP transport)
-
-```typescript
-import { createProject } from "@drskillissue/ganko";
-import { SolidPlugin, CSSPlugin } from "@drskillissue/ganko";
-
-const project = createProject({
-  rootPath: "/path/to/workspace",
-  plugins: [SolidPlugin, CSSPlugin],
-});
-
-const diagnostics = project.run(["src/App.tsx"]);
-const languageService = project.getLanguageService("src/App.tsx");
-
-project.updateFile("src/App.tsx", "<updated content>");
-project.setRuleOverrides({ "signal-call": "error" });
-project.dispose();
-```
-
-### TypeScript Project Service
-
-```typescript
-import {
-  createTypeScriptProjectService,
-  type TypeScriptProjectService,
-} from "@drskillissue/ganko";
-
-const service: TypeScriptProjectService = createTypeScriptProjectService({
-  tsconfigRootDir: "/path/to/workspace",
-});
-
-service.getProgramForFile("src/App.tsx");
-service.getLanguageServiceForFile("src/App.tsx");
-service.getScriptVersionForFile("src/App.tsx");
-service.updateFile("src/App.tsx", "<updated content>");
-service.closeFile("src/App.tsx");
-service.dispose();
-```
-
-### Exported Handler Functions
-
-`ganko` exports these handler functions:
-
-- `handleDefinition`
-- `handleReferences`
-- `handlePrepareRename`
-- `handleRename`
-- `handleHover`
-- `handleCompletion`
-- `handleCodeAction`
-- `handleSignatureHelp`
-- `handleDocumentHighlight`
-- `handleLinkedEditingRanges`
-- `handleFoldingRanges`
-- `handleSelectionRange`
+The CLI entrypoint uses `#!/usr/bin/env node` — only Node.js `>=22.0.0` is required on `PATH`.
 
 ## Client Settings (Initialization / Config Change)
 
@@ -203,72 +144,22 @@ Rule override precedence:
 2. ESLint config overrides
 3. Built-in rule defaults
 
-## Custom Request
-
-`ganko` implements a custom request for reactive graph visualization:
-
-- Method: `solid/showReactiveGraph`
-- Params:
-
-```json
-{
-  "textDocument": {
-    "uri": "file:///absolute/path/to/file.tsx"
-  }
-}
-```
-
-- Result: `{ mermaid, dot, nodes, edges }` or `null`
-
-## Architecture
-
-```
-src/
-  index.ts                  Public API exports
-  core/
-    project.ts              Project runner wrapper
-    project-service.ts      TypeScript project service wrapper
-    file-index.ts           Workspace file indexing by kind
-    eslint-config.ts        ESLint rule override loading + merging
-    analyze.ts              Shared diagnostic pipeline (single-file + cross-file)
-    logger.ts               LSP and CLI logger backends for @drskillissue/ganko-shared Logger interface
-  cli/
-    lint.ts                 Headless lint command
-    format.ts               Output formatters (text + JSON)
-  server/
-    index.ts                Server barrel exports
-    connection.ts           LSP wiring, routing, diagnostics pipeline
-    capabilities.ts         Advertised LSP capabilities
-    gc-timer.ts             Periodic garbage collection scheduler
-    memory-watcher.ts       Heap usage monitor with configurable threshold
-    handlers/               Feature handlers + lifecycle/document handlers
-bin/
-  ganko.js              CLI entrypoint (LSP server + lint subcommand)
-test/
-  cli/                      Lint command unit + integration tests
-  core/                     ESLint config, project service unit tests
-  integration/              LSP integration tests
-  helpers/                  Test utilities and server pool
-  fixtures/                 Test project fixtures
-```
-
 ## Development
 
 ```bash
 # Build
-bun run --cwd packages/ganko build
+bun run --cwd packages/lsp build
 
-# Test (watch mode available via test:watch)
-bun run --cwd packages/ganko test
+# Test
+bun run --cwd packages/lsp test
 
 # Type-check
-bun run --cwd packages/ganko tsc
+bun run --cwd packages/lsp tsc
 ```
 
 ## Requirements
 
 - Node.js `>=22.0.0`
-- Bun (for running the packaged CLI entrypoint)
 
 ## License
 

@@ -2,11 +2,10 @@
  * ganko CLI entry point.
  *
  * Dispatches to the language server (stdio) or the lint subcommand.
- * Built by tsup as a separate entry — no unbundled JS shim needed.
+ * Built by tsup as a separate CJS entry — all bundled deps use require().
  */
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 const HELP = `ganko - Solid.js Language Server & Linter
 
@@ -25,14 +24,17 @@ Lint Options:
   --max-warnings <n>       Exit with error if warnings exceed n
   --exclude <glob>         Glob pattern to exclude (repeatable)
   --log-level <level>      Log level: trace, debug, info, warning, error, critical, off (default: off)
+  --log-file <path>        Write logs to file (in addition to stderr)
   --verbose, -v            Shorthand for --log-level debug
+
+Server Options:
+  --log-file <path>        Write server logs to file (for debugging)
 
 The language server communicates via JSON-RPC over stdio.
 Configure your editor to use this as an external language server.`;
 
 function getVersion(): string {
-  const selfDir = dirname(fileURLToPath(import.meta.url));
-  const pkgPath = resolve(selfDir, "..", "package.json");
+  const pkgPath = resolve(__dirname, "..", "package.json");
   const raw = readFileSync(pkgPath, "utf-8");
   const pkg: { version: string } = JSON.parse(raw);
   return pkg.version;
@@ -50,10 +52,14 @@ if (args.includes("--version")) {
   process.exit(0);
 }
 
-if (args[0] === "lint") {
-  const { runLint } = await import("./lint");
-  await runLint(args.slice(1));
-} else {
-  const { main } = await import("../server/connection");
-  main();
+async function run(): Promise<void> {
+  if (args[0] === "lint") {
+    const { runLint } = await import("./lint");
+    await runLint(args.slice(1));
+  } else {
+    const { main } = await import("../server/connection");
+    main();
+  }
 }
+
+void run();

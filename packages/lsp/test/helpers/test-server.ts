@@ -23,6 +23,7 @@ import { CodeActionTriggerKind, CompletionItemKind } from "vscode-languageserver
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import { parseContent, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
+import { noopLogger } from "@drskillissue/ganko-shared";
 import type { HandlerContext } from "../../src/server/handlers/handler-context";
 
 import { handleDefinition } from "../../src/server/handlers/definition";
@@ -77,6 +78,7 @@ export class TestServer {
 
   constructor() {
     this.ctx = {
+      log: noopLogger,
       getLanguageService: () => null,
       getSourceFile: () => null,
       getTSFileInfo: () => null,
