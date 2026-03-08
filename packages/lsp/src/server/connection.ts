@@ -29,7 +29,7 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
 
 import { parseContent, GraphCache } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
@@ -395,6 +395,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
   const documents = new FilteredTextDocuments(TextDocument, (uri: string) => {
     if (uri.endsWith(".d.ts")) return false;
+    if (isToolingConfig(uri)) return false;
     const dotIdx = uri.lastIndexOf(".");
     if (dotIdx < 0) return false;
     return supportedExtensions.has(uri.slice(dotIdx));
