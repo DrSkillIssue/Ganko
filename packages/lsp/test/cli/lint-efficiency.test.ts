@@ -29,7 +29,7 @@ interface LintResult {
 
 function runLint(args: string[], cwd: string): LintResult {
   try {
-    const result = execFileSync("bun", [BIN, "lint", ...args], {
+    const result = execFileSync("node", [BIN, "lint", ...args], {
       cwd,
       encoding: "utf-8",
       timeout: 30000,

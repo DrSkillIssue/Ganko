@@ -6,16 +6,18 @@
  * as a subprocess to catch ESM/CJS bundling issues, shebang problems,
  * and argument parsing regressions.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const BINARY = join(__dirname, "../../dist/ganko");
 const ENTRY = join(__dirname, "../../dist/entry.js");
 const BASIC_APP = join(__dirname, "../fixtures/basic-app");
 
 const VERSION_RE = /^ganko \d+\.\d+\.\d+$/;
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
 function runBinary(args: string[], options?: { cwd?: string; timeout?: number }): {
   stdout: string;
@@ -201,6 +203,90 @@ describe("ganko binary", () => {
       const output = result.stdout ?? "";
       expect(output).toContain("Content-Length:");
       expect(output).toContain("jsonrpc");
+    });
+  });
+
+  describe("--log-file", () => {
+    let tempDir: string;
+
+    afterEach(() => {
+      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("CLI lint writes logs to file when --log-file is set", () => {
+      tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
+      const logPath = join(tempDir, "lint.log");
+
+      const result = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+        cwd: BASIC_APP,
+        encoding: "utf-8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      expect(existsSync(logPath)).toBe(true);
+      const logContent = readFileSync(logPath, "utf-8");
+      expect(logContent.length).toBeGreaterThan(0);
+      expect(logContent).toContain("[info]");
+      expect(logContent).toContain("project root:");
+    });
+
+    it("CLI lint writes to both stderr and file", () => {
+      tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
+      const logPath = join(tempDir, "dual.log");
+
+      const result = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+        cwd: BASIC_APP,
+        encoding: "utf-8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      const logContent = readFileSync(logPath, "utf-8");
+      const stderr = result.stderr ?? "";
+
+      expect(stderr).toContain("[info]");
+      expect(logContent).toContain("[info]");
+    });
+
+    it("LSP stdio mode writes logs to file when --log-file is set", () => {
+      tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
+      const logPath = join(tempDir, "lsp.log");
+
+      const initRequest = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { capabilities: {} },
+      });
+      const message = `Content-Length: ${Buffer.byteLength(initRequest)}\r\n\r\n${initRequest}`;
+
+      spawnSync("node", [ENTRY, "--stdio", "--log-file", logPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+        input: message,
+      });
+
+      expect(existsSync(logPath)).toBe(true);
+      const logContent = readFileSync(logPath, "utf-8");
+      expect(logContent.length).toBeGreaterThan(0);
+      expect(logContent).toContain("ganko server starting");
+    });
+
+    it("log file contains ISO timestamps", () => {
+      tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
+      const logPath = join(tempDir, "timestamps.log");
+
+      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+        cwd: BASIC_APP,
+        encoding: "utf-8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      const logContent = readFileSync(logPath, "utf-8");
+      const firstLine = logContent.split("\n")[0] ?? "";
+      expect(firstLine).toMatch(ISO_TIMESTAMP_RE);
     });
   });
 });

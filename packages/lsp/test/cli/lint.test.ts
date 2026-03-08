@@ -14,7 +14,7 @@ const MULTI_FILE_APP = join(__dirname, "../fixtures/multi-file-app");
 
 function runLint(args: string[], cwd: string): { stdout: string; exitCode: number } {
   try {
-    const stdout = execFileSync("bun", [BIN, "lint", ...args], {
+    const stdout = execFileSync("node", [BIN, "lint", ...args], {
       cwd,
       encoding: "utf-8",
       timeout: 30000,
