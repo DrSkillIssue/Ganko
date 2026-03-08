@@ -47,6 +47,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: true
 
       - name: Publish VS Code Extension
+        continue-on-error: true
         run: bun run --cwd packages/vscode publish:vsce
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
