@@ -1,8 +1,8 @@
 {
   "name": "ganko-vscode",
   "private": true,
-  "displayName": "Solid.js Language Support",
-  "description": "Language support for Solid.js - diagnostics, go-to-definition, references, and more",
+  "displayName": "Ganko — Solid.js & CSS Linter",
+  "description": "Static analysis for Solid.js and CSS",
   "version": "0.1.0",
   "license": "MIT",
   "publisher": "ganko",
