@@ -1,6 +1,6 @@
 {
   "name": "@drskillissue/ganko",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Static analysis SDK for Solid.js — graphs, rules, ESLint adapter",
   "license": "MIT",
   "type": "module",
@@ -41,8 +41,16 @@
   ],
   "sideEffects": false,
   "keywords": [
-    "solid", "solidjs", "lint", "linter", "static-analysis",
-    "eslint", "eslint-plugin", "css", "reactivity", "typescript"
+    "solid",
+    "solidjs",
+    "lint",
+    "linter",
+    "static-analysis",
+    "eslint",
+    "eslint-plugin",
+    "css",
+    "reactivity",
+    "typescript"
   ],
   "publishConfig": {
     "access": "public",

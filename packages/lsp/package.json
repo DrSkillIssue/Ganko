@@ -1,6 +1,6 @@
 {
   "name": "@drskillissue/ganko-lsp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Language server and CLI linter for Solid.js projects",
   "license": "MIT",
   "type": "commonjs",
@@ -22,7 +22,12 @@
     "LICENSE"
   ],
   "keywords": [
-    "solid", "solidjs", "lsp", "language-server", "linter", "cli"
+    "solid",
+    "solidjs",
+    "lsp",
+    "language-server",
+    "linter",
+    "cli"
   ],
   "publishConfig": {
     "access": "public",
