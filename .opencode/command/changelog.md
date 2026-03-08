@@ -9,10 +9,10 @@ Generate a changeset file for the `.changeset/` directory based on recent git ac
 
 1. Review the git log, diff, and status below
 2. Determine which packages were affected:
-   - `packages/solid-shared/` → `"@solid-lint/shared"`
-   - `packages/solid-lint/` → `"solid-lint"`
-   - `packages/solid-lsp/` → `"@solid-lint/lsp"`
-   - `packages/solid-vscode/` is private — never include it
+   - `packages/shared/` → `"@ganko/shared"`
+   - `packages/ganko/` → `"ganko"`
+   - `packages/lsp/` → `"@ganko/lsp"`
+   - `packages/vscode/` is private — never include it
 3. Determine the bump type for each affected package:
    - `major` — breaking changes (removed exports, renamed APIs, changed behavior)
    - `minor` — new features (new rules, new exports, new CLI flags)
@@ -33,8 +33,8 @@ Multiple packages in one changeset if they changed together:
 
 ```markdown
 ---
-"@solid-lint/shared": minor
-"solid-lint": minor
+"@ganko/shared": minor
+"ganko": minor
 ---
 
 Summary here.
