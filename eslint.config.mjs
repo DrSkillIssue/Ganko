@@ -5,7 +5,7 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import stylistic from "@stylistic/eslint-plugin";
-import solid from "ganko/eslint-plugin";
+import solid from "@drskillissue/ganko/eslint-plugin";
 
 const tsconfigPath = path.resolve("tsconfig.json");
 
@@ -18,6 +18,7 @@ export default [
       "**/.tmp/",
       "**/eslint.config.mjs",
       "**/eslint.config.js",
+      "scripts/",
       "**/test/valid/",
       "**/test/fixtures/",
       "test-fixtures/",
