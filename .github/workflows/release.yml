@@ -36,7 +36,7 @@ jobs:
               const fs = require('fs');
               const path = './$pkg/package.json';
               const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-              for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+              for (const field of ['dependencies', 'peerDependencies']) {
                 if (!pkg[field]) continue;
                 for (const [name, ver] of Object.entries(pkg[field])) {
                   if (typeof ver === 'string' && ver.startsWith('workspace:')) {

@@ -26,9 +26,8 @@
     },
     "packages/ganko": {
       "name": "@drskillissue/ganko",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
-        "@drskillissue/ganko-shared": "workspace:^",
         "@typescript-eslint/parser": "^8.56.1",
         "@typescript-eslint/typescript-estree": "^8.56.1",
         "@typescript-eslint/utils": "^8.56.1",
@@ -39,6 +38,7 @@
         "zod": "^4.3.6",
       },
       "devDependencies": {
+        "@drskillissue/ganko-shared": "workspace:^",
         "@typescript-eslint/rule-tester": "^8.56.1",
       },
       "peerDependencies": {
@@ -47,11 +47,11 @@
     },
     "packages/lsp": {
       "name": "@drskillissue/ganko-lsp",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "bin": {
-        "ganko-lsp": "./dist/entry.mjs",
+        "ganko": "./dist/entry.mjs",
       },
-      "dependencies": {
+      "devDependencies": {
         "@drskillissue/ganko": "workspace:^",
         "@drskillissue/ganko-shared": "workspace:^",
         "@typescript-eslint/parser": "^8.56.1",
@@ -64,14 +64,14 @@
     },
     "packages/shared": {
       "name": "@drskillissue/ganko-shared",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "zod": "^4.3.6",
       },
     },
     "packages/vscode": {
       "name": "ganko-vscode",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "dependencies": {
         "@drskillissue/ganko": "workspace:^",
         "@drskillissue/ganko-shared": "workspace:^",
