@@ -1,5 +1,6 @@
 {
   "name": "@ganko/shared",
+  "private": true,
   "version": "0.1.0",
   "description": "Shared protocol types for the ganko toolchain",
   "license": "MIT",
