@@ -1,5 +1,5 @@
 import type { AlignmentFactorId } from "./signal-model"
-import { isBlank } from "@ganko/shared"
+import { isBlank } from "@drskillissue/ganko-shared"
 
 interface AlignmentFactorContract {
   readonly polarity: "support" | "penalty"

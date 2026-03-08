@@ -19,7 +19,7 @@ import {
   extractParenContent,
   splitByCommaRobust,
   matchesLowercase,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 import type { Specificity, SelectorInfo } from "../entities/specificity";
 
 export type { Specificity };

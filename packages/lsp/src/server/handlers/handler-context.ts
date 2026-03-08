@@ -8,7 +8,7 @@
  */
 import type ts from "typescript";
 import type { TSESTree as T } from "@typescript-eslint/utils";
-import type { Diagnostic, SolidGraph } from "ganko";
+import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
 
 /** Combined result from a single TS service lookup. */
 export interface TSFileInfo {

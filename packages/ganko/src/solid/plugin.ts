@@ -7,7 +7,7 @@ import { runPhases } from "./phases"
 import { rules } from "./rules"
 import { parseFile } from "./parse"
 import { createSuppressionEmit } from "../suppression"
-import { SOLID_EXTENSIONS, matchesExtension } from "@ganko/shared"
+import { SOLID_EXTENSIONS, matchesExtension } from "@drskillissue/ganko-shared"
 
 /**
  * Build a SolidGraph from input.
@@ -52,7 +52,7 @@ export function runSolidRules(graph: SolidGraph, sourceCode: TSESLint.SourceCode
  *
  * @example
  * ```ts
- * import { createRunner, SolidPlugin } from "ganko"
+ * import { createRunner, SolidPlugin } from "@drskillissue/ganko"
  *
  * const runner = createRunner({ plugins: [SolidPlugin] })
  * const diagnostics = runner.run(["src/App.tsx"])

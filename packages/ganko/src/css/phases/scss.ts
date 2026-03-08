@@ -39,7 +39,7 @@ import {
   FUNCTION_CALL_RE,
   splitParameters,
   endsWithCaseInsensitive,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 
 const SCSS_BUILTIN_FUNCTIONS = new Set([
   "rgb", "rgba", "hsl", "hsla", "hwb",

@@ -15,12 +15,12 @@ import {
   runCrossFileRules,
   GraphCache,
   createOverrideEmit,
-} from "ganko";
-import type { CSSInput, Diagnostic, SolidGraph, SolidInput, TailwindValidator } from "ganko";
+} from "@drskillissue/ganko";
+import type { CSSInput, Diagnostic, SolidGraph, SolidInput, TailwindValidator } from "@drskillissue/ganko";
 import type ts from "typescript";
 import { readFileSync } from "node:fs";
-import { canonicalPath, classifyFile } from "@ganko/shared";
-import type { Logger, RuleOverrides } from "@ganko/shared";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
 import type { FileIndex } from "./file-index";
 

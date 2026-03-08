@@ -10,7 +10,7 @@ import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { CallEntity } from "../../entities/call";
 import { getCallsByMethodName, getTypeInfo, getMethodChain } from "../../queries";
-import { CHAR_OPEN_BRACKET, CHAR_R } from "@ganko/shared";
+import { CHAR_OPEN_BRACKET, CHAR_R } from "@drskillissue/ganko-shared";
 import { isInLoop } from "../../util";
 
 /** Array methods that return new arrays. */

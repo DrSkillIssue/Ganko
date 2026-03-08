@@ -1,6 +1,6 @@
-# @ganko/shared
+# @drskillissue/ganko-shared
 
-Shared protocol types, constants, and utilities for the ganko toolchain. This package defines the contracts between `ganko-vscode` (client), `@ganko/lsp` (server), and `ganko` (engine).
+Shared protocol types, constants, and utilities for the ganko toolchain. This package defines the contracts between `ganko-vscode` (client), `@drskillissue/ganko-lsp` (server), and `ganko` (engine).
 
 ## Modules
 

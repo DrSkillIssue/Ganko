@@ -3012,12 +3012,12 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
-    "@ganko/shared": "workspace:^",
-    "ganko": "workspace:^"
+    "@drskillissue/ganko-shared": "workspace:^",
+    "@drskillissue/ganko": "workspace:^"
   },
   "devDependencies": {
     "@types/vscode": "^1.105.0",
     "@vscode/vsce": "^3.7.1",
-    "@ganko/lsp": "workspace:^"
+    "@drskillissue/ganko-lsp": "workspace:^"
   }
 }

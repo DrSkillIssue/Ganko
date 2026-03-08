@@ -1,5 +1,5 @@
 {
-  "name": "@ganko/lsp",
+  "name": "@drskillissue/ganko-lsp",
   "version": "0.1.0",
   "description": "Language server and CLI linter for Solid.js projects",
   "license": "MIT",
@@ -45,8 +45,8 @@
     "tsc": "tsc --noEmit"
   },
   "dependencies": {
-    "@ganko/shared": "workspace:^",
-    "ganko": "workspace:^",
+    "@drskillissue/ganko-shared": "workspace:^",
+    "@drskillissue/ganko": "workspace:^",
     "@typescript-eslint/parser": "^8.56.1",
     "@typescript-eslint/project-service": "^8.56.1",
     "@typescript-eslint/utils": "^8.56.1",

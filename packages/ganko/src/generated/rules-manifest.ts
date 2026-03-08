@@ -5,7 +5,7 @@
  * Regenerate: bun run scripts/generate-rules-manifest.ts
  */
 
-import type { RuleSeverityOverride } from "@ganko/shared"
+import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"
 
 /** Rule category for grouping in configuration UIs and documentation. */
 export type RuleCategory =

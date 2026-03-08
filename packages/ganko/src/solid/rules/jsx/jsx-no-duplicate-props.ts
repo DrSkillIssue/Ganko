@@ -21,7 +21,7 @@ import { defineSolidRule } from "../../rule";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { getSourceCode } from "../../queries/get";
-import { isWhitespace } from "@ganko/shared";
+import { isWhitespace } from "@drskillissue/ganko-shared";
 
 const ON_PREFIX = /^on(?:capture)?:/
 const ATTR_PROP_PREFIX = /^(?:attr|prop):/

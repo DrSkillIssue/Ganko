@@ -9,7 +9,7 @@
 
 import { createProjectService } from "@typescript-eslint/project-service";
 import type ts from "typescript";
-import { canonicalPath } from "@ganko/shared";
+import { canonicalPath } from "@drskillissue/ganko-shared";
 import type { Logger } from "./logger";
 
 /**

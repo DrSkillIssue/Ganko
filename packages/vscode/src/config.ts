@@ -4,10 +4,10 @@
 import { workspace, window, type ExtensionContext } from "vscode";
 import { State, type LanguageClient } from "vscode-languageclient/node";
 import type { LeveledLogger } from "./log";
-import { parseLogLevel } from "@ganko/shared";
-import type { ServerSettings, RuleOverrides, RuleSeverityOverride, AccessibilityPolicy, LogLevel, TraceLevel } from "@ganko/shared";
-import { SEVERITY_LOOKUP } from "@ganko/shared";
-import { RULES } from "ganko/rules-manifest";
+import { parseLogLevel } from "@drskillissue/ganko-shared";
+import type { ServerSettings, RuleOverrides, RuleSeverityOverride, AccessibilityPolicy, LogLevel, TraceLevel } from "@drskillissue/ganko-shared";
+import { SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
+import { RULES } from "@drskillissue/ganko/rules-manifest";
 
 /**
  * Collect rule severity overrides from solid.rules.<id> settings.

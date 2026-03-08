@@ -39,7 +39,7 @@
  * ```
  */
 
-import { HTML_VOID_ELEMENTS } from "@ganko/shared";
+import { HTML_VOID_ELEMENTS } from "@drskillissue/ganko-shared";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import type { JSXElementEntity, JSXChildEntity } from "../../entities";

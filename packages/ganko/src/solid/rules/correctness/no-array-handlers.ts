@@ -20,7 +20,7 @@ import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { JSXAttributeEntity } from "../../entities/jsx"
 import { getJSXAttributesByKind } from "../../queries/jsx"
 import { typeIsArray } from "../../queries/type"
-import { isLowerAlpha } from "@ganko/shared"
+import { isLowerAlpha } from "@drskillissue/ganko-shared"
 
 const messages = {
   noArrayHandlers:

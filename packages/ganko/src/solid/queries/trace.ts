@@ -4,7 +4,7 @@
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import type { SolidGraph } from "../impl";
 import type { ScopeEntity } from "../entities/scope";
-import { HOOK_PATTERN } from "@ganko/shared";
+import { HOOK_PATTERN } from "@drskillissue/ganko-shared";
 import { getStaticStringValue } from "../util/static-value";
 import { getScopeFor, isInTrackedContext } from "./scope";
 import { isInsideJSXExpression } from "./parent-chain";

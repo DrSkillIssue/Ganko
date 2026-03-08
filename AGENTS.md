@@ -6,9 +6,9 @@ TypeScript monorepo for the **ganko** toolchain: a graph-first static analysis S
 
 ```
 packages/
-  shared/    @ganko/shared   Shared protocol types, constants, and utilities
-  ganko/     ganko           Analysis SDK — graphs, rules, ESLint adapter
-  lsp/       @ganko/lsp      Language server and CLI linter
+  shared/    @drskillissue/ganko-shared   Shared protocol types, constants, and utilities
+  ganko/     @drskillissue/ganko           Analysis SDK — graphs, rules, ESLint adapter
+  lsp/       @drskillissue/ganko-lsp      Language server and CLI linter
   vscode/    ganko-vscode    VS Code extension (private, not published)
 ```
 

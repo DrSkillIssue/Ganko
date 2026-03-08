@@ -21,7 +21,7 @@
 
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import { ASTUtils } from "@typescript-eslint/utils";
-import { isHtml } from "@ganko/shared";
+import { isHtml } from "@drskillissue/ganko-shared";
 import type { Diagnostic } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic } from "../../../diagnostic";

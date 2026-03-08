@@ -5,7 +5,7 @@
  * theme token categories and extract semantic information.
  */
 
-import { stripVarPrefix, endsWithCaseInsensitive, startsWithCaseInsensitive, isDigit } from "@ganko/shared";
+import { stripVarPrefix, endsWithCaseInsensitive, startsWithCaseInsensitive, isDigit } from "@drskillissue/ganko-shared";
 import type { TokenCategory } from "../entities/token";
 
 export type { TokenCategory };

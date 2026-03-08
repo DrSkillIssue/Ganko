@@ -5,7 +5,7 @@
  */
 
 import type { TSESTree as T } from "@typescript-eslint/utils";
-import { CHAR_O, CHAR_N, CHAR_COLON, CHAR_U, CHAR_S, CHAR_E, isUpperAlpha } from "@ganko/shared";
+import { CHAR_O, CHAR_N, CHAR_COLON, CHAR_U, CHAR_S, CHAR_E, isUpperAlpha } from "@drskillissue/ganko-shared";
 
 /**
  * JSX Attribute Kind (for classification)

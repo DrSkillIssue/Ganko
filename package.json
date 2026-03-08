@@ -33,7 +33,7 @@
     "@typescript-eslint/utils": "^8.56.1",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
-    "ganko": "workspace:^",
+    "@drskillissue/ganko": "workspace:^",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",

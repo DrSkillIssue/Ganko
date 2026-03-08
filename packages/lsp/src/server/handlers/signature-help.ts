@@ -15,7 +15,7 @@ import ts from "typescript";
 
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 /** Solid primitive signatures — zero-cost static lookup for rich docs */
 const SOLID_SIGNATURES: ReadonlyMap<string, SignatureInformation> = new Map([

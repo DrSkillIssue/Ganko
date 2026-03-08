@@ -12,8 +12,8 @@ import type {
   SemanticTokens,
 } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
-import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "ganko";
-import { uriToPath } from "@ganko/shared";
+import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 /**
  * Token type legend — Solid-specific types only.

@@ -1,4 +1,4 @@
-import { WHITESPACE_SPLIT, splitByComma } from "@ganko/shared"
+import { WHITESPACE_SPLIT, splitByComma } from "@drskillissue/ganko-shared"
 import { splitTopLevelComma, splitTopLevelWhitespace } from "./value-tokenizer"
 import { isTransitionKeywordToken } from "./animation-transition-keywords"
 import { CSS_WIDE_KEYWORDS } from "./css-keywords"

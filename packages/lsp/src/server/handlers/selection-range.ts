@@ -12,7 +12,7 @@ import type {
 } from "vscode-languageserver";
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import type { HandlerContext } from "./handler-context";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
 const INITIAL_STACK_SIZE = 128;

@@ -3,7 +3,7 @@ import type { VisitorContext } from "../context";
 import type { SpreadAttributeContext, FixableSpreadPattern, SpreadSourceKind, ObjectSpreadEntity } from "../../../entities/spread";
 import { isEmptyObject } from "../helpers";
 import { getPropertyKeyName } from "../../../util/pattern-detection";
-import { isDomElement } from "@ganko/shared";
+import { isDomElement } from "@drskillissue/ganko-shared";
 
 export function handleRestDestructure(ctx: VisitorContext, 
   rest: T.RestElement,

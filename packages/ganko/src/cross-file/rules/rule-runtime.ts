@@ -2,7 +2,7 @@ import { readElementRef, readElementRefById, readKnownPx } from "../layout"
 import type { LayoutElementNode, LayoutGraph, LayoutSignalName, LayoutSignalSnapshot } from "../layout"
 import { createDiagnostic, resolveMessage, effectiveSeverity } from "../../diagnostic"
 import type { Emit } from "../../graph"
-import { toKebabCase, type RuleSeverityOverride } from "@ganko/shared"
+import { toKebabCase, type RuleSeverityOverride } from "@drskillissue/ganko-shared"
 
 const SECTIONING_CONTAINER_TAGS = new Set(["section", "article", "main"])
 const VIEWPORT_CONTAINER_TAGS = new Set(["html", "body", "main", "section", "article", "div"])

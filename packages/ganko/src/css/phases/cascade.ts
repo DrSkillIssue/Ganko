@@ -9,7 +9,7 @@ import type { CSSGraph } from "../impl";
 import type { CSSInput } from "../input";
 import type { DeclarationEntity, VariableEntity } from "../entities";
 import { hasFlag, DECL_IS_IMPORTANT, VAR_IS_GLOBAL } from "../entities";
-import { extractKeyframeNames } from "@ganko/shared";
+import { extractKeyframeNames } from "@drskillissue/ganko-shared";
 
 /**
  * Build declaration override and variable shadow relationships.

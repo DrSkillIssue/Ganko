@@ -14,7 +14,7 @@ import { defineSolidRule } from "../../rule";
 import { getCallsByPrimitive, getCallByNode, getFunctionByNode } from "../../queries";
 
 import type { Fix, FixOperation } from "../../../diagnostic";
-import { isBlank } from "@ganko/shared";
+import { isBlank } from "@drskillissue/ganko-shared";
 
 
 /**

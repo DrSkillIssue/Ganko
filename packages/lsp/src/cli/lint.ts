@@ -13,17 +13,17 @@
  */
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "ganko";
-import type { Diagnostic } from "ganko";
-import { canonicalPath, classifyFile } from "@ganko/shared";
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import { createProject } from "../core/project";
 import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createCliLogger, noopLogger, type Logger } from "../core/logger";
-import { parseLogLevel } from "@ganko/shared";
-import type { LogLevel } from "@ganko/shared";
+import { parseLogLevel } from "@drskillissue/ganko-shared";
+import type { LogLevel } from "@drskillissue/ganko-shared";
 
 function die(message: string): never {
   process.stderr.write(message + "\n");

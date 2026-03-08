@@ -103,7 +103,7 @@ function buildCatalogSection(): string {
   lines.push("For full, up-to-date rule IDs and descriptions, read the generated manifest via API:")
   lines.push("")
   lines.push("```ts")
-  lines.push('import { RULES, RULES_BY_CATEGORY } from "ganko/rules-manifest"')
+  lines.push('import { RULES, RULES_BY_CATEGORY } from "@drskillissue/ganko/rules-manifest"')
   lines.push("")
   lines.push("const allRules = RULES")
   lines.push('const cssLayoutRules = RULES_BY_CATEGORY["css-layout"]')

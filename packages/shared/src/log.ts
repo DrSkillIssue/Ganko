@@ -21,7 +21,7 @@ export const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
  * Levels match VS Code's LogLevel enum: Trace, Debug, Info, Warning, Error, Critical, Off.
  *
  * Backends are environment-specific (LSP connection, CLI stderr, noop for tests).
- * The interface lives here so ganko and @ganko/shared consumers can log
+ * The interface lives here so ganko and @drskillissue/ganko-shared consumers can log
  * without depending on ganko.
  *
  * Use the `enabled` flag to guard expensive log argument computation:

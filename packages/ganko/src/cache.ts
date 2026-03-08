@@ -9,8 +9,8 @@
  * The cache does not perform I/O or parsing — callers supply builder
  * functions that are invoked only on cache miss.
  */
-import { canonicalPath, classifyFile, noopLogger } from "@ganko/shared"
-import type { Logger } from "@ganko/shared"
+import { canonicalPath, classifyFile, noopLogger } from "@drskillissue/ganko-shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 import type { Diagnostic } from "./diagnostic"
 import type { SolidGraph } from "./solid/impl"
 import type { CSSGraph } from "./css/impl"

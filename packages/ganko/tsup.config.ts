@@ -11,7 +11,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: [
-    "@ganko/shared",
+    "@drskillissue/ganko-shared",
     "@typescript-eslint/parser",
     "@typescript-eslint/typescript-estree",
     "@typescript-eslint/utils",

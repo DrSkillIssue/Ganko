@@ -1,5 +1,5 @@
 /**
- * @ganko/shared
+ * @drskillissue/ganko-shared
  *
  * Protocol types and constants shared between ganko-vscode (client),
  * ganko (server), and ganko (engine). These types define the

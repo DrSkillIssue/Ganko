@@ -1,4 +1,4 @@
-import { canonicalPath } from "@ganko/shared"
+import { canonicalPath } from "@drskillissue/ganko-shared"
 import type { CSSGraph } from "../../css/impl"
 import type { SolidGraph } from "../../solid/impl"
 import { createLayoutModuleResolver } from "./module-resolver"

@@ -2,8 +2,8 @@ import type { CSSGraph } from "../../css/impl"
 import type { SelectorEntity } from "../../css/entities"
 import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
-import { noopLogger } from "@ganko/shared"
-import type { Logger } from "@ganko/shared"
+import { noopLogger } from "@drskillissue/ganko-shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 
 import type {

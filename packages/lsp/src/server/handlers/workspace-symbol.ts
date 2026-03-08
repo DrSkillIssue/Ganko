@@ -10,7 +10,7 @@ import type {
 import { SymbolKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
-import { pathToUri } from "@ganko/shared";
+import { pathToUri } from "@drskillissue/ganko-shared";
 
 /**
  * Handle workspace/symbol request.

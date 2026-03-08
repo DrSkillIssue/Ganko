@@ -11,8 +11,8 @@
  */
 
 import { resolve } from "path";
-import type { RuleEntry } from "ganko/rules-manifest";
-import { RULES_BY_CATEGORY, RULE_CATEGORIES } from "ganko/rules-manifest";
+import type { RuleEntry } from "@drskillissue/ganko/rules-manifest";
+import { RULES_BY_CATEGORY, RULE_CATEGORIES } from "@drskillissue/ganko/rules-manifest";
 import type {
   RuleConfigProperty,
   VSCodeConfigProperty,

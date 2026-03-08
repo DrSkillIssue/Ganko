@@ -1,5 +1,5 @@
 import type { Diagnostic } from "./diagnostic"
-import type { RuleSeverityOverride } from "@ganko/shared"
+import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"
 
 /** Emit callback type for pushing diagnostics */
 export type Emit = (d: Diagnostic) => void

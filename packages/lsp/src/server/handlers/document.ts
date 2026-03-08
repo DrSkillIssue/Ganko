@@ -9,9 +9,9 @@ import type {
 } from "vscode-languageserver";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 
-import { uriToPath, ALL_EXTENSIONS, canonicalPath } from "@ganko/shared";
+import { uriToPath, ALL_EXTENSIONS, canonicalPath } from "@drskillissue/ganko-shared";
 
-/** File extensions the LSP supports for analysis (derived from @ganko/shared). */
+/** File extensions the LSP supports for analysis (derived from @drskillissue/ganko-shared). */
 const SUPPORTED_EXTENSIONS: ReadonlySet<string> = new Set<string>(ALL_EXTENSIONS);
 
 /**

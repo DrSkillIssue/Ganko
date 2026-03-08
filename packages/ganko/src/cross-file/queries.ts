@@ -1,7 +1,7 @@
 import type { CSSGraph } from "../css/impl";
 import type { SolidGraph } from "../solid/impl";
 import { getPropertyKeyName } from "../solid/util/pattern-detection";
-import { CHAR_HYPHEN } from "@ganko/shared";
+import { CHAR_HYPHEN } from "@drskillissue/ganko-shared";
 
 export function getUnusedCSSClasses(solids: readonly SolidGraph[], css: CSSGraph): readonly string[] {
   const used = new Set<string>();

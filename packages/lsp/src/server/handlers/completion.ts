@@ -7,7 +7,7 @@ import type { CompletionParams, CompletionItem } from "vscode-languageserver";
 import { CompletionItemKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
 const SOLID_CONTROL_FLOW: readonly CompletionItem[] = [

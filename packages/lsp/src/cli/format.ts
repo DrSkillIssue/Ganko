@@ -4,7 +4,7 @@
  * Converts ganko diagnostics to human-readable terminal output
  * or structured JSON for CI consumption.
  */
-import type { Diagnostic } from "ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
 import { relative } from "node:path";
 
 /** ANSI color codes for terminal output */

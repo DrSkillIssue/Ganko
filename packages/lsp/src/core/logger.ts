@@ -1,7 +1,7 @@
 /**
  * Logger — LSP and CLI backends for the shared Logger interface.
  *
- * The Logger interface itself lives in @ganko/shared so that ganko
+ * The Logger interface itself lives in @drskillissue/ganko-shared so that ganko
  * can log without depending on ganko. This module provides the
  * environment-specific backends:
  * - LSP mode: routes through connection.console → VS Code Output panel
@@ -12,10 +12,10 @@
  * `setLevel()` so the server can react to workspace/didChangeConfiguration.
  */
 import type { Connection } from "vscode-languageserver/node";
-export type { Logger, LeveledLogger } from "@ganko/shared";
-export { noopLogger } from "@ganko/shared";
-import { createLogger } from "@ganko/shared";
-import type { LeveledLogger, LogLevel, LogWriter } from "@ganko/shared";
+export type { Logger, LeveledLogger } from "@drskillissue/ganko-shared";
+export { noopLogger } from "@drskillissue/ganko-shared";
+import { createLogger } from "@drskillissue/ganko-shared";
+import type { LeveledLogger, LogLevel, LogWriter } from "@drskillissue/ganko-shared";
 
 /**
  * Create a logger backed by the LSP connection's RemoteConsole.

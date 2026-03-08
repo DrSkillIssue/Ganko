@@ -7,7 +7,7 @@
 
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import { SYNC_CALLBACK_METHODS } from "../util/call";
-import { isUpperAlpha } from "@ganko/shared";
+import { isUpperAlpha } from "@drskillissue/ganko-shared";
 
 /**
  * Information extracted from walking up the parent chain from a node.

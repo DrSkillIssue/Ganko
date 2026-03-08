@@ -15,9 +15,9 @@ body:
     attributes:
       label: Package
       options:
-        - ganko
-        - "@ganko/lsp"
-        - "@ganko/shared"
+        - "@drskillissue/ganko"
+        - "@drskillissue/ganko-lsp"
+        - "@drskillissue/ganko-shared"
         - ganko-vscode
     validations:
       required: true

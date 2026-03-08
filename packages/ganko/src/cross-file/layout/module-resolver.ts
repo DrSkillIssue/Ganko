@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
-import { CSS_EXTENSIONS, SOLID_EXTENSIONS, matchesExtension } from "@ganko/shared"
+import { CSS_EXTENSIONS, SOLID_EXTENSIONS, matchesExtension } from "@drskillissue/ganko-shared"
 import { z } from "zod/v4"
 import type { CSSGraph } from "../../css/impl"
 import type { SolidGraph } from "../../solid/impl"

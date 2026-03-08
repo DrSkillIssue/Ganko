@@ -1,7 +1,7 @@
 import { resolveMessage } from "../../../diagnostic"
 import { defineCSSRule } from "../../rule"
 import { emitCSSDiagnostic } from "../util"
-import { isBlank } from "@ganko/shared"
+import { isBlank } from "@drskillissue/ganko-shared"
 
 const messages = {
   unresolvedCustomProperty:

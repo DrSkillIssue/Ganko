@@ -5,7 +5,7 @@ import { getScopeFor } from "../../../queries/scope";
 import { createJSXElement } from "../../../entities/jsx";
 import { handleJSXSpread } from "./spread";
 import { getJSXElementTag, buildJSXAttribute, getJSXChildKind } from "../helpers";
-import { isDomElement } from "@ganko/shared";
+import { isDomElement } from "@drskillissue/ganko-shared";
 
 export function handleJSXElement(ctx: VisitorContext, node: T.JSXElement): void {
   const graph = ctx.graph;

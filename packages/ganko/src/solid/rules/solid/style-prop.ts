@@ -31,7 +31,7 @@
 
 import type { TSESTree as T } from "@typescript-eslint/utils";
 
-import { knownCSSProperties, styleToObject as parseStyle, toKebabCase } from "@ganko/shared";
+import { knownCSSProperties, styleToObject as parseStyle, toKebabCase } from "@drskillissue/ganko-shared";
 import type { Diagnostic, Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";

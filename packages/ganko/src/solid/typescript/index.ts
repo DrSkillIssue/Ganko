@@ -10,8 +10,8 @@
 
 import { TSESTree as T, type ParserServices } from "@typescript-eslint/utils";
 import ts from "typescript";
-import type { Logger } from "@ganko/shared";
-import { noopLogger } from "@ganko/shared";
+import type { Logger } from "@drskillissue/ganko-shared";
+import { noopLogger } from "@drskillissue/ganko-shared";
 
 import type { ReactiveKind } from "../entities/variable";
 

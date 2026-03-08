@@ -16,7 +16,7 @@ import {
   CHAR_CR,
   CHAR_ASTERISK,
   CHAR_SLASH,
-} from "@ganko/shared"
+} from "@drskillissue/ganko-shared"
 
 /** Lookup table for banner characters (=-*#/~_+.) */
 const BANNER_CHARS = new Uint8Array(128)

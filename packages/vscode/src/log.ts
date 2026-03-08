@@ -5,10 +5,10 @@
  * config change handler can react to `solid.logLevel` without a restart.
  */
 import type { OutputChannel } from "vscode";
-import { createLogger as createSharedLogger } from "@ganko/shared";
-import type { LeveledLogger, LogLevel, LogWriter } from "@ganko/shared";
+import { createLogger as createSharedLogger } from "@drskillissue/ganko-shared";
+import type { LeveledLogger, LogLevel, LogWriter } from "@drskillissue/ganko-shared";
 
-export type { Logger, LeveledLogger } from "@ganko/shared";
+export type { Logger, LeveledLogger } from "@drskillissue/ganko-shared";
 
 /** Create a leveled logger backed by a VS Code OutputChannel. */
 export function createLogger(channel: OutputChannel, level: LogLevel = "info"): LeveledLogger {

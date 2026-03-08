@@ -18,7 +18,7 @@ import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { JSXElementEntity } from "../../entities/jsx";
 import { findEnclosingDOMElement } from "../../queries";
-import { HTML_VOID_ELEMENTS, HEADING_ELEMENTS, isBlank } from "@ganko/shared";
+import { HTML_VOID_ELEMENTS, HEADING_ELEMENTS, isBlank } from "@drskillissue/ganko-shared";
 
 const messages = {
   invalidNesting: "Invalid HTML nesting: <{{child}}> cannot be a child of <{{parent}}>. {{reason}}.",

@@ -109,7 +109,7 @@ Use stdio transport and launch `ganko` (or `npx ganko`) as your language server 
 ### Server
 
 ```typescript
-import { createServer, startServer, main, buildServerCapabilities } from "ganko";
+import { createServer, startServer, main, buildServerCapabilities } from "@drskillissue/ganko";
 
 const server = createServer();
 startServer(server);
@@ -123,8 +123,8 @@ const capabilities = buildServerCapabilities();
 ### Project (without LSP transport)
 
 ```typescript
-import { createProject } from "ganko";
-import { SolidPlugin, CSSPlugin } from "ganko";
+import { createProject } from "@drskillissue/ganko";
+import { SolidPlugin, CSSPlugin } from "@drskillissue/ganko";
 
 const project = createProject({
   rootPath: "/path/to/workspace",
@@ -145,7 +145,7 @@ project.dispose();
 import {
   createTypeScriptProjectService,
   type TypeScriptProjectService,
-} from "ganko";
+} from "@drskillissue/ganko";
 
 const service: TypeScriptProjectService = createTypeScriptProjectService({
   tsconfigRootDir: "/path/to/workspace",
@@ -231,7 +231,7 @@ src/
     file-index.ts           Workspace file indexing by kind
     eslint-config.ts        ESLint rule override loading + merging
     analyze.ts              Shared diagnostic pipeline (single-file + cross-file)
-    logger.ts               LSP and CLI logger backends for @ganko/shared Logger interface
+    logger.ts               LSP and CLI logger backends for @drskillissue/ganko-shared Logger interface
   cli/
     lint.ts                 Headless lint command
     format.ts               Output formatters (text + JSON)

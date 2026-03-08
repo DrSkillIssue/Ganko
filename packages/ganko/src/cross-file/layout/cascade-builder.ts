@@ -4,7 +4,7 @@ import type { SelectorEntity, CascadePosition, RuleEntity } from "../../css/enti
 import { compareCascadePositions } from "../../css/analysis/cascade"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 import { expandShorthand } from "./shorthand-expansion"
-import type { Logger } from "@ganko/shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 
 import type {
   LayoutCascadedDeclaration,

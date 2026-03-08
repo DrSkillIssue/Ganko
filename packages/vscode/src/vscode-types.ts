@@ -1,4 +1,4 @@
-import type { RuleSeveritySettingValue } from "@ganko/shared";
+import type { RuleSeveritySettingValue } from "@drskillissue/ganko-shared";
 
 /** A single VS Code contributes.configuration property entry (JSON Schema subset). */
 export interface VSCodeConfigProperty {

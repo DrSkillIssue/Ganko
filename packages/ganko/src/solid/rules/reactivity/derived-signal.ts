@@ -37,7 +37,7 @@ import {
   getContainingFunction,
 } from "../../queries";
 import { isCalleeRead, formatVariableNames, getDeclaratorName } from "../../util";
-import { HOOK_PATTERN, COMPONENT_PATTERN } from "@ganko/shared";
+import { HOOK_PATTERN, COMPONENT_PATTERN } from "@drskillissue/ganko-shared";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 

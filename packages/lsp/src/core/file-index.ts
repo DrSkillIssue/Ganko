@@ -7,7 +7,7 @@
  */
 import { readdirSync } from "node:fs";
 import { join, relative, matchesGlob } from "node:path";
-import { canonicalPath, classifyFile } from "@ganko/shared";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".output", "coverage"]);
 

@@ -6,7 +6,7 @@
  * CSSInput supports multi-file graphs with explicit file content.
  */
 
-import type { Logger } from "@ganko/shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 import type { TailwindValidator } from "./tailwind"
 
 /**

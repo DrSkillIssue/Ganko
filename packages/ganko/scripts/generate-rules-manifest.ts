@@ -87,7 +87,7 @@ function generateSource(entries: readonly ManifestEntry[]): string {
   lines.push(" * Regenerate: bun run scripts/generate-rules-manifest.ts")
   lines.push(" */")
   lines.push("")
-  lines.push('import type { RuleSeverityOverride } from "@ganko/shared"')
+  lines.push('import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"')
   lines.push("")
   lines.push("/** Rule category for grouping in configuration UIs and documentation. */")
   lines.push("export type RuleCategory =")

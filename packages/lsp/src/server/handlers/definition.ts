@@ -6,7 +6,7 @@
 import type { DefinitionParams, Definition } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri } from "@ganko/shared";
+import { uriToPath, pathToUri } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/definition request.

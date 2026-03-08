@@ -7,20 +7,20 @@
  * @example
  * ```typescript
  * // Start the LSP server
- * import { createServer, startServer } from "ganko"
+ * import { createServer, startServer } from "@drskillissue/ganko"
  * const ctx = createServer()
  * startServer(ctx)
  *
  * // Or use programmatically
- * import { createProject } from "ganko"
- * import { SolidPlugin, CSSPlugin } from "ganko"
+ * import { createProject } from "@drskillissue/ganko"
+ * import { SolidPlugin, CSSPlugin } from "@drskillissue/ganko"
  * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin, CSSPlugin] })
  * const diagnostics = project.run(["App.tsx"])
  * ```
  */
 
 // Re-export types from ganko
-export type { Diagnostic, Fix, FixOperation } from "ganko";
+export type { Diagnostic, Fix, FixOperation } from "@drskillissue/ganko";
 
 // Project management
 export { createProject } from "./core/project";

@@ -51,7 +51,7 @@ Ganko also ships as an ESLint plugin for individuals that want to run it through
 
 ```javascript
 // eslint.config.mjs
-import solid from "ganko/eslint-plugin";
+import solid from "@drskillissue/ganko/eslint-plugin";
 
 export default [
   ...solid.configs.recommended,

@@ -7,9 +7,9 @@
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult } from "@ganko/shared";
-import { ESLINT_CONFIG_FILENAMES, NUMERIC_SEVERITY, SEVERITY_LOOKUP } from "@ganko/shared";
-import { getRule } from "ganko";
+import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult } from "@drskillissue/ganko-shared";
+import { ESLINT_CONFIG_FILENAMES, NUMERIC_SEVERITY, SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
+import { getRule } from "@drskillissue/ganko";
 
 /** ESLint flat config severity: string or numeric */
 type ESLintSeverity = "error" | "warn" | "off" | 0 | 1 | 2;

@@ -1,6 +1,6 @@
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
-import { isKebabCase } from "@ganko/shared"
+import { isKebabCase } from "@drskillissue/ganko-shared"
 import { forEachStylePropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
 import { normalizeStylePropertyKey } from "./rule-runtime"
 

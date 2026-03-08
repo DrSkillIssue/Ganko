@@ -20,7 +20,7 @@ import {
   extractTokenVariant,
 } from "../parser/variable-name";
 import { hasFlag, VAR_IS_SCSS } from "../entities";
-import { isDigit } from "@ganko/shared";
+import { isDigit } from "@drskillissue/ganko-shared";
 
 const DIGITS_G = /\d+/g
 const TRAILING_VARIANT = /-[a-z]+$/i

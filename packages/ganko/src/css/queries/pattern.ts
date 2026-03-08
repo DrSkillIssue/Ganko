@@ -1,5 +1,5 @@
 import type { SelectorEntity, VariableEntity } from "../entities";
-import { CHAR_HYPHEN, CHAR_UNDERSCORE } from "@ganko/shared";
+import { CHAR_HYPHEN, CHAR_UNDERSCORE } from "@drskillissue/ganko-shared";
 
 const BEM_BLOCK = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const BEM_ELEMENT = /^[a-z][a-z0-9]*(-[a-z0-9]+)*__[a-z][a-z0-9]*(-[a-z0-9]+)*$/;

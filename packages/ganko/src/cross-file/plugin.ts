@@ -4,8 +4,8 @@ import type { SolidInput } from "../solid/input"
 import type { CSSInput, CSSFile } from "../css/input"
 import { buildSolidGraph } from "../solid/plugin"
 import { buildCSSGraph } from "../css/plugin"
-import { SOLID_EXTENSIONS, CSS_EXTENSIONS, canonicalPath as canonicalizePath, matchesExtension, noopLogger } from "@ganko/shared"
-import type { Logger } from "@ganko/shared"
+import { SOLID_EXTENSIONS, CSS_EXTENSIONS, canonicalPath as canonicalizePath, matchesExtension, noopLogger } from "@drskillissue/ganko-shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 import { parseFile } from "../solid/parse"
 import { rules } from "./rules"
 import { rules as cssGraphRules } from "../css/rules"
@@ -123,7 +123,7 @@ export function analyzeCrossFileInput(input: CrossFileInput, emit: Emit, logger:
  *
  * @example
  * ```ts
- * import { createRunner, CrossFilePlugin } from "ganko"
+ * import { createRunner, CrossFilePlugin } from "@drskillissue/ganko"
  *
  * const runner = createRunner({ plugins: [CrossFilePlugin] })
  * const diagnostics = runner.run(["src/App.tsx", "src/App.css"])

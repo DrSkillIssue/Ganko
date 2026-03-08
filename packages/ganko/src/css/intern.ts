@@ -1,4 +1,4 @@
-import { StringInterner } from "@ganko/shared";
+import { StringInterner } from "@drskillissue/ganko-shared";
 
 const CSS_PROPERTIES: readonly string[] = [
   "display", "position", "top", "right", "bottom", "left",

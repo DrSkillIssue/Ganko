@@ -18,7 +18,7 @@ import {
   CHAR_UNDERSCORE,
   CHAR_DOT,
   countLines,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 
 const URL_IMPORT_RE = /^url\s*\(\s*(['"]?)([^'")\s]+)\1\s*\)/;
 const LAYER_RE = /layer\s*\(\s*([^)]+)\s*\)/;

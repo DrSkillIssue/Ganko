@@ -1,5 +1,5 @@
 {
-  "name": "ganko",
+  "name": "@drskillissue/ganko",
   "version": "0.1.0",
   "description": "Static analysis SDK for Solid.js — graphs, rules, ESLint adapter",
   "license": "MIT",
@@ -45,6 +45,7 @@
     "eslint", "eslint-plugin", "css", "reactivity", "typescript"
   ],
   "publishConfig": {
+    "access": "public",
     "provenance": true
   },
   "repository": {
@@ -68,7 +69,7 @@
     "tsc": "tsc --noEmit"
   },
   "dependencies": {
-    "@ganko/shared": "workspace:^",
+    "@drskillissue/ganko-shared": "workspace:^",
     "@typescript-eslint/parser": "^8.56.1",
     "@typescript-eslint/typescript-estree": "^8.56.1",
     "@typescript-eslint/utils": "^8.56.1",

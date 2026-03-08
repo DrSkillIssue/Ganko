@@ -22,7 +22,7 @@ import { CodeActionTriggerKind, CompletionItemKind } from "vscode-languageserver
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { TSESTree as T } from "@typescript-eslint/utils";
-import { parseContent, analyzeInput, type Diagnostic } from "ganko";
+import { parseContent, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
 import type { HandlerContext } from "../../src/server/handlers/handler-context";
 
 import { handleDefinition } from "../../src/server/handlers/definition";

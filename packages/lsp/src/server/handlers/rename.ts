@@ -13,7 +13,7 @@ import type {
 import ts from "typescript";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri } from "@ganko/shared";
+import { uriToPath, pathToUri } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/prepareRename request.

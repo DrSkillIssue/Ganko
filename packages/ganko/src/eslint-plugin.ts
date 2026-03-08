@@ -8,7 +8,7 @@
  * @example
  * ```js
  * // eslint.config.mjs
- * import solid from "ganko/eslint-plugin"
+ * import solid from "@drskillissue/ganko/eslint-plugin"
  *
  * export default [
  *   ...solid.configs.recommended,
@@ -20,7 +20,7 @@ import type { RuleModule } from "./eslint-adapter"
 import { eslintRules as solidRules, rules as solidRuleList } from "./solid/eslint-plugin"
 import { eslintRules as cssRules, rules as cssRuleList } from "./css/eslint-plugin"
 import { eslintRules as crossFileRules, rules as crossFileRuleList } from "./cross-file/eslint-plugin"
-import { SOLID_EXTENSIONS, CSS_EXTENSIONS, extensionsToGlobs } from "@ganko/shared"
+import { SOLID_EXTENSIONS, CSS_EXTENSIONS, extensionsToGlobs } from "@drskillissue/ganko-shared"
 
 /** Merge all rule modules into a single record. */
 const allRules: Record<string, RuleModule> = {

@@ -10,7 +10,7 @@ import type {
 import { InlayHintKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/inlayHint request.

@@ -5,7 +5,7 @@
  */
 import { type ExtensionContext, workspace, window } from "vscode";
 import { type LeveledLogger, createLogger } from "./log";
-import { noopLogger, parseLogLevel } from "@ganko/shared";
+import { noopLogger, parseLogLevel } from "@drskillissue/ganko-shared";
 import { createStatusBar } from "./status-bar";
 import { getClient, startClient, stopClient, restartClient } from "./client";
 import { registerConfigHandler } from "./config";

@@ -7,7 +7,7 @@
  */
 import type { ParserServices, TSESLint } from "@typescript-eslint/utils";
 import type ts from "typescript";
-import type { Logger } from "@ganko/shared";
+import type { Logger } from "@drskillissue/ganko-shared";
 
 /**
  * Input for building a SolidGraph from ESLint-parsed source.

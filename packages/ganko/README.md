@@ -27,7 +27,7 @@ It provides:
 ## Quick Start
 
 ```ts
-import { createRunner, SolidPlugin, CSSPlugin } from "ganko";
+import { createRunner, SolidPlugin, CSSPlugin } from "@drskillissue/ganko";
 
 const runner = createRunner({
   plugins: [SolidPlugin, CSSPlugin],
@@ -57,8 +57,8 @@ const diagnostics = runner.run([
 ## Runner API
 
 ```ts
-import { createRunner } from "ganko";
-import type { Runner, RunnerConfig } from "ganko";
+import { createRunner } from "@drskillissue/ganko";
+import type { Runner, RunnerConfig } from "@drskillissue/ganko";
 
 const config: RunnerConfig = {
   plugins: [],
@@ -84,7 +84,7 @@ import {
   parseContentWithProgram,
   analyzeInput,
   buildSolidGraph,
-} from "ganko";
+} from "@drskillissue/ganko";
 
 const input = parseContent("src/App.tsx", "export const App = () => <div />");
 
@@ -99,8 +99,8 @@ const graph = buildSolidGraph(input);
 ### CSS Graph
 
 ```ts
-import { buildCSSGraph } from "ganko";
-import type { CSSInput } from "ganko";
+import { buildCSSGraph } from "@drskillissue/ganko";
+import type { CSSInput } from "@drskillissue/ganko";
 
 const cssInput: CSSInput = {
   files: [{ path: "src/styles/app.css", content: ".btn { color: red; }" }],
@@ -118,7 +118,7 @@ import {
   buildCSSGraph,
   buildLayoutGraph,
   runCrossFileRules,
-} from "ganko";
+} from "@drskillissue/ganko";
 
 const solidInput = parseContent("src/App.tsx", "export const App = () => <div class=\"btn\" />;");
 const cssInput = { files: [{ path: "src/app.css", content: ".btn { color: red; }" }] };
@@ -194,7 +194,7 @@ const view = <div>{count}</div>;
 `GraphCache` is exported for LSP-style incremental workflows:
 
 ```ts
-import { GraphCache } from "ganko";
+import { GraphCache } from "@drskillissue/ganko";
 
 const cache = new GraphCache();
 
@@ -258,7 +258,7 @@ Use the dedicated subpath export:
 
 ```js
 // eslint.config.mjs
-import solid from "ganko/eslint-plugin";
+import solid from "@drskillissue/ganko/eslint-plugin";
 
 export default [
   ...solid.configs.recommended,
@@ -281,7 +281,7 @@ Notes:
 For docs/UI/config tools, import metadata without loading full analysis code:
 
 ```ts
-import { RULES, RULES_BY_CATEGORY, getRule } from "ganko/rules-manifest";
+import { RULES, RULES_BY_CATEGORY, getRule } from "@drskillissue/ganko/rules-manifest";
 
 const allRules = RULES;
 const reactivityRules = RULES_BY_CATEGORY["reactivity"];
@@ -324,7 +324,7 @@ Category breakdown:
 For full, up-to-date rule IDs and descriptions, read the generated manifest via API:
 
 ```ts
-import { RULES, RULES_BY_CATEGORY } from "ganko/rules-manifest"
+import { RULES, RULES_BY_CATEGORY } from "@drskillissue/ganko/rules-manifest"
 
 const allRules = RULES
 const cssLayoutRules = RULES_BY_CATEGORY["css-layout"]

@@ -13,11 +13,11 @@ import {
   isHexDigit,
   isIdentChar,
   isWhitespace,
-} from "@ganko/shared"
+} from "@drskillissue/ganko-shared"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import type { Logger } from "@ganko/shared"
-import { noopLogger } from "@ganko/shared"
+import type { Logger } from "@drskillissue/ganko-shared"
+import { noopLogger } from "@drskillissue/ganko-shared"
 
 interface CompoundPseudoConstraints {
   readonly firstChild: boolean

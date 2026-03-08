@@ -24,7 +24,7 @@ import { getObjectProperties, getTypeInfo } from "../../queries/type"
 import { getSpreadSourceReactivity, isPropsPassThrough } from "../../queries/spread"
 import { getMemberAccessesOnIdentifier } from "../../queries/entity"
 import { getSourceCode } from "../../queries/get"
-import { matchesAnyGlobPattern } from "@ganko/shared"
+import { matchesAnyGlobPattern } from "@drskillissue/ganko-shared"
 
 interface Options extends Record<string, unknown> {
   checkDeferred: boolean

@@ -3,7 +3,7 @@
  *
  * Converts ganko diagnostics to LSP format.
  */
-import type { Diagnostic } from "ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
 import {
   type Connection,
   type Diagnostic as LSPDiagnostic,

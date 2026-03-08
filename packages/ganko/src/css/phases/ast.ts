@@ -73,7 +73,7 @@ import {
   MEDIA_FEATURE_RE,
   MEDIA_RANGE_RE,
   MEDIA_COLON_RE,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 
 const CSS_IDENT = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/
 const ATTRIBUTE_EXISTS_RE = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/

@@ -10,7 +10,7 @@ import { createDiagnostic, resolveMessage} from "../../../diagnostic"
 import type { FunctionEntity, PropertyEntity } from "../../entities/index"
 import { getSourceCode } from "../../queries/get"
 import { isFunctionExported } from "../../queries/entity"
-import { CHAR_NEWLINE, CHAR_ASTERISK, CHAR_SPACE, CHAR_TAB } from "@ganko/shared"
+import { CHAR_NEWLINE, CHAR_ASTERISK, CHAR_SPACE, CHAR_TAB } from "@drskillissue/ganko-shared"
 
 const PARAM_TAG = /@param\s+(?:\{[^}]*\}\s+)?(\w+)/
 

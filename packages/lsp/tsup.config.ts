@@ -1,8 +1,8 @@
 import { defineConfig } from "tsup";
 
 const BUNDLED_DEPS = [
-  "ganko",
-  "@ganko/shared",
+  "@drskillissue/ganko",
+  "@drskillissue/ganko-shared",
   "vscode-languageserver",
   "vscode-languageserver-textdocument",
   "@typescript-eslint/parser",

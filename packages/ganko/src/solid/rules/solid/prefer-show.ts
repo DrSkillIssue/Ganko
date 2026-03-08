@@ -39,7 +39,7 @@ import type { TSESTree as T, TSESLint } from "@typescript-eslint/utils";
 import type { SolidGraph } from "../../impl";
 import type { Diagnostic, Fix, FixOperation } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic";
-import { isAlphaNumeric, CHAR_UNDERSCORE, CHAR_DOLLAR, CHAR_SPACE, CHAR_TAB, CHAR_NEWLINE } from "@ganko/shared";
+import { isAlphaNumeric, CHAR_UNDERSCORE, CHAR_DOLLAR, CHAR_SPACE, CHAR_TAB, CHAR_NEWLINE } from "@drskillissue/ganko-shared";
 import { defineSolidRule } from "../../rule";
 import { getJSXElements } from "../../queries";
 import { buildSolidImportFix } from "../util";

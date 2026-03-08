@@ -5,10 +5,10 @@
 import type { Rule, AtRule } from "postcss";
 import type { CSSInput, CSSOptions } from "./input";
 import type { TailwindValidator } from "./tailwind";
-import type { Logger } from "@ganko/shared";
-import { noopLogger } from "@ganko/shared";
-import { extractKeyframeNames, CHAR_HYPHEN, CHAR_R, CHAR_H, HEADING_ELEMENTS } from "@ganko/shared";
-import type { StringInterner } from "@ganko/shared";
+import type { Logger } from "@drskillissue/ganko-shared";
+import { noopLogger } from "@drskillissue/ganko-shared";
+import { extractKeyframeNames, CHAR_HYPHEN, CHAR_R, CHAR_H, HEADING_ELEMENTS } from "@drskillissue/ganko-shared";
+import type { StringInterner } from "@drskillissue/ganko-shared";
 import { createCSSInterner } from "./intern";
 import {
   parseContainerNames,

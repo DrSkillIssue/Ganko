@@ -10,7 +10,7 @@
  * Uses createBatchPluginAdapter: all cross-file rules share one analysis
  * pass per SourceCode instance, avoiding redundant graph construction.
  */
-import { CSS_EXTENSIONS, canonicalPath, matchesExtension } from "@ganko/shared"
+import { CSS_EXTENSIONS, canonicalPath, matchesExtension } from "@drskillissue/ganko-shared"
 import { createBatchPluginAdapter, buildSolidInputFromContext } from "../eslint-adapter"
 import type { RuleContext } from "../eslint-adapter"
 import type { CrossRuleContext } from "./rule"

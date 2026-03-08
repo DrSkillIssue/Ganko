@@ -4,7 +4,7 @@
  * Provides pre-interned strings for common Solid.js identifiers.
  */
 
-import { StringInterner } from "@ganko/shared";
+import { StringInterner } from "@drskillissue/ganko-shared";
 
 /**
  * Pre-interned strings for known Solid.js identifiers.

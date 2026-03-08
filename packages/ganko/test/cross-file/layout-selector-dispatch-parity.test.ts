@@ -4,7 +4,7 @@ import { buildLayoutGraph } from "../../src/cross-file";
 import type { LayoutGraph } from "../../src/cross-file/layout";
 import { createLayoutPerfStats } from "../../src/cross-file/layout/perf";
 import { compileSelectorMatcher, selectorMatchesLayoutElement } from "../../src/cross-file/layout/selector-match";
-import { canonicalPath } from "@ganko/shared";
+import { canonicalPath } from "@drskillissue/ganko-shared";
 import { buildSolidGraph } from "../../src/solid/plugin";
 import { parseCode } from "../solid/test-utils";
 

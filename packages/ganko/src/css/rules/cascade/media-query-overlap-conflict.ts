@@ -3,7 +3,7 @@ import { defineCSSRule } from "../../rule"
 import type { AtRuleEntity, DeclarationEntity } from "../../entities"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../entities"
 import { emitCSSDiagnostic } from "../util"
-import { splitMediaQueries, WHITESPACE_SPLIT } from "@ganko/shared"
+import { splitMediaQueries, WHITESPACE_SPLIT } from "@drskillissue/ganko-shared"
 
 const PX_VALUE = /^([0-9]+(?:\.[0-9]+)?)px$/
 const MIN_WIDTH_FEATURE = /^min-width\s*:\s*(.+)$/i

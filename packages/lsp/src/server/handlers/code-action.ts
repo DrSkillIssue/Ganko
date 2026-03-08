@@ -14,10 +14,10 @@ import {
 } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
-import type { Diagnostic, Fix, FixOperation } from "ganko";
+import type { Diagnostic, Fix, FixOperation } from "@drskillissue/ganko";
 import type { HandlerContext } from "./handler-context";
 import { toLSPDiagnostic } from "./diagnostics";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 const KIND_QUICKFIX = CodeActionKind.QuickFix;
 const KIND_SUPPRESS = `${CodeActionKind.QuickFix}.suppress`;

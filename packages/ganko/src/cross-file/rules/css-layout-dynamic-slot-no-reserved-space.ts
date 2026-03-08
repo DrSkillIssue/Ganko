@@ -1,4 +1,4 @@
-import { HEADING_ELEMENTS } from "@ganko/shared"
+import { HEADING_ELEMENTS } from "@drskillissue/ganko-shared"
 import { defineCrossRule } from "../rule"
 import type { LayoutSignalSnapshot } from "../layout"
 import {

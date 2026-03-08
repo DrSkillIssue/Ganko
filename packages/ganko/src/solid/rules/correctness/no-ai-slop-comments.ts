@@ -5,7 +5,7 @@
  * Helps maintain code quality by identifying low-value AI-generated comments.
  */
 
-import { toLowerString } from "@ganko/shared";
+import { toLowerString } from "@drskillissue/ganko-shared";
 import { getSourceCode } from "../../queries/get";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnosticFromComment } from "../../../diagnostic"

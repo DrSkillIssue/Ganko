@@ -27,7 +27,7 @@ import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getJSXAttributesByKind } from "../../queries/jsx"
 import type { JSXAttributeEntity } from "../../entities/jsx"
 import { getStaticValue } from "../../util/static-value"
-import { CHAR_O, CHAR_N, isAlpha, isLowerAlpha } from "@ganko/shared"
+import { CHAR_O, CHAR_N, isAlpha, isLowerAlpha } from "@drskillissue/ganko-shared"
 
 /**
  * List of common DOM event handler names that Solid supports.

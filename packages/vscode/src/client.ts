@@ -18,7 +18,7 @@ import type { Logger } from "./log";
 import { updateStatusBar } from "./status-bar";
 import { getInitializationOptions } from "./config";
 import { findServerModule } from "./server-path";
-import { ALL_EXTENSIONS, extensionsToWatcherGlob } from "@ganko/shared";
+import { ALL_EXTENSIONS, extensionsToWatcherGlob } from "@drskillissue/ganko-shared";
 
 const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_COOLDOWN_MS = 5 * 60 * 1000;

@@ -7,8 +7,8 @@
  * as Mermaid and DOT diagrams for the VS Code webview.
  */
 import type { HandlerContext } from "./handler-context";
-import type { SolidGraph, ComputationEntity, DependencyEdge } from "ganko";
-import { uriToPath } from "@ganko/shared";
+import type { SolidGraph, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 /** Node in the reactive graph response. */
 interface ReactiveGraphNode {

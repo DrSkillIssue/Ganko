@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { formatText, formatJSON, countDiagnostics } from "../../src/cli/format";
-import type { Diagnostic } from "ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
 
 function makeDiag(overrides: Partial<Diagnostic> & Pick<Diagnostic, "file" | "rule" | "message">): Diagnostic {
   return {

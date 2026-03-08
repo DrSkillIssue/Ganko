@@ -19,7 +19,7 @@ import {
   CHAR_V_UPPER,
   isHexColor,
   isAlpha,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 
 /**
  * Parsed CSS value with component breakdown.

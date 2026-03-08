@@ -16,7 +16,7 @@ import type { SolidInput } from "../input";
 import type { FunctionEntity } from "../entities/function";
 import type { CallEntity } from "../entities/call";
 import type { ScopeEntity } from "../entities/scope";
-import { HOOK_PATTERN } from "@ganko/shared";
+import { HOOK_PATTERN } from "@drskillissue/ganko-shared";
 
 const REACHABILITY_BASE = 1;
 const FLAG_IS_HOOK = 2;

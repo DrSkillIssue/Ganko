@@ -1,5 +1,5 @@
 import type { TSESTree as T } from "@typescript-eslint/utils"
-import type { RuleSeverityOverride } from "@ganko/shared"
+import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"
 
 export type MessageId = string
 export type Message = string

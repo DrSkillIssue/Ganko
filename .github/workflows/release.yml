@@ -47,12 +47,12 @@ jobs:
         run: |
           VERSION=$(node -p "require('./packages/ganko/package.json').version")
           for i in $(seq 1 30); do
-            PUBLISHED=$(npm view ganko version 2>/dev/null || echo "")
+            PUBLISHED=$(npm view @drskillissue/ganko version 2>/dev/null || echo "")
             if [ "$PUBLISHED" = "$VERSION" ]; then
-              echo "ganko@$VERSION is live on npm"
+              echo "@drskillissue/ganko@$VERSION is live on npm"
               break
             fi
-            echo "Attempt $i/30: waiting for ganko@$VERSION (got: ${PUBLISHED:-none})"
+            echo "Attempt $i/30: waiting for @drskillissue/ganko@$VERSION (got: ${PUBLISHED:-none})"
             sleep 10
           done
 

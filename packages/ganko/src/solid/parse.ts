@@ -14,7 +14,7 @@ import { simpleTraverse } from "@typescript-eslint/typescript-estree"
 import type ts from "typescript"
 import type { SolidInput } from "./input"
 import { readFileSync } from "node:fs"
-import type { Logger } from "@ganko/shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 
 /**
  * Convert parser visitorKeys to SourceCode-compatible visitorKeys.

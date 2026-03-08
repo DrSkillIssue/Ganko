@@ -11,7 +11,7 @@
  */
 import type { Diagnostic } from "./diagnostic"
 import type { Plugin, Emit } from "./graph"
-import type { RuleOverrides } from "@ganko/shared"
+import type { RuleOverrides } from "@drskillissue/ganko-shared"
 
 /** Runner configuration */
 export interface RunnerConfig {

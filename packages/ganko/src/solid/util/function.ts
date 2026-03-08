@@ -5,7 +5,7 @@
  */
 
 import type { TSESTree as T } from "@typescript-eslint/utils";
-import { COMPONENT_PATTERN, isUpperAlpha } from "@ganko/shared";
+import { COMPONENT_PATTERN, isUpperAlpha } from "@drskillissue/ganko-shared";
 
 export type FunctionNode = T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression;
 

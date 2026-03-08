@@ -31,7 +31,7 @@ import {
   HAS_ID_RE,
   HAS_UNIVERSAL_RE,
   HAS_ATTRIBUTE_RE,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 
 import type { CombinatorType, SelectorComplexity, SelectorPart } from "../entities";
 import { MINIMAL_COMPLEXITY } from "../entities";

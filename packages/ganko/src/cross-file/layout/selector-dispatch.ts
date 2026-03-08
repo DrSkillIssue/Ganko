@@ -1,6 +1,6 @@
 import type { SelectorEntity } from "../../css/entities"
 import type { CSSGraph } from "../../css/impl"
-import { canonicalPath } from "@ganko/shared"
+import { canonicalPath } from "@drskillissue/ganko-shared"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutRuleGuard } from "./guard-model"
 import type { CompiledSelectorMatcher, SelectorFeatureRequirements } from "./selector-match"

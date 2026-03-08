@@ -14,7 +14,7 @@ import {
   snapshotToLogLine,
   HighWaterMarkTracker,
   type MemorySnapshot,
-} from "@ganko/shared";
+} from "@drskillissue/ganko-shared";
 import type { Logger } from "../core/logger";
 
 /** Default interval between checks (30 seconds). */

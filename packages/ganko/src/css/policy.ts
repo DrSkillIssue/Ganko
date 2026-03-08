@@ -6,7 +6,7 @@
  * W3C Low Vision Needs.
  */
 
-import { ACCESSIBILITY_POLICIES, type AccessibilityPolicy } from "@ganko/shared"
+import { ACCESSIBILITY_POLICIES, type AccessibilityPolicy } from "@drskillissue/ganko-shared"
 
 /** All enforceable thresholds for a single policy template. */
 export interface PolicyThresholds {

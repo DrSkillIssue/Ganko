@@ -9,7 +9,7 @@ import type { FoldingRangeParams, FoldingRange } from "vscode-languageserver";
 import { FoldingRangeKind } from "vscode-languageserver";
 import type { TSESTree as T } from "@typescript-eslint/utils";
 import type { HandlerContext } from "./handler-context";
-import { uriToPath } from "@ganko/shared";
+import { uriToPath } from "@drskillissue/ganko-shared";
 
 /** Key for accessing comments on AST program node. */
 const COMMENTS_KEY = "comments";

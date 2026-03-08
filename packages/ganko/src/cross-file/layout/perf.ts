@@ -1,4 +1,4 @@
-import type { Logger } from "@ganko/shared"
+import type { Logger } from "@drskillissue/ganko-shared"
 
 export interface LayoutPerfStats {
   readonly elementsScanned: number

@@ -1,5 +1,5 @@
 {
-  "name": "@ganko/shared",
+  "name": "@drskillissue/ganko-shared",
   "private": true,
   "version": "0.1.0",
   "description": "Shared protocol types for the ganko toolchain",

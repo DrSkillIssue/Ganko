@@ -6,7 +6,7 @@ import { runPhases } from "./phases"
 import { rules } from "./rules"
 import { generateExternalPropertiesCSS } from "./library-analysis"
 import { readFileSync } from "node:fs"
-import { CSS_EXTENSIONS, matchesExtension } from "@ganko/shared"
+import { CSS_EXTENSIONS, matchesExtension } from "@drskillissue/ganko-shared"
 
 /**
  * Synthetic file path for externally-provided CSS custom properties.
@@ -77,7 +77,7 @@ export function analyzeCSSInput(input: CSSInput, emit: Emit): void {
  *
  * @example
  * ```ts
- * import { createRunner, CSSPlugin } from "ganko"
+ * import { createRunner, CSSPlugin } from "@drskillissue/ganko"
  *
  * const runner = createRunner({ plugins: [CSSPlugin] })
  * const diagnostics = runner.run(["src/styles/app.css"])

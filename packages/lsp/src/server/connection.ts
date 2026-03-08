@@ -28,10 +28,10 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import type { TSESTree as T } from "@typescript-eslint/utils";
 
-import { parseContent, GraphCache } from "ganko";
-import type { Diagnostic, TailwindValidator } from "ganko";
-import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot } from "@ganko/shared";
-import type { FileKind, RuleOverrides } from "@ganko/shared";
+import { parseContent, GraphCache } from "@drskillissue/ganko";
+import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot } from "@drskillissue/ganko-shared";
+import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
 import type { Project } from "../core/project";
 import { createFileIndex, type FileIndex } from "../core/file-index";
@@ -61,7 +61,7 @@ import {
   flushPendingChanges,
 } from "./handlers/document";
 import { createLspLogger, type Logger, type LeveledLogger } from "../core/logger";
-import { parseLogLevel } from "@ganko/shared";
+import { parseLogLevel } from "@drskillissue/ganko-shared";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
 

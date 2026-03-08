@@ -13,8 +13,8 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "ganko";
-import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, type RuleOverrides, type ConfigurationChangePayload } from "@ganko/shared";
+import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, type RuleOverrides, type ConfigurationChangePayload } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
 import { createFileIndex } from "../../core/file-index";

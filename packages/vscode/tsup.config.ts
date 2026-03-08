@@ -10,7 +10,7 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   external: ["vscode"],
-  noExternal: ["vscode-languageclient", /^ganko/, /^@ganko\//],
+  noExternal: ["vscode-languageclient", /^@drskillissue\/ganko/],
   async onSuccess() {
     const serverDir = resolve("dist", "server");
     mkdirSync(serverDir, { recursive: true });

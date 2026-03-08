@@ -4,8 +4,8 @@
  * Uses the runner architecture from ganko.
  * User configures which plugins to use.
  */
-import { createRunner, type Runner, type Diagnostic, type Plugin } from "ganko";
-import type { RuleOverrides } from "@ganko/shared";
+import { createRunner, type Runner, type Diagnostic, type Plugin } from "@drskillissue/ganko";
+import type { RuleOverrides } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 import { createTypeScriptProjectService, type TypeScriptProjectService, type ProjectServiceOptions } from "./project-service";
 import type { Logger } from "./logger";

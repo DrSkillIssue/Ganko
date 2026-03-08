@@ -24,9 +24,9 @@ import { TypeResolver, createTypeResolver } from "./typescript";
 import type { JSXAttributeKind } from "./util/jsx";
 import { getPropertyKeyName } from "./util/pattern-detection";
 import { getStaticStringFromJSXValue } from "./util/static-value";
-import { WHITESPACE_SPLIT, CHAR_NEWLINE } from "@ganko/shared";
-import type { Logger } from "@ganko/shared";
-import { noopLogger } from "@ganko/shared";
+import { WHITESPACE_SPLIT, CHAR_NEWLINE } from "@drskillissue/ganko-shared";
+import type { Logger } from "@drskillissue/ganko-shared";
+import { noopLogger } from "@drskillissue/ganko-shared";
 
 /** @internal */
 interface JSXAttributeWithElement {
