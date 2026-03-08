@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    tags: ["v*"]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -17,7 +17,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -29,35 +28,84 @@ jobs:
 
       - run: bun run test
 
-      - name: Create Release PR or Publish
-        id: changesets
-        uses: changesets/action@v1.7.0
-        with:
-          version: bun run changeset:version
-          publish: bun run changeset:publish
-          commit: "chore: version packages"
-          title: "chore: version packages"
+      - name: Publish to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          cd packages/ganko && npm publish --access public --provenance
+          cd ../lsp && npm publish --access public --provenance
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
 
-      - name: Wait for npm propagation
-        if: steps.changesets.outputs.published == 'true'
-        run: |
-          VERSION=$(node -p "require('./packages/ganko/package.json').version")
-          for i in $(seq 1 30); do
-            PUBLISHED=$(npm view @drskillissue/ganko version 2>/dev/null || echo "")
-            if [ "$PUBLISHED" = "$VERSION" ]; then
-              echo "@drskillissue/ganko@$VERSION is live on npm"
-              break
-            fi
-            echo "Attempt $i/30: waiting for @drskillissue/ganko@$VERSION (got: ${PUBLISHED:-none})"
-            sleep 10
-          done
-
       - name: Publish VS Code Extension
-        if: steps.changesets.outputs.published == 'true'
         run: bun run --cwd packages/vscode publish:vsce
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Find previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p' || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$TAG"
+          else
+            RANGE="${PREV_TAG}..${TAG}"
+          fi
+
+          # Generate categorized notes from conventional commits
+          {
+            echo "notes<<RELEASE_EOF"
+
+            # Core (feat/fix without scope, or scope=ganko/core/engine)
+            CORE=$(git log "$RANGE" --pretty=format:'%s' --no-merges | grep -E '^(feat|fix|perf|refactor)(\(ganko\)|\(core\)|\(engine\))?:' | sed 's/^[a-z]*\([^)]*\): //' || true)
+            if [ -n "$CORE" ]; then
+              echo "## Core"
+              echo "$CORE" | while IFS= read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # LSP
+            LSP=$(git log "$RANGE" --pretty=format:'%s' --no-merges | grep -E '^(feat|fix|perf|refactor)\(lsp\):' | sed 's/^[a-z]*([^)]*): //' || true)
+            if [ -n "$LSP" ]; then
+              echo "## LSP"
+              echo "$LSP" | while IFS= read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # CSS
+            CSS=$(git log "$RANGE" --pretty=format:'%s' --no-merges | grep -E '^(feat|fix|perf|refactor)\(css\):' | sed 's/^[a-z]*([^)]*): //' || true)
+            if [ -n "$CSS" ]; then
+              echo "## CSS"
+              echo "$CSS" | while IFS= read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # VS Code Extension
+            VSCODE=$(git log "$RANGE" --pretty=format:'%s' --no-merges | grep -E '^(feat|fix|perf|refactor)\(vscode\):' | sed 's/^[a-z]*([^)]*): //' || true)
+            if [ -n "$VSCODE" ]; then
+              echo "## VS Code Extension"
+              echo "$VSCODE" | while IFS= read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # CI / Chores (optional, collapsed)
+            INFRA=$(git log "$RANGE" --pretty=format:'%s' --no-merges | grep -E '^(ci|chore|build|docs):' | sed 's/^[a-z]*\([^)]*\)\?: //' || true)
+            if [ -n "$INFRA" ]; then
+              echo "## Infrastructure"
+              echo "$INFRA" | while IFS= read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "${{ steps.notes.outputs.notes }}" \
+            --verify-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,13 +15,9 @@
     "clean": "bun -e \"import { readdir, rm } from 'node:fs/promises'; import { resolve } from 'node:path'; const root = process.cwd(); const entries = await readdir(resolve(root, 'packages'), { withFileTypes: true }); for (const entry of entries) { if (!entry.isDirectory()) continue; await rm(resolve(root, 'packages', entry.name, 'dist'), { recursive: true, force: true }); }\"",
     "rebuild": "bun run clean && bun install && bun run build",
     "package": "bun run build && bun run --cwd packages/vscode package",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "changeset:publish": "changeset publish"
+    "version:bump": "bun run scripts/version-bump.ts"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.6.0",
-    "@changesets/cli": "^2.30.0",
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@tsconfig/bun": "^1.0.10",

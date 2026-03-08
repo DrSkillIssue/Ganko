@@ -27,10 +27,6 @@
   "keywords": [
     "solid", "solidjs", "lint", "lsp", "shared", "types", "protocol"
   ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DrSkillIssue/ganko.git",
