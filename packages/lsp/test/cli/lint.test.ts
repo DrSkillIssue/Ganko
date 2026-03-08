@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-const BIN = join(__dirname, "../../bin/ganko.js");
+const BIN = join(__dirname, "../../dist/entry.js");
 const BASIC_APP = join(__dirname, "../fixtures/basic-app");
 const MULTI_FILE_APP = join(__dirname, "../fixtures/multi-file-app");
 
