@@ -9,7 +9,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const BINARY = join(__dirname, "../../dist/ganko");
@@ -18,6 +18,15 @@ const BASIC_APP = join(__dirname, "../fixtures/basic-app");
 
 const VERSION_RE = /^ganko \d+\.\d+\.\d+$/;
 const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+
+interface LintDiagnostic {
+  file: string;
+  rule: string;
+  severity: string;
+  message: string;
+  line: number;
+  column: number;
+}
 
 function runBinary(args: string[], options?: { cwd?: string; timeout?: number }): {
   stdout: string;
@@ -217,7 +226,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "lint.log");
 
-      const result = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,
@@ -235,7 +244,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "dual.log");
 
-      const result = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      const dualResult = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,
@@ -243,7 +252,7 @@ describe("ganko binary", () => {
       });
 
       const logContent = readFileSync(logPath, "utf-8");
-      const stderr = result.stderr ?? "";
+      const stderr = dualResult.stderr ?? "";
 
       expect(stderr).toContain("[info]");
       expect(logContent).toContain("[info]");
@@ -287,6 +296,108 @@ describe("ganko binary", () => {
       const logContent = readFileSync(logPath, "utf-8");
       const firstLine = logContent.split("\n")[0] ?? "";
       expect(firstLine).toMatch(ISO_TIMESTAMP_RE);
+    });
+  });
+
+  describe("tooling config exclusion (infinite loop regression)", () => {
+    let tempDir: string;
+
+    afterEach(() => {
+      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function createTempProject(files: Record<string, string>): string {
+      tempDir = mkdtempSync(join(tmpdir(), "ganko-config-test-"));
+      for (const [relativePath, content] of Object.entries(files)) {
+        const filePath = join(tempDir, relativePath);
+        const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+        if (dir !== tempDir) mkdirSync(dir, { recursive: true });
+        writeFileSync(filePath, content);
+      }
+      return tempDir;
+    }
+
+    it("lint completes within timeout when eslint.config.mjs exists", () => {
+      const root = createTempProject({
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: {
+            target: "ESNext",
+            module: "ESNext",
+            moduleResolution: "bundler",
+            strict: true,
+            jsx: "preserve",
+            jsxImportSource: "solid-js",
+            skipLibCheck: true,
+            noEmit: true,
+          },
+          include: ["**/*.tsx", "**/*.ts"],
+        }),
+        "eslint.config.mjs": "export default [];",
+        "src/App.tsx": [
+          'import { createSignal } from "solid-js";',
+          "export function App() {",
+          "  const [count, setCount] = createSignal(0);",
+          "  return <div>{count()}</div>;",
+          "}",
+        ].join("\n"),
+      });
+
+      const { exitCode, stdout } = runEntry(
+        ["lint", "--format", "json", "--no-cross-file"],
+        { cwd: root, timeout: 30000 },
+      );
+
+      expect(typeof exitCode).toBe("number");
+
+      const parsed: LintDiagnostic[] = JSON.parse(stdout || "[]");
+      const configInOutput = parsed.some((d) => d.file.includes("eslint.config"));
+      expect(configInOutput).toBe(false);
+    });
+
+    it("lint does not report diagnostics for eslint.config.mjs", () => {
+      const root = createTempProject({
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: {
+            target: "ESNext",
+            module: "ESNext",
+            moduleResolution: "bundler",
+            strict: true,
+            jsx: "preserve",
+            jsxImportSource: "solid-js",
+            skipLibCheck: true,
+            noEmit: true,
+          },
+          include: ["**/*.tsx", "**/*.ts"],
+        }),
+        "eslint.config.mjs": [
+          "import solidPlugin from '@drskillissue/ganko';",
+          "export default [",
+          "  ...solidPlugin.configs.recommended,",
+          "];",
+        ].join("\n"),
+        "vite.config.ts": [
+          "import { defineConfig } from 'vite';",
+          "export default defineConfig({ plugins: [] });",
+        ].join("\n"),
+        "src/Counter.tsx": [
+          'import { createSignal } from "solid-js";',
+          "export function Counter() {",
+          "  const [count] = createSignal(0);",
+          "  return <span>{count()}</span>;",
+          "}",
+        ].join("\n"),
+      });
+
+      const { stdout } = runEntry(
+        ["lint", "--format", "json", "--no-cross-file"],
+        { cwd: root, timeout: 30000 },
+      );
+
+      const parsed: LintDiagnostic[] = JSON.parse(stdout || "[]");
+      for (const d of parsed) {
+        expect(d.file).not.toContain("eslint.config");
+        expect(d.file).not.toContain("vite.config");
+      }
     });
   });
 });

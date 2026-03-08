@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { FilteredTextDocuments } from "../../src/server/filtered-documents";
+import { ALL_EXTENSIONS, isToolingConfig } from "@drskillissue/ganko-shared";
 import type {
   DidOpenTextDocumentParams,
   DidChangeTextDocumentParams,
@@ -375,6 +376,97 @@ describe("FilteredTextDocuments", () => {
           "file:///app/index.ts",
           "file:///app/App.tsx",
           "file:///app/styles.css",
+        ]),
+      );
+    });
+  });
+
+  describe("tooling config rejection (infinite loop regression)", () => {
+    /**
+     * Uses the same predicate as connection.ts — the production predicate
+     * that guards the LSP document store. This tests the actual filtering
+     * logic that prevents the infinite loop.
+     */
+    function setupWithProductionPredicate() {
+      const supportedExtensions = new Set<string>(ALL_EXTENSIONS);
+      const docs = new FilteredTextDocuments(TextDocument, (uri: string) => {
+        if (uri.endsWith(".d.ts")) return false;
+        if (isToolingConfig(uri)) return false;
+        const dotIdx = uri.lastIndexOf(".");
+        if (dotIdx < 0) return false;
+        return supportedExtensions.has(uri.slice(dotIdx));
+      });
+      const mock = createMockConnection();
+      docs.listen(mock.connection);
+      return { docs, mock };
+    }
+
+    it("rejects eslint.config.mjs despite .mjs being a supported extension", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      mock.simulateOpen("file:///project/eslint.config.mjs", "export default [];");
+
+      expect(docs.get("file:///project/eslint.config.mjs")).toBeUndefined();
+      expect(docs.all()).toHaveLength(0);
+    });
+
+    it("rejects eslint.config.ts", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      mock.simulateOpen("file:///project/eslint.config.ts", "export default [];");
+
+      expect(docs.get("file:///project/eslint.config.ts")).toBeUndefined();
+    });
+
+    it("rejects vite.config.ts", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      mock.simulateOpen("file:///project/vite.config.ts", "export default {};");
+
+      expect(docs.get("file:///project/vite.config.ts")).toBeUndefined();
+    });
+
+    it("rejects vitest.setup.ts", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      mock.simulateOpen("file:///project/vitest.setup.ts", "import '@testing-library/jest-dom';");
+
+      expect(docs.get("file:///project/vitest.setup.ts")).toBeUndefined();
+    });
+
+    it("does not fire events for tooling config files", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      const openListener = vi.fn();
+      const changeListener = vi.fn();
+      docs.onDidOpen(openListener);
+      docs.onDidChangeContent(changeListener);
+
+      mock.simulateOpen("file:///project/eslint.config.mjs", "export default [];");
+      mock.simulateChange("file:///project/eslint.config.mjs", "export default [{}];");
+
+      expect(openListener).not.toHaveBeenCalled();
+      expect(changeListener).not.toHaveBeenCalled();
+    });
+
+    it("still accepts regular .mjs source files", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+      mock.simulateOpen("file:///project/src/utils.mjs", "export const x = 1;");
+
+      expect(docs.get("file:///project/src/utils.mjs")).toBeDefined();
+    });
+
+    it("accepts source files while rejecting config files in same batch", () => {
+      const { docs, mock } = setupWithProductionPredicate();
+
+      mock.simulateOpen("file:///project/src/App.tsx", "<div />");
+      mock.simulateOpen("file:///project/eslint.config.mjs", "export default [];");
+      mock.simulateOpen("file:///project/vite.config.ts", "export default {};");
+      mock.simulateOpen("file:///project/src/styles.css", "body {}", "css");
+      mock.simulateOpen("file:///project/vitest.setup.ts", "import '@testing-library/jest-dom';");
+      mock.simulateOpen("file:///project/src/index.ts", "export {};");
+
+      expect(docs.all()).toHaveLength(3);
+      expect(docs.keys()).toEqual(
+        expect.arrayContaining([
+          "file:///project/src/App.tsx",
+          "file:///project/src/styles.css",
+          "file:///project/src/index.ts",
         ]),
       );
     });

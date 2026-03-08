@@ -17,6 +17,7 @@ export {
   ALL_EXTENSIONS,
   matchesExtension,
   classifyFile,
+  isToolingConfig,
   extensionsToGlobs,
   extensionsToWatcherGlob,
   type FileKind,

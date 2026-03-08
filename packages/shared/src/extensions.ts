@@ -11,6 +11,34 @@ export const ALL_EXTENSIONS = [...SOLID_EXTENSIONS, ...CSS_EXTENSIONS] as const;
 export type FileKind = "solid" | "css" | "unknown";
 
 /**
+ * Compiled pattern matching tooling config files that share a supported
+ * extension but must never be analysed as source code.
+ *
+ * Matches basenames like `eslint.config.mjs`, `vite.config.ts`,
+ * `vitest.config.mts`, `webpack.config.js`, etc. — any file whose
+ * basename is `<name>.config.<supported-ext>` or `<name>.setup.<supported-ext>`.
+ *
+ * Using a regex pattern instead of an exhaustive set ensures new
+ * tooling configs are excluded automatically.
+ */
+const TOOLING_CONFIG_RE = /(?:^|[\\/])[\w.-]+\.(?:config|setup)\.(?:ts|js|mts|cts|mjs|cjs)$/;
+
+/**
+ * Check whether a path refers to a tooling config file that should
+ * be excluded from analysis despite having a supported extension.
+ *
+ * Matches any file whose basename follows the `<name>.config.<ext>` or
+ * `<name>.setup.<ext>` convention (e.g. `eslint.config.mjs`,
+ * `vitest.setup.ts`, `webpack.config.js`).
+ *
+ * @param path - File path to check
+ * @returns `true` if the file matches a tooling config pattern
+ */
+export function isToolingConfig(path: string): boolean {
+  return TOOLING_CONFIG_RE.test(path);
+}
+
+/**
  * Check if a file path ends with one of the given extensions.
  *
  * @param path - File path to check
@@ -37,6 +65,7 @@ export function matchesExtension(path: string, extensions: readonly string[]): b
  */
 export function classifyFile(path: string): FileKind {
   if (path.endsWith(".d.ts")) return "unknown";
+  if (isToolingConfig(path)) return "unknown";
   if (matchesExtension(path, SOLID_EXTENSIONS)) return "solid";
   if (matchesExtension(path, CSS_EXTENSIONS)) return "css";
   return "unknown";
