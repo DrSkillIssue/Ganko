@@ -28,6 +28,27 @@ jobs:
 
       - run: bun run test
 
+      - name: Resolve workspace protocol
+        run: |
+          VERSION=$(node -p "require('./packages/ganko/package.json').version")
+          for pkg in packages/ganko packages/lsp; do
+            node -e "
+              const fs = require('fs');
+              const path = './$pkg/package.json';
+              const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+              for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+                if (!pkg[field]) continue;
+                for (const [name, ver] of Object.entries(pkg[field])) {
+                  if (typeof ver === 'string' && ver.startsWith('workspace:')) {
+                    pkg[field][name] = '^$VERSION';
+                  }
+                }
+              }
+              fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            "
+            echo "Resolved workspace: references in $pkg/package.json"
+          done
+
       - name: Publish to npm
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc

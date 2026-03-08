@@ -3,7 +3,7 @@
   "private": true,
   "displayName": "Ganko — Solid.js & CSS Linter",
   "description": "Static analysis for Solid.js and CSS",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "MIT",
   "publisher": "ganko",
   "icon": "icon.png",
