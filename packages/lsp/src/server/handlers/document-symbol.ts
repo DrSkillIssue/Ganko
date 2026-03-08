@@ -20,6 +20,7 @@ export function handleDocumentSymbol(
   params: DocumentSymbolParams,
   ctx: HandlerContext,
 ): DocumentSymbol[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -29,6 +30,7 @@ export function handleDocumentSymbol(
   if (!tree) return null;
 
   const symbols = convertTree(tree, sf);
+  if (log.enabled) log.trace(`documentSymbol: ${symbols.length} symbols for ${path}`);
   return symbols.length > 0 ? symbols : null;
 }
 

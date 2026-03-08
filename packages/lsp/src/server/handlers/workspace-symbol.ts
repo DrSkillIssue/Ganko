@@ -22,6 +22,7 @@ export function handleWorkspaceSymbol(
   ctx: HandlerContext,
   seedPath: string,
 ): WorkspaceSymbol[] | null {
+  const { log } = ctx;
   const ls = ctx.getLanguageService(seedPath);
   if (!ls) return null;
 
@@ -48,5 +49,6 @@ export function handleWorkspaceSymbol(
     });
   }
 
+  if (log.enabled) log.trace(`workspaceSymbol: query="${query}" → ${symbols.length} results`);
   return symbols.length > 0 ? symbols : null;
 }

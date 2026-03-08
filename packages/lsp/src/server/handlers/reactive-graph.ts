@@ -50,16 +50,24 @@ export function handleReactiveGraph(
   params: ReactiveGraphParams,
   ctx: HandlerContext,
 ): ReactiveGraphResult | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
 
   const graph = ctx.getSolidGraph(path);
-  if (!graph) return null;
+  if (!graph) {
+    if (log.enabled) log.trace(`reactiveGraph: no SolidGraph for ${path}`);
+    return null;
+  }
 
   const nodes = buildNodes(graph);
   const edges = buildEdges(graph);
 
-  if (nodes.length === 0) return null;
+  if (nodes.length === 0) {
+    if (log.enabled) log.trace(`reactiveGraph: 0 nodes for ${path}`);
+    return null;
+  }
 
+  if (log.enabled) log.trace(`reactiveGraph: ${nodes.length} nodes, ${edges.length} edges for ${path}`);
   return {
     mermaid: toMermaid(nodes, edges),
     dot: toDot(nodes, edges),

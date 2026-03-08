@@ -90,6 +90,7 @@ export function handleSemanticTokens(
   params: SemanticTokensParams,
   ctx: HandlerContext,
 ): SemanticTokens | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const graph = ctx.getSolidGraph(path);
   if (!graph) return null;
@@ -102,6 +103,7 @@ export function handleSemanticTokens(
 
   if (tokens.length === 0) return null;
 
+  if (log.enabled) log.trace(`semanticTokens: ${tokens.length} tokens for ${path}`);
   tokens.sort(compareTokens);
   return { data: deltaEncode(tokens) };
 }

@@ -31,6 +31,7 @@ export function handleCodeAction(
   params: CodeActionParams,
   ctx: HandlerContext,
 ): CodeAction[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const diagnostics = ctx.getDiagnostics(path);
   if (diagnostics.length === 0) return null;
@@ -124,6 +125,7 @@ export function handleCodeAction(
     }
   }
 
+  if (log.enabled) log.trace(`codeAction: ${actions.length} actions from ${filtered.length} diagnostics for ${path}`);
   return actions.length > 0 ? actions : null;
 }
 

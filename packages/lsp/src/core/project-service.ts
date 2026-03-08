@@ -152,13 +152,17 @@ export function createTypeScriptProjectService(
       if (scriptInfo) {
         const snapshot = scriptInfo.getSnapshot();
         scriptInfo.editContent(0, snapshot.getLength(), content);
+        if (log?.enabled) log.trace(`updateFile: edited ${key} (${content.length} chars)`);
       } else {
         service.openClientFile(key, content);
+        if (log?.enabled) log.trace(`updateFile: opened ${key} (${content.length} chars)`);
       }
     },
 
     closeFile(filePath: string): void {
-      service.closeClientFile(canonicalPath(filePath));
+      const key = canonicalPath(filePath);
+      service.closeClientFile(key);
+      if (log?.enabled) log.trace(`closeFile: ${key}`);
     },
 
     dispose(): void {

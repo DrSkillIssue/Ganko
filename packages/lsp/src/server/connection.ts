@@ -111,10 +111,13 @@ function createHandlerContext(
   graphCache: GraphCache,
   astCache: Map<string, CachedAST>,
   diagCache: Map<string, readonly Diagnostic[]>,
+  handlerLog: Logger,
 ): HandlerContext {
   /* All HandlerContext methods receive paths already canonicalized by
      uriToPath() in the caller. No redundant canonicalPath() calls. */
   return {
+    log: handlerLog,
+
     getLanguageService(path) {
       return project.getLanguageService(path);
     },
@@ -186,6 +189,7 @@ function collectAffectedPaths(
   changed: readonly string[],
   state: DocumentState,
   exclude?: ReadonlySet<string>,
+  logger?: Logger,
 ): string[] {
   const needed = new Set<FileKind>();
   for (let i = 0, len = changed.length; i < len; i++) {
@@ -204,6 +208,7 @@ function collectAffectedPaths(
     if (exclude !== undefined && exclude.has(p)) continue;
     if (needed.has(classifyFile(p))) out.push(p);
   }
+  if (logger?.enabled) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
   return out;
 }
 
@@ -228,8 +233,10 @@ function runDiagnostics(
   logger?: Logger,
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
+  if (logger?.enabled) logger.trace(`runDiagnostics: ${key}`);
   const diagnostics = runSingleFileDiagnostics(project, key, content, overrides, logger);
   diagCache.set(key, diagnostics);
+  if (logger?.enabled) logger.trace(`runDiagnostics: ${key} → ${diagnostics.length} diagnostics`);
   return diagnostics;
 }
 
@@ -421,7 +428,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
     setProject(project) {
       context.project = project;
-      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache);
+      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
@@ -450,7 +457,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       if (!project) return;
       if (changed.length === 0) return;
 
-      const affected = collectAffectedPaths(changed, context.documentState, exclude);
+      const affected = collectAffectedPaths(changed, context.documentState, exclude, log);
       if (affected.length > 0) {
         if (log.enabled) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
       }
@@ -563,7 +570,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (eslintConfigChanged && context.project) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState));
+        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
         context.rediagnoseAll();
@@ -586,7 +593,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (result === "rebuild-index") {
       if (serverState.rootPath) {
         const excludes = effectiveExclude(serverState);
-        const fileIndex = createFileIndex(serverState.rootPath, excludes);
+        const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
         context.fileIndex = fileIndex;
         if (context.log.enabled) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
       }
@@ -597,7 +604,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (result === "reload-eslint") {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState));
+        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (!outcome.overridesChanged && !outcome.ignoresChanged) return;
     }

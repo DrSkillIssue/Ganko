@@ -15,15 +15,23 @@ export function handleDefinition(
   params: DefinitionParams,
   ctx: HandlerContext,
 ): Definition | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
-  if (!tsFile) return null;
+  if (!tsFile) {
+    if (log.enabled) log.trace(`definition: no TS file for ${path}`);
+    return null;
+  }
   const { ls, sf } = tsFile;
 
   const offset = positionToOffset(sf, params.position);
   const defs = ls.getDefinitionAtPosition(path, offset);
-  if (!defs || defs.length === 0) return null;
+  if (!defs || defs.length === 0) {
+    if (log.enabled) log.trace(`definition: no definitions at ${path}:${params.position.line}:${params.position.character}`);
+    return null;
+  }
 
+  if (log.enabled) log.trace(`definition: ${defs.length} definitions at ${path}:${params.position.line}:${params.position.character}`);
   return defs.map(def => {
     const defSf = ls.getProgram()?.getSourceFile(def.fileName);
     const range = defSf

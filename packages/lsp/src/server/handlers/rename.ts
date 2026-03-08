@@ -22,6 +22,7 @@ export function handlePrepareRename(
   params: PrepareRenameParams,
   ctx: HandlerContext,
 ): { range: Range; placeholder: string } | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -29,13 +30,17 @@ export function handlePrepareRename(
 
   const offset = positionToOffset(sf, params.position);
   const locations = ls.findRenameLocations(path, offset, false, false);
-  if (!locations || locations.length === 0) return null;
+  if (!locations || locations.length === 0) {
+    if (log.enabled) log.trace(`prepareRename: no locations at ${path}:${params.position.line}:${params.position.character}`);
+    return null;
+  }
 
   const first = locations[0];
   if (!first) return null;
   const firstSf = ls.getProgram()?.getSourceFile(first.fileName);
   if (!firstSf) return null;
 
+  if (log.enabled) log.trace(`prepareRename: ${locations.length} locations at ${path}:${params.position.line}:${params.position.character}`);
   return {
     range: textSpanToRange(first.textSpan, firstSf),
     placeholder: firstSf.text.slice(first.textSpan.start, ts.textSpanEnd(first.textSpan)),
@@ -49,6 +54,7 @@ export function handleRename(
   params: RenameParams,
   ctx: HandlerContext,
 ): WorkspaceEdit | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -56,7 +62,10 @@ export function handleRename(
 
   const offset = positionToOffset(sf, params.position);
   const locations = ls.findRenameLocations(path, offset, false, false);
-  if (!locations || locations.length === 0) return null;
+  if (!locations || locations.length === 0) {
+    if (log.enabled) log.trace(`rename: no locations at ${path}:${params.position.line}:${params.position.character}`);
+    return null;
+  }
 
   const program = ls.getProgram();
   const changes: Record<string, TextEdit[]> = {};
@@ -72,5 +81,6 @@ export function handleRename(
     });
   }
 
+  if (log.enabled) log.trace(`rename: ${locations.length} locations, ${Object.keys(changes).length} files`);
   return { changes };
 }

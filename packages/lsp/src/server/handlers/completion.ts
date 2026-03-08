@@ -59,6 +59,7 @@ export function handleCompletion(
   params: CompletionParams,
   ctx: HandlerContext,
 ): CompletionItem[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -74,7 +75,9 @@ export function handleCompletion(
     }
   }
 
-  if (isJSXTagContext(sf.text, offset)) {
+  const jsxContext = isJSXTagContext(sf.text, offset);
+  if (log.enabled) log.trace(`completion: ${items.length} items, jsxContext=${jsxContext} at ${path}:${params.position.line}:${params.position.character}`);
+  if (jsxContext) {
     for (let ci = 0; ci < SOLID_CONTROL_FLOW.length; ci++) {
       const cf = SOLID_CONTROL_FLOW[ci];
       if (!cf) continue;

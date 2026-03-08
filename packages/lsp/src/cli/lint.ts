@@ -342,16 +342,20 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   if (hasExplicitTargets) {
     resolvedTargets = resolveFiles(options.files, cwd, options.exclude);
-    projectRoot = findProjectRoot(commonAncestor(resolvedTargets));
+    if (log.enabled) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
+    const ancestor = commonAncestor(resolvedTargets);
+    projectRoot = findProjectRoot(ancestor);
+    if (log.enabled) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
   } else {
     projectRoot = findProjectRoot(cwd);
+    if (log.enabled) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
   }
 
   if (log.enabled) log.info(`project root: ${projectRoot}`);
 
   const eslintResult = options.noEslintConfig
     ? EMPTY_ESLINT_RESULT
-    : await loadESLintConfig(projectRoot, options.eslintConfig).catch(() => EMPTY_ESLINT_RESULT);
+    : await loadESLintConfig(projectRoot, options.eslintConfig, log).catch(() => EMPTY_ESLINT_RESULT);
 
   if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores`);
 
@@ -363,7 +367,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     resolvedTargets = resolveFiles(options.files, cwd, effectiveExclude);
   }
 
-  const fileIndex = createFileIndex(projectRoot, effectiveExclude);
+  const fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
   if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
   const filesToLint = resolvedTargets ?? fileIndex.allFiles();
@@ -422,6 +426,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       try {
         content = readFileSync(path, "utf-8");
       } catch {
+        if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
         continue;
       }
 

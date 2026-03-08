@@ -131,6 +131,7 @@ export function handleFoldingRanges(
   const filePath = uriToPath(params.textDocument.uri);
   const ast = ctx.getAST(filePath);
   if (!ast) return null;
+  const { log } = ctx;
 
   count = 0;
   let stackTop = 0;
@@ -434,6 +435,7 @@ export function handleFoldingRanges(
 
   if (count === 0) return null;
 
+  if (log.enabled) log.trace(`foldingRanges: ${count} ranges for ${filePath}${count >= MAX_RANGES ? " (limit reached)" : ""}`);
   const result = new Array<FoldingRange>(count);
   for (let i = 0; i < count; i++) {
     result[i] = {

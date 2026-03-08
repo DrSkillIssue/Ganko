@@ -26,11 +26,11 @@ export function handleLinkedEditingRanges(
   params: LinkedEditingRangeParams,
   ctx: HandlerContext,
 ): LinkedEditingRanges | null {
+  const { log } = ctx;
   const filePath = uriToPath(params.textDocument.uri);
   const ast = ctx.getAST(filePath);
   if (!ast) return null;
 
-  // Convert to 1-based line for AST compatibility
   const line = params.position.line + 1;
   const col = params.position.character;
   const targetPos = packPos(line, col);
@@ -40,8 +40,11 @@ export function handleLinkedEditingRanges(
 
   const { element, tagName } = result;
 
-  // Self-closing elements don't need linked editing
-  if (!element.closingElement) return null;
+  if (!element.closingElement) {
+    if (log.enabled) log.trace(`linkedEditing: self-closing <${tagName}/> — skipped`);
+    return null;
+  }
+  if (log.enabled) log.trace(`linkedEditing: <${tagName}> at ${filePath}:${params.position.line}:${params.position.character}`);
 
   const openName = element.openingElement.name;
   const closeName = element.closingElement.name;

@@ -177,6 +177,7 @@ export function handleSelectionRange(
   const filePath = uriToPath(params.textDocument.uri);
   const ast = ctx.getAST(filePath);
   if (!ast) return null;
+  if (ctx.log.enabled) ctx.log.trace(`selectionRange: ${params.positions.length} positions for ${filePath}`);
 
   const positions = params.positions;
   const posLen = positions.length;

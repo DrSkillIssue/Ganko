@@ -19,6 +19,7 @@ export function handleDocumentHighlight(
   params: DocumentHighlightParams,
   ctx: HandlerContext,
 ): DocumentHighlight[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -40,5 +41,6 @@ export function handleDocumentHighlight(
     }
   }
 
+  if (log.enabled) log.trace(`documentHighlight: ${result.length} highlights at ${path}:${params.position.line}:${params.position.character}`);
   return result.length > 0 ? result : null;
 }

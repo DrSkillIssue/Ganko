@@ -150,6 +150,7 @@ export function handleSignatureHelp(
   params: SignatureHelpParams,
   ctx: HandlerContext,
 ): SignatureHelp | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
@@ -211,6 +212,7 @@ export function handleSignatureHelp(
     signatures[i] = sigInfo;
   }
 
+  if (log.enabled) log.trace(`signatureHelp: ${signatures.length} signatures at ${path}:${params.position.line}:${params.position.character}`);
   return {
     signatures,
     activeSignature: items.selectedItemIndex,

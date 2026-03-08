@@ -15,14 +15,21 @@ export function handleReferences(
   params: ReferenceParams,
   ctx: HandlerContext,
 ): Location[] | null {
+  const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
-  if (!tsFile) return null;
+  if (!tsFile) {
+    if (log.enabled) log.trace(`references: no TS file for ${path}`);
+    return null;
+  }
   const { ls, sf } = tsFile;
 
   const offset = positionToOffset(sf, params.position);
   const refs = ls.findReferences(path, offset);
-  if (!refs || refs.length === 0) return null;
+  if (!refs || refs.length === 0) {
+    if (log.enabled) log.trace(`references: none at ${path}:${params.position.line}:${params.position.character}`);
+    return null;
+  }
 
   const program = ls.getProgram();
   const locations: Location[] = [];
@@ -39,5 +46,6 @@ export function handleReferences(
     }
   }
 
+  if (log.enabled) log.trace(`references: ${locations.length} at ${path}:${params.position.line}:${params.position.character}`);
   return locations.length > 0 ? locations : null;
 }
