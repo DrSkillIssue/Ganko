@@ -85,8 +85,9 @@ function createEmitter<T>(): MiniEmitter<T> {
   return {
     event,
     fire(data: T) {
-      for (let i = 0; i < listeners.length; i++) {
-        listeners[i]?.(data);
+      const snapshot = listeners.slice(0);
+      for (let i = 0; i < snapshot.length; i++) {
+        snapshot[i]?.(data);
       }
     },
   };

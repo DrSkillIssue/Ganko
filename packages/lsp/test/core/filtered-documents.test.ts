@@ -265,6 +265,74 @@ describe("FilteredTextDocuments", () => {
       mock.simulateOpen("file:///app/b.ts", "b");
       expect(listener).toHaveBeenCalledOnce();
     });
+
+    it("double-dispose of event subscription is safe", () => {
+      const { docs, mock } = setup();
+      const listener = vi.fn();
+      const disposable = docs.onDidOpen(listener);
+
+      disposable.dispose();
+      disposable.dispose();
+
+      mock.simulateOpen("file:///app/a.ts", "a");
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("self-disposing listener during fire does not skip subsequent listeners", () => {
+      const { docs, mock } = setup();
+      const calls: string[] = [];
+      const holder: { disposable?: Disposable } = {};
+
+      holder.disposable = docs.onDidOpen(() => {
+        calls.push("first");
+        holder.disposable?.dispose();
+      });
+
+      docs.onDidOpen(() => { calls.push("second"); });
+      docs.onDidOpen(() => { calls.push("third"); });
+
+      mock.simulateOpen("file:///app/a.ts", "a");
+
+      expect(calls).toEqual(["first", "second", "third"]);
+    });
+  });
+
+  describe("listen disposable", () => {
+    it("unregisters all handlers when disposed", () => {
+      const docs = new FilteredTextDocuments(TextDocument, acceptSupportedExtensions);
+
+      let onOpen: NotificationHandler<DidOpenTextDocumentParams> = () => {};
+      let openDisposed = false;
+
+      const connection = {
+        __textDocumentSync: undefined,
+        onDidOpenTextDocument(handler: NotificationHandler<DidOpenTextDocumentParams>): Disposable {
+          onOpen = handler;
+          return { dispose() { openDisposed = true; onOpen = () => {}; } };
+        },
+        onDidChangeTextDocument(_handler: NotificationHandler<DidChangeTextDocumentParams>): Disposable {
+          return { dispose() {} };
+        },
+        onDidCloseTextDocument(_handler: NotificationHandler<DidCloseTextDocumentParams>): Disposable {
+          return { dispose() {} };
+        },
+        onDidSaveTextDocument(_handler: NotificationHandler<DidSaveTextDocumentParams>): Disposable {
+          return { dispose() {} };
+        },
+      };
+
+      const listenDisposable = docs.listen(connection);
+
+      onOpen({ textDocument: { uri: "file:///app/a.ts", languageId: "typescript", version: 1, text: "a" } });
+      expect(docs.all()).toHaveLength(1);
+
+      listenDisposable.dispose();
+      expect(openDisposed).toBe(true);
+
+      onOpen({ textDocument: { uri: "file:///app/b.ts", languageId: "typescript", version: 1, text: "b" } });
+      expect(docs.all()).toHaveLength(1);
+      expect(docs.get("file:///app/b.ts")).toBeUndefined();
+    });
   });
 
   describe("document content", () => {
