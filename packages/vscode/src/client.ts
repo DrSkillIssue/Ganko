@@ -1,7 +1,7 @@
 /**
  * LanguageClient factory, lifecycle, and restart throttle.
  */
-import { workspace, window, type ExtensionContext, type OutputChannel, type StatusBarItem } from "vscode";
+import { workspace, window, type ExtensionContext, type LogOutputChannel, type StatusBarItem } from "vscode";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -66,7 +66,7 @@ function shouldAttemptRestart(log: Logger): boolean {
 /** Create a configured LanguageClient instance. */
 function createClient(
   serverModule: string,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
   statusBar: StatusBarItem,
   log: Logger,
 ): LanguageClient {
@@ -81,14 +81,14 @@ function createClient(
 
   const serverOptions: ServerOptions = {
     run: {
-      command: "bun",
-      args: ["run", serverModule],
+      command: "node",
+      args: [serverModule],
       transport: TransportKind.stdio,
       options: { env },
     },
     debug: {
-      command: "bun",
-      args: ["run", "--inspect=6009", serverModule],
+      command: "node",
+      args: ["--inspect=6009", serverModule],
       transport: TransportKind.stdio,
       options: { env },
     },
@@ -158,7 +158,7 @@ function createClient(
 /** Start the language client (internal — call via serialized wrapper). */
 async function startClientInternal(
   context: ExtensionContext,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
   statusBar: StatusBarItem,
   log: Logger,
 ): Promise<void> {
@@ -195,7 +195,7 @@ async function startClientInternal(
 /** Start the language client (serialized). */
 export function startClient(
   context: ExtensionContext,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
   statusBar: StatusBarItem,
   log: Logger,
 ): Promise<void> {
@@ -227,7 +227,7 @@ export function stopClient(log: Logger): Promise<void> {
 /** Restart the language client (resets throttle for manual restart, serialized). */
 export function restartClient(
   context: ExtensionContext,
-  outputChannel: OutputChannel,
+  outputChannel: LogOutputChannel,
   statusBar: StatusBarItem,
   log: Logger,
 ): Promise<void> {

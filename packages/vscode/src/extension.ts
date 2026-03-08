@@ -3,9 +3,10 @@
  *
  * Pure orchestration — creates dependencies, wires modules, manages lifecycle.
  */
-import { type ExtensionContext, workspace, window } from "vscode";
+import { type ExtensionContext, workspace, window, type LogOutputChannel, LogLevel as VscodeLogLevel } from "vscode";
 import { type LeveledLogger, createLogger } from "./log";
 import { noopLogger, parseLogLevel } from "@drskillissue/ganko-shared";
+import type { LogLevel } from "@drskillissue/ganko-shared";
 import { createStatusBar } from "./status-bar";
 import { getClient, startClient, stopClient, restartClient } from "./client";
 import { registerConfigHandler } from "./config";
@@ -15,12 +16,18 @@ import { registerCommands } from "./commands";
 const module: { log: LeveledLogger | null } = { log: null };
 
 export async function activate(context: ExtensionContext): Promise<void> {
-  const outputChannel = window.createOutputChannel("Solid Language Server");
+  const outputChannel: LogOutputChannel = window.createOutputChannel("Solid Language Server", { log: true });
   context.subscriptions.push(outputChannel);
 
   const log = createLogger(outputChannel, parseLogLevel(
     workspace.getConfiguration("solid").get<string>("logLevel") ?? "info", "info",
   ));
+
+  context.subscriptions.push(outputChannel.onDidChangeLogLevel((vscodeLevel) => {
+    const mapped = mapVscodeLogLevel(vscodeLevel);
+    log.setLevel(mapped);
+    log.info(`Log level changed to ${mapped} via VS Code command palette`);
+  }));
   module.log = log;
 
   log.info("Activating Solid.js extension...");
@@ -63,6 +70,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
   await start();
   log.info("Extension activation complete");
+}
+
+/** Map VS Code's LogLevel enum to ganko's LogLevel string. */
+function mapVscodeLogLevel(level: VscodeLogLevel): LogLevel {
+  switch (level) {
+    case VscodeLogLevel.Trace: return "trace";
+    case VscodeLogLevel.Debug: return "debug";
+    case VscodeLogLevel.Info: return "info";
+    case VscodeLogLevel.Warning: return "warning";
+    case VscodeLogLevel.Error: return "error";
+    case VscodeLogLevel.Off: return "off";
+    default: return "info";
+  }
 }
 
 export async function deactivate(): Promise<void> {
