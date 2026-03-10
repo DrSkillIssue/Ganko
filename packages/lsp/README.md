@@ -75,8 +75,10 @@ ganko --version
 
 Run the same analysis pipeline as the LSP server, but headless — no editor required.
 
+By default, `ganko lint` connects to a background daemon that keeps the TypeScript project service, graph caches, file index, and Tailwind validator warm between runs. This eliminates the ~2-5s startup cost on repeated invocations. The daemon is started automatically on the first `ganko lint` call and shuts down after 5 minutes of inactivity.
+
 ```bash
-# Lint entire project
+# Lint entire project (uses daemon)
 ganko lint
 
 # Lint specific files
@@ -99,6 +101,9 @@ ganko lint --eslint-config eslint.config.mjs
 
 # Skip ESLint config entirely
 ganko lint --no-eslint-config
+
+# Skip daemon, run analysis in-process
+ganko lint --no-daemon
 ```
 
 | Option | Description |
@@ -109,11 +114,32 @@ ganko lint --no-eslint-config
 | `--eslint-config <path>` | Explicit ESLint config file path |
 | `--no-eslint-config` | Ignore ESLint config |
 | `--exclude <glob>` | Exclude files matching glob pattern (repeatable) |
+| `--no-daemon` | Skip daemon, run analysis in-process |
 | `--verbose`, `-v` | Enable debug-level log output |
 | `--log-level <level>` | Set log level: `trace`, `debug`, `info`, `warning`, `error`, `critical`, `off` |
 | `--log-file <path>` | Write logs to a file (in addition to stderr) |
 
 Exit codes: `0` clean, `1` errors found (or warnings exceeded `--max-warnings`), `2` invalid arguments.
+
+### Daemon Commands
+
+The daemon is managed automatically, but you can control it manually:
+
+```bash
+# Start the background daemon
+ganko daemon start
+
+# Check daemon status
+ganko daemon status
+
+# Stop the background daemon
+ganko daemon stop
+
+# Specify project root (default: auto-detected from cwd)
+ganko daemon start --project-root /path/to/project
+```
+
+The daemon communicates over a Unix domain socket with Content-Length framed messages. It stores its socket and PID file under `$XDG_RUNTIME_DIR` (or `$TMPDIR`), namespaced by a hash of the project root and ganko version.
 
 The CLI entrypoint uses `#!/usr/bin/env node` — only Node.js `>=22.0.0` is required on `PATH`.
 

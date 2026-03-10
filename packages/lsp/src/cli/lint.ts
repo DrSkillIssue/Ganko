@@ -23,6 +23,8 @@ import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCross
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
 import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
+import { ensureDaemon, requestLint } from "./daemon-client";
+import type { LintRequestParams } from "./daemon-protocol";
 
 function die(message: string): never {
   process.stderr.write(message + "\n");
@@ -51,6 +53,8 @@ interface LintOptions {
   readonly logLevel: LogLevel
   /** Path to log file (writes to both stderr and file when set) */
   readonly logFile: string | undefined
+  /** Skip the daemon and run analysis in-process */
+  readonly noDaemon: boolean
 }
 
 /**
@@ -69,6 +73,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let maxWarnings = -1;
   let logLevel: LogLevel = "off";
   let logFile: string | undefined;
+  let noDaemon = false;
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -147,6 +152,11 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       continue;
     }
 
+    if (arg === "--no-daemon") {
+      noDaemon = true;
+      continue;
+    }
+
     if (arg === "--exclude") {
       const next = args[i + 1];
       if (next === undefined || next.startsWith("-")) {
@@ -165,7 +175,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon };
 }
 
 /** Glob metacharacters — presence means the arg is a pattern, not a literal path. */
@@ -304,6 +314,77 @@ function commonAncestor(files: readonly string[]): string {
 }
 
 /**
+ * Attempt to lint via the daemon. Returns diagnostics on success, null if
+ * the daemon is unavailable or the request fails.
+ */
+async function tryDaemonLint(
+  options: LintOptions,
+  projectRoot: string,
+  filesToLint: readonly string[],
+  log: Logger,
+): Promise<readonly Diagnostic[] | null> {
+  const socket = await ensureDaemon(projectRoot).catch(() => null);
+  if (socket === null) return null;
+
+  try {
+    const base = {
+      projectRoot,
+      files: filesToLint,
+      exclude: options.exclude,
+      crossFile: options.crossFile,
+      noEslintConfig: options.noEslintConfig,
+      logLevel: options.logLevel,
+    };
+    const params: LintRequestParams = options.eslintConfig !== undefined
+      ? { ...base, eslintConfigPath: options.eslintConfig }
+      : base;
+
+    const response = await requestLint(socket, params);
+    if (response.kind === "lint-response") {
+      if (log.enabled) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
+      return response.diagnostics;
+    }
+    if (response.kind === "error-response") {
+      if (log.enabled) log.warning(`daemon error: ${response.message}`);
+      return null;
+    }
+    return null;
+  } catch (err: unknown) {
+    if (log.enabled) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  } finally {
+    socket.destroy();
+  }
+}
+
+/**
+ * Format diagnostics, print output, and exit with appropriate code.
+ * Shared by both daemon and in-process paths.
+ */
+function outputAndExit(
+  allDiagnostics: readonly Diagnostic[],
+  options: LintOptions,
+): never {
+  if (options.format === "json") {
+    console.log(formatJSON(allDiagnostics));
+  } else if (allDiagnostics.length > 0) {
+    console.log(formatText(allDiagnostics, options.cwd));
+  }
+
+  const counts = countDiagnostics(allDiagnostics);
+  let exitCode = 0;
+  if (counts.errors > 0) {
+    exitCode = 1;
+  } else if (options.maxWarnings >= 0 && counts.warnings > options.maxWarnings) {
+    if (options.format !== "json") {
+      process.stderr.write(`\nganko: too many warnings (${counts.warnings}). Max allowed: ${options.maxWarnings}.\n`);
+    }
+    exitCode = 1;
+  }
+  process.exit(exitCode);
+}
+
+/**
  * Run the lint command.
  *
  * The project root is the nearest directory containing `tsconfig.json` or
@@ -336,7 +417,6 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   const hasExplicitTargets = options.files.length > 0;
 
-  /* FIX #2: Resolve files once, reuse for both project root discovery and linting. */
   let projectRoot: string;
   let resolvedTargets: readonly string[] | undefined;
 
@@ -373,6 +453,15 @@ export async function runLint(args: readonly string[]): Promise<void> {
   const filesToLint = resolvedTargets ?? fileIndex.allFiles();
 
   if (log.enabled) log.info(`resolved ${filesToLint.length} files to lint`);
+
+  if (!options.noDaemon) {
+    const daemonResult = await tryDaemonLint(options, projectRoot, filesToLint, log);
+    if (daemonResult !== null) {
+      if (fileHandle !== undefined) await fileHandle.close();
+      outputAndExit(daemonResult, options);
+    }
+    if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
+  }
 
   /* FIX #5: CLI never uses Runner/project.run() — only SolidPlugin is needed
      for the TypeScript project service, not for plugin dispatch. */
@@ -431,6 +520,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       }
 
       const key = canonicalPath(path);
+      project.updateFile(key, content);
       const program = project.getLanguageService(key)?.getProgram() ?? null;
       const input = parseWithOptionalProgram(key, content, program, log);
       const graph = buildSolidGraph(input);

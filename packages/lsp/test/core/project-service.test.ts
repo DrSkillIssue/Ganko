@@ -191,6 +191,43 @@ export function Counter() {
     });
   });
 
+  describe("openFiles", () => {
+    let service: TypeScriptProjectService;
+
+    beforeAll(() => {
+      service = createTypeScriptProjectService({
+        tsconfigRootDir: FIXTURES_DIR,
+      });
+    });
+
+    afterAll(() => {
+      service.dispose();
+    });
+
+    it("returns empty set when no files are open", () => {
+      const fresh = createTypeScriptProjectService({
+        tsconfigRootDir: FIXTURES_DIR,
+      });
+      const open = fresh.openFiles();
+      expect(open.size).toBe(0);
+      fresh.dispose();
+    });
+
+    it("tracks opened files", () => {
+      service.getLanguageServiceForFile(COUNTER_FILE);
+      const open = service.openFiles();
+      expect(open.size).toBeGreaterThanOrEqual(1);
+    });
+
+    it("reflects closed files", () => {
+      service.getLanguageServiceForFile(COUNTER_FILE);
+      const beforeClose = service.openFiles().size;
+      service.closeFile(COUNTER_FILE);
+      const afterClose = service.openFiles().size;
+      expect(afterClose).toBeLessThan(beforeClose);
+    });
+  });
+
   describe("dispose", () => {
     it("disposes without error", () => {
       const service = createTypeScriptProjectService({

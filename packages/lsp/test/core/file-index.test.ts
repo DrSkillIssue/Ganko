@@ -8,7 +8,7 @@
  * re-diagnose → config reload → re-diagnose cycle.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createFileIndex } from "../../src/core/file-index";
@@ -195,6 +195,178 @@ describe("createFileIndex", () => {
       for (const file of all) {
         expect(file).not.toContain("config");
       }
+    });
+  });
+
+  describe("symlink handling", () => {
+    it("follows symlinked files to their real path", () => {
+      const root = createTempProject({
+        "src/App.tsx": "export default function App() { return <div />; }",
+      });
+      /* Create a file outside src/ and symlink it into src/.
+         canonicalPath resolves symlinks, so the real path is indexed. */
+      mkdirSync(join(root, "lib"), { recursive: true });
+      writeFileSync(join(root, "lib/utils.ts"), "export const x = 1;");
+      symlinkSync(join(root, "lib/utils.ts"), join(root, "src/linked-utils.ts"));
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      /* The real file is found via both the direct scan and the symlink.
+         canonicalPath deduplicates to the real path. */
+      expect(names).toContain("utils.ts");
+      expect(index.solidFiles.size).toBe(2);
+    });
+
+    it("follows symlinked directories", () => {
+      const root = createTempProject({
+        "src/App.tsx": "<div />",
+        "external/components/Button.tsx": "<button />",
+      });
+      symlinkSync(join(root, "external/components"), join(root, "src/components"));
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).toContain("Button.tsx");
+    });
+
+    it("handles broken symlinks gracefully", () => {
+      const root = createTempProject({
+        "src/App.tsx": "<div />",
+      });
+      symlinkSync(join(root, "nonexistent.tsx"), join(root, "src/broken-link.tsx"));
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).not.toContain("broken-link.tsx");
+    });
+
+    it("prevents symlink cycles", () => {
+      const root = createTempProject({
+        "src/App.tsx": "<div />",
+      });
+      /* Create a cycle: src/loop → src */
+      symlinkSync(join(root, "src"), join(root, "src/loop"));
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      /* Should not hang or crash — cycle is detected and skipped. */
+    });
+  });
+
+  describe("gitignore support", () => {
+    it("respects root .gitignore patterns", () => {
+      const root = createTempProject({
+        ".gitignore": "generated/\n",
+        "src/App.tsx": "<div />",
+        "generated/output.ts": "export const x = 1;",
+      });
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).not.toContain("output.ts");
+    });
+
+    it("respects nested .gitignore files", () => {
+      const root = createTempProject({
+        "src/App.tsx": "<div />",
+        "packages/ui/src/Button.tsx": "<button />",
+        "packages/ui/.gitignore": "*.generated.ts\n",
+        "packages/ui/src/types.generated.ts": "export type X = string;",
+      });
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).toContain("Button.tsx");
+      expect(names).not.toContain("types.generated.ts");
+    });
+
+    it("handles negation patterns", () => {
+      const root = createTempProject({
+        ".gitignore": "*.generated.ts\n!important.generated.ts\n",
+        "src/types.generated.ts": "export type X = string;",
+        "src/important.generated.ts": "export const KEEP = true;",
+        "src/App.tsx": "<div />",
+      });
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).toContain("important.generated.ts");
+      expect(names).not.toContain("types.generated.ts");
+    });
+
+    it("handles directory-only patterns (trailing slash)", () => {
+      const root = createTempProject({
+        ".gitignore": "temp/\n",
+        "src/App.tsx": "<div />",
+        "temp/scratch.ts": "export const x = 1;",
+        /* A file named 'temp' (not a directory) should NOT be ignored */
+      });
+      writeFileSync(join(root, "src/temp"), "not a directory");
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).not.toContain("scratch.ts");
+    });
+
+    it("handles comments and blank lines in .gitignore", () => {
+      const root = createTempProject({
+        ".gitignore": "# This is a comment\n\nignored.ts\n\n# Another comment\n",
+        "src/App.tsx": "<div />",
+        "src/ignored.ts": "export const x = 1;",
+        "src/kept.ts": "export const y = 2;",
+      });
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).toContain("kept.ts");
+      expect(names).not.toContain("ignored.ts");
+    });
+
+    it("gitignore patterns do not override explicit exclude patterns", () => {
+      const root = createTempProject({
+        ".gitignore": "!src/excluded.ts\n",
+        "src/App.tsx": "<div />",
+        "src/excluded.ts": "export const x = 1;",
+      });
+
+      const index = createFileIndex(root, ["**/excluded.ts"]);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      /* Explicit excludes take priority — the file is excluded even though
+         gitignore tries to negate it. */
+      expect(names).not.toContain("excluded.ts");
+    });
+
+    it("works when no .gitignore exists", () => {
+      const root = createTempProject({
+        "src/App.tsx": "<div />",
+        "src/utils.ts": "export const x = 1;",
+      });
+
+      const index = createFileIndex(root);
+      const names = fileNames(index.solidFiles);
+
+      expect(names).toContain("App.tsx");
+      expect(names).toContain("utils.ts");
     });
   });
 });

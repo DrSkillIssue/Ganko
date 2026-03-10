@@ -1,6 +1,6 @@
 {
   "name": "@drskillissue/ganko-lsp",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Language server and CLI linter for Solid.js projects",
   "license": "MIT",
   "type": "commonjs",
@@ -52,14 +52,16 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@drskillissue/ganko-shared": "workspace:^",
     "@drskillissue/ganko": "workspace:^",
-    "@typescript-eslint/parser": "^8.56.1",
-    "@typescript-eslint/project-service": "^8.56.1",
-    "@typescript-eslint/utils": "^8.56.1",
+    "@drskillissue/ganko-shared": "workspace:^",
+    "@typescript-eslint/parser": "^8.57.0",
+    "@typescript-eslint/project-service": "^8.57.0",
+    "@typescript-eslint/utils": "^8.57.0",
+    "ignore": "^7.0.5",
     "typescript": "^5.9.3",
     "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "zod": "^4.3.6"
   },
   "author": "DrSkillIssue",
   "engines": {

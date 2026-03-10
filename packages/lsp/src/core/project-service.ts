@@ -31,6 +31,9 @@ export interface TypeScriptProjectService {
   /** Close a file when no longer needed */
   closeFile(filePath: string): void;
 
+  /** Return the set of currently open file paths. */
+  openFiles(): ReadonlySet<string>;
+
   /** Dispose of all resources */
   dispose(): void;
 }
@@ -163,6 +166,14 @@ export function createTypeScriptProjectService(
       const key = canonicalPath(filePath);
       service.closeClientFile(key);
       if (log?.enabled) log.trace(`closeFile: ${key}`);
+    },
+
+    openFiles(): ReadonlySet<string> {
+      const paths = new Set<string>();
+      for (const filePath of service.openFiles.keys()) {
+        paths.add(filePath);
+      }
+      return paths;
     },
 
     dispose(): void {
