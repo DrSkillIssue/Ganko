@@ -15,6 +15,9 @@ node_modules/**
 *.tsbuildinfo
 *.vsix
 
+# Source maps
+**/*.map
+
 # Test files
 test/**
 **/*.test.ts
@@ -28,3 +31,4 @@ AGENTS.md
 STYLE_GUIDE.md
 bun.lockb
 bun.lock
+scripts/**
