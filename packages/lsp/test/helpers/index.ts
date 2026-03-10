@@ -7,6 +7,9 @@
 // Test server
 export { TestServer, createTestServer, type PrepareRenameResult } from "./test-server";
 
+// LSP protocol client
+export { LSPClient, type PublishedDiagnostics } from "./lsp-client";
+
 // Server pool
 export { ServerPool, serverPool, createServerPool } from "./server-pool";
 
