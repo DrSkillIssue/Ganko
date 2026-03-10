@@ -163,8 +163,8 @@ export function runCrossFileDiagnostics(
   const log = cache.logger;
   if (log.enabled) log.debug(`runCrossFileDiagnostics ENTER: path=${path} solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
 
-  if (fileIndex.solidFiles.size === 0 || fileIndex.cssFiles.size === 0) {
-    log.debug("runCrossFileDiagnostics EXIT: no solid or css files");
+  if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) {
+    log.debug("runCrossFileDiagnostics EXIT: no files to analyze");
     return [];
   }
 
@@ -270,7 +270,7 @@ export function runAllCrossFileDiagnostics(
   const log = cache.logger;
   if (log.enabled) log.debug(`runAllCrossFileDiagnostics ENTER: solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
 
-  if (fileIndex.solidFiles.size === 0 || fileIndex.cssFiles.size === 0) return [];
+  if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) return [];
 
   const { results, emit } = createEmit(overrides);
   rebuildGraphsAndRunCrossFileRules(fileIndex, project, cache, tailwind, resolveContent, emit, externalCustomProperties);

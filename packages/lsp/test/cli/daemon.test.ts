@@ -974,4 +974,66 @@ describe("daemon integration", () => {
       expect(normalize(second.diagnostics)).toEqual(normalize(first.diagnostics));
     });
   });
+
+  describe("cross-file on solid-only project (no CSS)", () => {
+    it("does not crash when cross-file runs without CSS files", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": BUGGY_COMPONENT,
+        "src/helpers.ts": "export const add = (a: number, b: number) => a + b;",
+      });
+
+      /** Run with cross-file enabled (default) on a project with zero CSS. */
+      const result = lintJson(root, ["--no-daemon"]);
+
+      /** Should produce diagnostics without crashing. */
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+    });
+
+    it("daemon handles solid-only project cross-file analysis", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": BUGGY_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+      const result = lintJson(root);
+      stopDaemon(root);
+      await sleep(500);
+
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("stale file cleanup", () => {
+    it("daemon closes files removed between requests", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": BUGGY_COMPONENT,
+        "src/Extra.tsx": BUGGY_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First request opens both files. */
+      const first = lintJson(root);
+      expect(first.diagnostics.length).toBeGreaterThan(0);
+
+      /** Delete Extra.tsx and re-lint. */
+      rmSync(join(root, "src/Extra.tsx"));
+      const second = lintJson(root);
+
+      stopDaemon(root);
+      await sleep(500);
+
+      /** Fewer diagnostics after deletion — deleted file's diagnostics are gone. */
+      expect(second.diagnostics.length).toBeLessThan(first.diagnostics.length);
+
+      /** No diagnostics should reference the deleted file. */
+      const deletedFileDiags = second.diagnostics.filter(
+        (d) => d.file.includes("Extra.tsx"),
+      );
+      expect(deletedFileDiags).toHaveLength(0);
+    });
+  });
 });

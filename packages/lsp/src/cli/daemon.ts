@@ -285,6 +285,22 @@ async function handleLintRequest(
     }
   }
 
+  /* Close files in the TS project service that are no longer in the
+     file index. Without this, every file opened via updateFile/getLanguageService
+     across all requests accumulates in the project service, leaking memory. */
+  const activeFiles = new Set(fileIndex.solidFiles);
+  const openFiles = project.openFiles();
+  let closed = 0;
+  for (const openPath of openFiles) {
+    if (!activeFiles.has(openPath)) {
+      project.closeFile(openPath);
+      closed++;
+    }
+  }
+  if (closed > 0 && log.enabled) {
+    log.debug(`closed ${closed} stale files from TS project service (${openFiles.size - closed} remain)`);
+  }
+
   return { kind: "lint-response", id: request.id, diagnostics: allDiagnostics };
 }
 

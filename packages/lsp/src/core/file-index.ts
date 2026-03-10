@@ -4,8 +4,13 @@
  * Scans the workspace root for all Solid and CSS files at startup,
  * then maintains the index via didChangeWatchedFiles notifications.
  * Provides the full file set needed for cross-file analysis.
+ *
+ * Respects `.gitignore` files (root and nested) using the `ignore` package
+ * which implements the full gitignore specification including negation,
+ * directory-only patterns, anchoring, and escape sequences.
  */
-import { readdirSync } from "node:fs";
+import ignore, { type Ignore } from "ignore";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, matchesGlob } from "node:path";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { Logger } from "@drskillissue/ganko-shared";
@@ -46,12 +51,90 @@ function classify(path: string, solidFiles: Set<string>, cssFiles: Set<string>):
   if (kind === "css") cssFiles.add(key);
 }
 
+/**
+ * Resolve a symlink to its real path and stat it.
+ *
+ * @returns `{ realPath, isFile, isDir }` or null if the target is unresolvable
+ */
+function resolveSymlink(
+  linkPath: string,
+  log?: Logger,
+): { realPath: string; isFile: boolean; isDir: boolean } | null {
+  try {
+    const realPath = realpathSync(linkPath);
+    const st = statSync(realPath);
+    return { realPath, isFile: st.isFile(), isDir: st.isDirectory() };
+  } catch {
+    if (log?.enabled) log.trace(`fileIndex: cannot resolve symlink ${linkPath}`);
+    return null;
+  }
+}
+
+/** An `Ignore` instance scoped to the directory containing its `.gitignore`. */
+interface ScopedIgnore {
+  readonly dir: string
+  readonly ig: Ignore
+}
+
+/**
+ * Try to read a `.gitignore` file and create a scoped `Ignore` instance.
+ *
+ * @returns A `ScopedIgnore` or null if no `.gitignore` exists
+ */
+function tryLoadGitignore(dir: string, log?: Logger): ScopedIgnore | null {
+  const gitignorePath = join(dir, ".gitignore");
+  let raw: string;
+  try {
+    raw = readFileSync(gitignorePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const ig = ignore().add(raw);
+  if (log?.enabled) log.trace(`fileIndex: loaded .gitignore from ${dir}`);
+  return { dir, ig };
+}
+
+/**
+ * Test whether a path is ignored by any `.gitignore` in the stack.
+ *
+ * Each `ScopedIgnore` is tested with a path relative to its own directory,
+ * matching git's behavior where nested `.gitignore` patterns are relative
+ * to the directory containing the `.gitignore` file.
+ *
+ * @param absolutePath - Absolute path to test
+ * @param isDir - Whether the path is a directory (appends `/` for gitignore dir-only patterns)
+ * @param gitignoreStack - Stack of scoped ignore instances (root first)
+ * @returns `true` if any gitignore in the stack ignores this path
+ */
+function isGitignored(
+  absolutePath: string,
+  isDir: boolean,
+  gitignoreStack: readonly ScopedIgnore[],
+): boolean {
+  for (let i = gitignoreStack.length - 1; i >= 0; i--) {
+    const scoped = gitignoreStack[i];
+    if (!scoped) continue;
+    const rel = relative(scoped.dir, absolutePath);
+    if (rel.startsWith("..")) continue;
+    /* The `ignore` package distinguishes files from directories: `foo/` in
+       gitignore only matches directories. Appending `/` tells the package
+       this path is a directory. */
+    const testPath = isDir ? rel + "/" : rel;
+    const result = scoped.ig.test(testPath);
+    if (result.ignored) return true;
+    if (result.unignored) return false;
+  }
+  return false;
+}
+
 function scanDir(
   dir: string,
   rootPath: string,
   excludes: readonly string[],
   solidFiles: Set<string>,
   cssFiles: Set<string>,
+  visited: Set<string>,
+  gitignoreStack: ScopedIgnore[],
   log?: Logger,
 ): void {
   let entries;
@@ -62,29 +145,70 @@ function scanDir(
     return;
   }
 
+  /* Check for a nested .gitignore in this directory. */
+  const nestedIgnore = tryLoadGitignore(dir, log);
+  if (nestedIgnore !== null) {
+    gitignoreStack.push(nestedIgnore);
+  }
+
   const hasExcludes = excludes.length > 0;
+  const hasGitignore = gitignoreStack.length > 0;
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     if (!entry) continue;
+
+    if (entry.isSymbolicLink()) {
+      const linkPath = join(dir, entry.name);
+      const resolved = resolveSymlink(linkPath, log);
+      if (resolved === null) continue;
+
+      if (resolved.isDir) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        if (entry.name.startsWith(".")) continue;
+        if (hasExcludes && isExcluded(relative(rootPath, linkPath), excludes)) continue;
+        if (hasGitignore && isGitignored(linkPath, true, gitignoreStack)) continue;
+        if (visited.has(resolved.realPath)) continue;
+        visited.add(resolved.realPath);
+        scanDir(resolved.realPath, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
+      } else if (resolved.isFile) {
+        if (hasExcludes && isExcluded(relative(rootPath, linkPath), excludes)) continue;
+        if (hasGitignore && isGitignored(linkPath, false, gitignoreStack)) continue;
+        classify(linkPath, solidFiles, cssFiles);
+      }
+      continue;
+    }
+
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
       if (entry.name.startsWith(".")) continue;
       const childDir = join(dir, entry.name);
       if (hasExcludes && isExcluded(relative(rootPath, childDir), excludes)) continue;
-      scanDir(childDir, rootPath, excludes, solidFiles, cssFiles, log);
+      if (hasGitignore && isGitignored(childDir, true, gitignoreStack)) continue;
+      scanDir(childDir, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
       continue;
     }
     if (entry.isFile()) {
       const filePath = join(dir, entry.name);
       if (hasExcludes && isExcluded(relative(rootPath, filePath), excludes)) continue;
+      if (hasGitignore && isGitignored(filePath, false, gitignoreStack)) continue;
       classify(filePath, solidFiles, cssFiles);
     }
+  }
+
+  /* Pop the nested gitignore when leaving this directory. */
+  if (nestedIgnore !== null) {
+    gitignoreStack.pop();
   }
 }
 
 /**
  * Create a file index by scanning the project root.
+ *
+ * Respects `.gitignore` files at all directory levels using the `ignore`
+ * package (full gitignore spec: negation, directory-only, anchoring, escapes).
+ * Patterns from nested `.gitignore` files are scoped to their containing
+ * directory, matching git's behavior.
  *
  * @param rootPath - Project root directory
  * @param excludes - Glob patterns matched against paths relative to rootPath
@@ -94,7 +218,9 @@ export function createFileIndex(rootPath: string, excludes: readonly string[] = 
   const cssFiles = new Set<string>();
 
   const t0 = performance.now();
-  scanDir(rootPath, rootPath, excludes, solidFiles, cssFiles, log);
+  const visited = new Set<string>();
+  const gitignoreStack: ScopedIgnore[] = [];
+  scanDir(rootPath, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
   if (log?.enabled) log.debug(`fileIndex: scanned ${rootPath} → ${solidFiles.size} solid, ${cssFiles.size} css in ${(performance.now() - t0).toFixed(1)}ms`);
 
   return {

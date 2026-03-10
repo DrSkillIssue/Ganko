@@ -3,7 +3,7 @@
   "private": true,
   "displayName": "Ganko — Solid.js & CSS Linter",
   "description": "Static analysis for Solid.js and CSS",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "license": "MIT",
   "publisher": "ganko",
   "icon": "icon.png",
@@ -3016,7 +3016,7 @@
     "@drskillissue/ganko": "workspace:^"
   },
   "devDependencies": {
-    "@types/vscode": "^1.105.0",
+    "@types/vscode": "^1.110.0",
     "@vscode/vsce": "^3.7.1",
     "@drskillissue/ganko-lsp": "workspace:^"
   }

@@ -15,6 +15,7 @@ const BUNDLED_DEPS = [
   "typescript",
   "eslint",
   "zod",
+  "ignore",
 ] as const;
 
 export default defineConfig([

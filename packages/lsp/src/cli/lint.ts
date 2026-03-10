@@ -520,6 +520,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       }
 
       const key = canonicalPath(path);
+      project.updateFile(key, content);
       const program = project.getLanguageService(key)?.getProgram() ?? null;
       const input = parseWithOptionalProgram(key, content, program, log);
       const graph = buildSolidGraph(input);

@@ -36,6 +36,12 @@ export interface Project {
   /** Update in-memory file content for unsaved buffers */
   updateFile(path: string, content: string): void
 
+  /** Close a file in the TypeScript project service, releasing its resources. */
+  closeFile(path: string): void
+
+  /** Return the set of currently open file paths in the TypeScript project service. */
+  openFiles(): ReadonlySet<string>
+
   /** Update plugins configuration */
   setPlugins(plugins: readonly Plugin<string>[]): void
 
@@ -76,6 +82,14 @@ export function createProject(config: ProjectConfig): Project {
 
     updateFile(path, content) {
       tsService.updateFile(path, content);
+    },
+
+    closeFile(path) {
+      tsService.closeFile(path);
+    },
+
+    openFiles() {
+      return tsService.openFiles();
     },
 
     setPlugins(plugins) {
