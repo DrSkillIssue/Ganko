@@ -658,6 +658,19 @@ function setupDocumentHandlers(context: ServerContext): void {
     }
 
     context.rediagnoseAffected(paths, diagnosed);
+
+    /* Phase 4: Merge cross-file diagnostics into changed files.
+       Phase 2 published changed files with single-file diagnostics only
+       (includeCrossFile=false). Phase 3 rebuilt cross-file results for
+       the workspace. Republish each changed file by merging the cached
+       single-file results with the now-available cross-file diagnostics.
+       No re-parsing — reads from diagCache + graphCache only. */
+    for (let i = 0, len = changes.length; i < len; i++) {
+      const change = changes[i];
+      if (!change) continue;
+      republishMergedDiagnostics(context, change.path);
+    }
+
     context.connection.tracer.log(
       `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
     );
@@ -905,6 +918,45 @@ function publishFileDiagnostics(
   );
   context.connection.tracer.log(
     `publishFileDiagnostics ${key}: ${rawDiagnostics.length} diagnostics in ${elapsed}ms`,
+  );
+
+  const params: PublishDiagnosticsParams = { uri, diagnostics };
+  if (docInfo?.version !== undefined) params.version = docInfo.version;
+  context.connection.sendDiagnostics(params);
+}
+
+/**
+ * Republish diagnostics for a file by merging already-computed single-file
+ * results from `diagCache` with fresh cross-file results from `graphCache`.
+ *
+ * Used after `rediagnoseAffected` rebuilds cross-file results: the changed
+ * files were initially published with `includeCrossFile=false` (Phase 2 of
+ * the debounce flow), so they only have single-file diagnostics in the
+ * editor. This function merges the cached single-file results with the
+ * now-available cross-file diagnostics and sends the complete set — without
+ * re-parsing or re-running any analysis.
+ *
+ * No-ops when no cross-file diagnostics exist for the file (nothing to add).
+ */
+function republishMergedDiagnostics(
+  context: ServerContext,
+  path: string,
+): void {
+  const key = canonicalPath(path);
+  const crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
+  if (crossFile.length === 0) return;
+
+  const singleFile = context.diagCache.get(key);
+  if (singleFile === undefined) return;
+
+  const rawDiagnostics = [...singleFile, ...crossFile];
+  context.diagCache.set(key, rawDiagnostics);
+  const diagnostics = convertDiagnostics(rawDiagnostics);
+  const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
+  const docInfo = context.documentState.openDocuments.get(uri);
+
+  if (context.log.enabled) context.log.debug(
+    `republishMergedDiagnostics: ${key} single=${singleFile.length} cross=${crossFile.length} total=${rawDiagnostics.length}`,
   );
 
   const params: PublishDiagnosticsParams = { uri, diagnostics };
