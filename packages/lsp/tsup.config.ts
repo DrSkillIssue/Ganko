@@ -14,6 +14,7 @@ const BUNDLED_DEPS = [
   "@typescript-eslint/visitor-keys",
   "typescript",
   "eslint",
+  "zod",
 ] as const;
 
 export default defineConfig([

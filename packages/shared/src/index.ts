@@ -28,6 +28,7 @@ export { canonicalPath, uriToPath, pathToUri } from "./path";
 
 // Logging
 export {
+  LOG_LEVELS,
   noopLogger,
   parseLogLevel,
   createLogger,
