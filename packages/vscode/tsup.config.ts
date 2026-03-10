@@ -13,11 +13,12 @@ export default defineConfig({
   noExternal: ["vscode-languageclient", /^@drskillissue\/ganko/],
   async onSuccess() {
     const serverDir = resolve("dist", "server");
-    mkdirSync(serverDir, { recursive: true });
+    const serverDistDir = resolve(serverDir, "dist");
+    mkdirSync(serverDistDir, { recursive: true });
 
-    const lspPath = resolve("..", "lsp");
-    cpSync(resolve(lspPath, "dist"), resolve(serverDir, "dist"), { recursive: true });
-    cpSync(resolve(lspPath, "package.json"), resolve(serverDir, "package.json"));
+    const lspDist = resolve("..", "lsp", "dist");
+    cpSync(resolve(lspDist, "entry.js"), resolve(serverDistDir, "entry.js"));
+    cpSync(resolve("..", "lsp", "package.json"), resolve(serverDir, "package.json"));
 
     const webviewDir = resolve("dist", "webview");
     mkdirSync(webviewDir, { recursive: true });

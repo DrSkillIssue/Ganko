@@ -1,6 +1,6 @@
 {
   "name": "@drskillissue/ganko-lsp",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Language server and CLI linter for Solid.js projects",
   "license": "MIT",
   "type": "commonjs",
