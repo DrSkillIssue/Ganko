@@ -14,10 +14,18 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LSPClient } from "../helpers/lsp-client";
+import type { Diagnostic as LSPDiagnostic } from "vscode-languageserver";
+
+function findByCode(list: LSPDiagnostic[], code: string | number | undefined): LSPDiagnostic | undefined {
+  for (let i = 0, len = list.length; i < len; i++) {
+    if (list[i]?.code === code) return list[i];
+  }
+  return undefined;
+}
 
 const TSCONFIG = JSON.stringify({
   compilerOptions: {
@@ -69,14 +77,10 @@ describe("cross-file debounce", () => {
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "ganko-debounce-test-"));
 
-    // Create node_modules symlink so the server can resolve solid-js
     const fixtureNodeModules = join(__dirname, "../fixtures/node_modules");
-    const { symlinkSync } = require("node:fs");
     try {
       symlinkSync(fixtureNodeModules, join(tempDir, "node_modules"), "dir");
     } catch {
-      // May fail on some platforms — copy instead
-      const { cpSync } = require("node:fs");
       cpSync(fixtureNodeModules, join(tempDir, "node_modules"), { recursive: true });
     }
 
@@ -140,7 +144,8 @@ describe("cross-file debounce", () => {
 
     // Verify line numbers shifted by 1 (blank line inserted at top of CSS)
     for (const diag of finalCrossFile) {
-      const initialMatch = initialCrossFile.find(d => d.code === diag.code);
+      const code = diag.code;
+      const initialMatch = findByCode(initialCrossFile, code);
       if (initialMatch) {
         expect(diag.range.start.line).toBe(initialMatch.range.start.line + 1);
       }
