@@ -12,6 +12,7 @@ import type { LayoutElementNode, LayoutElementRef } from "./graph"
 import type { LayoutSignalSnapshot } from "./signal-model"
 import { readKnownSignalWithGuard, readNormalizedSignalEvidence } from "./signal-access"
 
+const WHITESPACE_RE = /\s+/
 const TABLE_SEMANTIC_TAGS = new Set(["table", "thead", "tbody", "tfoot", "tr", "td", "th"])
 const TABLE_DISPLAY_VALUES = new Set([
   "table",
@@ -422,7 +423,7 @@ function resolveEffectiveAlignItems(
 ): string | null {
   if (alignItems !== null) return alignItems
   if (placeItems === null) return null
-  const firstToken = placeItems.split(/\s+/)[0]
+  const firstToken = placeItems.split(WHITESPACE_RE)[0]
   return firstToken ?? null
 }
 
