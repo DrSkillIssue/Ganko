@@ -4,26 +4,61 @@
  * Loads ESLint flat config files and extracts ganko rule overrides
  * that differ from the RULES manifest defaults, plus global ignore patterns.
  */
-import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { existsSync, copyFileSync, unlinkSync } from "node:fs";
+import { resolve, join, extname, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { z } from "zod/v4";
 import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult, Logger } from "@drskillissue/ganko-shared";
-import { ESLINT_CONFIG_FILENAMES, NUMERIC_SEVERITY, SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
+import { ESLINT_CONFIG_FILENAMES, numericSeverity, SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
 import { getRule } from "@drskillissue/ganko";
 
-/** ESLint flat config severity: string or numeric */
-type ESLintSeverity = "error" | "warn" | "off" | 0 | 1 | 2;
+let importCounter = 0;
 
-/** ESLint flat config rule value: severity alone or [severity, ...options] */
-type ESLintRuleEntry = ESLintSeverity | readonly [ESLintSeverity, ...unknown[]];
-
-/** A single ESLint flat config object */
-interface FlatConfigObject {
-  readonly rules?: Readonly<Record<string, ESLintRuleEntry>>
-  readonly files?: unknown
-  readonly plugins?: unknown
-  readonly ignores?: readonly string[]
+/**
+ * Import an ESM module bypassing the runtime's module cache.
+ *
+ * Both Node.js and Bun cache `import()` results by URL. Node respects
+ * query-string differences (`?t=123`), but Bun does not — it resolves
+ * to the same filesystem path and returns the cached module.
+ *
+ * This function copies the file to a unique temporary path, imports
+ * that copy, and deletes it afterward. Each call produces a fresh
+ * module regardless of runtime.
+ */
+async function importFresh(filePath: string): Promise<unknown> {
+  const ext = extname(filePath);
+  const tmpPath = join(dirname(filePath), `.ganko-eslint-${process.pid}-${++importCounter}${ext}`);
+  copyFileSync(filePath, tmpPath);
+  try {
+    const mod = await import(pathToFileURL(tmpPath).href);
+    return mod.default ?? mod;
+  } finally {
+    try { unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
+  }
 }
+
+/** ESLint rule values: severity, array, or arbitrary plugin values (boolean, object, etc.).
+ * Covers all values ESLint allows in flat config `rules` records. */
+type ESLintRuleValue = string | number | boolean | null | readonly (string | number | boolean | null | Record<string, unknown>)[];
+
+/** Zod schema for a single ESLint flat config object.
+ * Rules use z.unknown() because non-ganko plugins may use arbitrary
+ * value shapes (booleans, strings, etc.). Filtering happens in
+ * normalizeSeverity which already handles unrecognizable entries. */
+const FlatConfigObjectSchema = z.object({
+  rules: z.record(z.string(), z.unknown()).optional(),
+  files: z.unknown().optional(),
+  plugins: z.unknown().optional(),
+  ignores: z.array(z.string()).optional(),
+}).passthrough();
+
+type FlatConfigObject = z.infer<typeof FlatConfigObjectSchema>;
+
+/** Zod schema for the ESLint config export: array of config objects, or a single object. */
+const ESLintConfigExportSchema = z.union([
+  z.array(FlatConfigObjectSchema),
+  FlatConfigObjectSchema,
+]);
 
 /** Shared empty result — returned when no config is found or config is empty. */
 export const EMPTY_ESLINT_RESULT: ESLintConfigResult = { overrides: {}, globalIgnores: [] };
@@ -31,16 +66,22 @@ export const EMPTY_ESLINT_RESULT: ESLintConfigResult = { overrides: {}, globalIg
 /** Prefix for ganko rules in ESLint config */
 const RULE_PREFIX = "solid/";
 
+
 /**
  * Normalize an ESLint severity value to a RuleSeverityOverride.
  *
  * Handles: "error", "warn", "off", 0, 1, 2, and array format [severity, ...options].
  * Returns null if the value is unrecognizable.
  */
-function normalizeSeverity(entry: ESLintRuleEntry): RuleSeverityOverride | null {
-  const raw = Array.isArray(entry) ? entry[0] : entry;
-  if (typeof raw === "number") return NUMERIC_SEVERITY[raw] ?? null;
-  if (typeof raw === "string") return SEVERITY_LOOKUP[raw] ?? null;
+function normalizeSeverity(entry: ESLintRuleValue): RuleSeverityOverride | null {
+  if (Array.isArray(entry)) {
+    const [first] = entry;
+    if (typeof first === "number") return numericSeverity(first) ?? null;
+    if (typeof first === "string") return SEVERITY_LOOKUP[first] ?? null;
+    return null;
+  }
+  if (typeof entry === "number") return numericSeverity(entry) ?? null;
+  if (typeof entry === "string") return SEVERITY_LOOKUP[entry] ?? null;
   return null;
 }
 
@@ -51,10 +92,8 @@ function normalizeSeverity(entry: ESLintRuleEntry): RuleSeverityOverride | null 
  */
 function isGlobalIgnoresOnly(config: FlatConfigObject): boolean {
   if (!config.ignores || config.ignores.length === 0) return false;
-  if (config.files !== undefined) return false;
-  if (config.rules !== undefined) return false;
-  if (config.plugins !== undefined) return false;
-  return true;
+  const keys = Object.keys(config);
+  return keys.length === 1 && keys[0] === "ignores";
 }
 
 /**
@@ -110,6 +149,7 @@ function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
       if (!key.startsWith(RULE_PREFIX)) continue;
       const entry = rules[key];
       if (entry === undefined) continue;
+      if (typeof entry !== "string" && typeof entry !== "number" && !Array.isArray(entry)) continue;
       const severity = normalizeSeverity(entry);
       if (severity === null) continue;
       raw.set(key.slice(RULE_PREFIX.length), severity);
@@ -134,53 +174,34 @@ function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
  * @param explicitPath - User-specified config path (takes priority)
  * @returns Absolute path to config file, or null if not found
  */
-function findConfigFile(rootPath: string, explicitPath?: string): string | null {
+function findConfigFile(rootPath: string, explicitPath?: string, log?: Logger): string | null {
   if (explicitPath) {
     const resolved = resolve(rootPath, explicitPath);
-    return existsSync(resolved) ? resolved : null;
+    const found = existsSync(resolved);
+    if (log?.enabled) log.trace(`eslintConfig: explicit path ${resolved} → ${found ? "found" : "NOT found"}`);
+    return found ? resolved : null;
   }
 
   for (const filename of ESLINT_CONFIG_FILENAMES) {
     const candidate = join(rootPath, filename);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) {
+      if (log?.enabled) log.trace(`eslintConfig: found config ${candidate}`);
+      return candidate;
+    }
+    if (log?.enabled) log.trace(`eslintConfig: tried ${candidate} → not found`);
   }
 
   return null;
 }
 
 /**
- * Coerce a dynamic import result into a FlatConfigObject array.
- *
- * ESLint flat config exports either an array of config objects or a single
- * config object. This function normalizes both forms and filters out
- * non-object entries (primitives, nulls) that may appear in the array.
- */
-function coerceToConfigArray(exported: Record<string, FlatConfigObject>): readonly FlatConfigObject[] {
-  if (Array.isArray(exported)) {
-    const configs: FlatConfigObject[] = [];
-    for (let i = 0; i < exported.length; i++) {
-      const entry = exported[i];
-      if (entry !== null && typeof entry === "object") {
-        configs.push(entry);
-      }
-    }
-    return configs;
-  }
-
-  if ("rules" in exported) {
-    return [exported];
-  }
-
-  return [];
-}
-
-/**
  * Process a dynamically imported ESLint config export into overrides and ignores.
  *
- * Handles both array exports (standard flat config) and single-object exports.
+ * Parses the export through a zod schema, handling both array exports
+ * (standard flat config) and single-object exports.
  */
-function processExport(exported: Record<string, FlatConfigObject>): ESLintConfigResult {
-  const configs = coerceToConfigArray(exported);
+function processExport(exported: FlatConfigObject[] | FlatConfigObject): ESLintConfigResult {
+  const configs = Array.isArray(exported) ? exported : [exported];
   if (configs.length === 0) return EMPTY_ESLINT_RESULT;
 
   return {
@@ -205,19 +226,30 @@ export async function loadESLintConfig(
   explicitPath?: string,
   log?: Logger,
 ): Promise<ESLintConfigResult> {
-  const configPath = findConfigFile(rootPath, explicitPath);
+  const configPath = findConfigFile(rootPath, explicitPath, log);
   if (!configPath) {
     if (log?.enabled) log.debug(`eslintConfig: no config file found in ${rootPath}`);
     return EMPTY_ESLINT_RESULT;
   }
 
   if (log?.enabled) log.debug(`eslintConfig: loading ${configPath}`);
-  const url = pathToFileURL(configPath).href + `?t=${Date.now()}`;
   try {
-    const mod = await import(url);
-    const exported = mod.default ?? mod;
-    const result = processExport(exported);
-    if (log?.enabled) log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
+    const raw = await importFresh(configPath);
+    const parsed = ESLintConfigExportSchema.safeParse(raw);
+    if (!parsed.success) {
+      if (log?.enabled) log.warning(`eslintConfig: ${configPath} export did not match expected schema`);
+      return EMPTY_ESLINT_RESULT;
+    }
+    const result = processExport(parsed.data);
+    if (log?.enabled) {
+      log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
+      if (Object.keys(result.overrides).length > 0) {
+        log.trace(`eslintConfig: overrides: ${JSON.stringify(result.overrides)}`);
+      }
+      if (result.globalIgnores.length > 0) {
+        log.trace(`eslintConfig: globalIgnores: ${JSON.stringify(result.globalIgnores)}`);
+      }
+    }
     return result;
   } catch (e) {
     if (log?.enabled) log.warning(`eslintConfig: failed to load ${configPath}: ${e instanceof Error ? e.message : String(e)}`);

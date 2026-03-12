@@ -16,6 +16,7 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, createLogger } from "@drskillissue/ganko-shared";
@@ -81,7 +82,19 @@ function shutdown(state: DaemonState): void {
 
   state.server.close();
 
+  /** Hard exit if pending work doesn't settle within 10s (prevents zombie). */
+  const hardExit = setTimeout(() => {
+    const sockPath = daemonSocketPath(state.projectRoot);
+    try { unlinkSync(sockPath); } catch { /* already gone */ }
+    state.log.error("hard exit: pending work did not settle within 10s");
+    void state.closeLogFile().finally(() => {
+      process.exit(1);
+    });
+  }, 10_000);
+  hardExit.unref();
+
   void state.pending.finally(() => {
+    clearTimeout(hardExit);
     if (state.project !== null) {
       try { state.project.dispose(); } catch { /* dispose is best-effort */ }
       state.project = null;
@@ -95,6 +108,16 @@ function shutdown(state: DaemonState): void {
       process.exit(0);
     });
   });
+}
+
+/** Compare two ReadonlySet instances for shallow equality. */
+function setsEqual(a: ReadonlySet<string> | null, b: ReadonlySet<string>): boolean {
+  if (a === null) return b.size === 0;
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
 }
 
 /** Invalidate all caches when project root or excludes change. */
@@ -165,12 +188,6 @@ async function handleLintRequest(
     }
   }
 
-  /** Invalidate CSS/Tailwind per-request — files may change on disk.
-   * externalCustomProperties is kept warm — node_modules doesn't change
-   * between lint runs. Restart the daemon after npm install. */
-  state.cssContentMap = null;
-  state.tailwind = null;
-
   let filesToLint: readonly string[];
   if (params.files.length > 0) {
     filesToLint = params.files;
@@ -184,26 +201,77 @@ async function handleLintRequest(
 
   const allDiagnostics: Diagnostic[] = [];
 
-  /** Read CSS files fresh each request — disk state may have changed. */
-  if (state.cssContentMap === null) {
+  /** Re-read CSS files from disk and diff against cached content.
+   * Only invalidate the GraphCache CSS generation when content actually
+   * changed, so cross-file results remain cached across no-op runs. */
+  {
     const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    state.cssContentMap = new Map<string, string>();
+    const previousContentMap = state.cssContentMap;
+    const nextContentMap = new Map<string, string>();
+
+    let cssChanged = previousContentMap === null;
+
     for (let i = 0, len = allCSSFiles.length; i < len; i++) {
       const cssFile = allCSSFiles[i];
       if (!cssFile) continue;
-      state.cssContentMap.set(cssFile.path, cssFile.content);
+      nextContentMap.set(cssFile.path, cssFile.content);
+
+      if (!cssChanged && previousContentMap !== null) {
+        const prev = previousContentMap.get(cssFile.path);
+        if (prev === undefined || prev !== cssFile.content) {
+          cssChanged = true;
+        }
+      }
     }
 
-    /** H4: Cache Tailwind validator across requests. */
-    state.tailwind = await resolveTailwindValidator(allCSSFiles).catch((err) => {
-      log.warning(`failed to resolve Tailwind validator: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    });
+    // Detect deleted CSS files
+    if (!cssChanged && previousContentMap !== null) {
+      for (const prevPath of previousContentMap.keys()) {
+        if (!nextContentMap.has(prevPath)) {
+          cssChanged = true;
+          break;
+        }
+      }
+    }
+
+    state.cssContentMap = nextContentMap;
+
+    if (cssChanged) {
+      // Invalidate every CSS file in the cache so cssGeneration bumps
+      // and getCachedCrossFileResults() / getCSSGraph() return misses.
+      if (state.cache !== null) {
+        for (const cssPath of nextContentMap.keys()) {
+          state.cache.invalidate(cssPath);
+        }
+        // Also invalidate deleted CSS files so their cross-file
+        // diagnostics are evicted and cssGeneration reflects the removal.
+        if (previousContentMap !== null) {
+          for (const prevPath of previousContentMap.keys()) {
+            if (!nextContentMap.has(prevPath)) {
+              state.cache.invalidate(prevPath);
+            }
+          }
+        }
+      }
+
+      state.tailwind = await resolveTailwindValidator(allCSSFiles).catch((err) => {
+        log.warning(`failed to resolve Tailwind validator: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+    }
   }
 
-  /** H5: Cache external custom properties across requests. */
-  if (state.externalCustomProperties === null) {
-    state.externalCustomProperties = scanDependencyCustomProperties(projectRoot);
+  /** H5: Re-scan external custom properties every request.
+   * node_modules may change between runs (npm install). The scan reads
+   * package.json + a few JS files per dependency — fast enough per-request.
+   * When the set changes, invalidate the CSSGraph so it rebuilds with
+   * the updated synthetic `:root` declarations. */
+  {
+    const nextExternal = scanDependencyCustomProperties(projectRoot);
+    if (!setsEqual(state.externalCustomProperties, nextExternal) && state.cache !== null) {
+      state.cache.invalidateAll();
+    }
+    state.externalCustomProperties = nextExternal;
   }
 
   /** H2: Persist GraphCache across requests. */
@@ -212,7 +280,10 @@ async function handleLintRequest(
   }
   const cache = state.cache;
 
-  /** M3: Use async file reads to avoid blocking the event loop. */
+  /** M3: Use async file reads to avoid blocking the event loop.
+   * Only rebuild SolidGraphs when the TS script version changed —
+   * avoids bumping solidGeneration on no-op runs, which would
+   * invalidate CSSGraph/LayoutGraph/cross-file caches. */
   for (let i = 0, len = filesToLint.length; i < len; i++) {
     const path = filesToLint[i];
     if (!path) continue;
@@ -226,19 +297,44 @@ async function handleLintRequest(
 
     const key = canonicalPath(path);
     project.updateFile(key, content);
-    const program = project.getLanguageService(key)?.getProgram() ?? null;
-    const input = parseWithOptionalProgram(key, content, program, log);
-    const graph = buildSolidGraph(input);
 
-    const version = project.getScriptVersion(key) ?? "0";
-    cache.setSolidGraph(key, version, graph);
+    const version = project.getScriptVersion(key)
+      ?? `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
+    const needsRebuild = !cache.hasSolidGraph(key, version);
 
-    const { results, emit } = createEmit(eslintResult.overrides);
-    runSolidRules(graph, input.sourceCode, emit);
-    for (let j = 0, dLen = results.length; j < dLen; j++) {
-      const result = results[j];
-      if (!result) continue;
-      allDiagnostics.push(result);
+    if (needsRebuild) {
+      const program = project.getLanguageService(key)?.getProgram() ?? null;
+      const input = parseWithOptionalProgram(key, content, program, log);
+      const graph = buildSolidGraph(input);
+      cache.setSolidGraph(key, version, graph);
+
+      const { results, emit } = createEmit(eslintResult.overrides);
+      runSolidRules(graph, input.sourceCode, emit);
+      for (let j = 0, dLen = results.length; j < dLen; j++) {
+        const result = results[j];
+        if (!result) continue;
+        allDiagnostics.push(result);
+      }
+    } else {
+      // File unchanged — re-run single-file rules from cached graph.
+      // Parse is still needed for sourceCode, but graph build is skipped.
+      const cachedGraph = cache.getCachedSolidGraph(key, version);
+      if (cachedGraph === null) {
+        log.warning(`getCachedSolidGraph miss after hasSolidGraph hit for ${key} v=${version}`);
+      }
+      const program = project.getLanguageService(key)?.getProgram() ?? null;
+      const input = parseWithOptionalProgram(key, content, program, log);
+      const graphToUse = cachedGraph ?? buildSolidGraph(input);
+      if (cachedGraph === null) {
+        cache.setSolidGraph(key, version, graphToUse);
+      }
+      const { results, emit } = createEmit(eslintResult.overrides);
+      runSolidRules(graphToUse, input.sourceCode, emit);
+      for (let j = 0, dLen = results.length; j < dLen; j++) {
+        const result = results[j];
+        if (!result) continue;
+        allDiagnostics.push(result);
+      }
     }
   }
 

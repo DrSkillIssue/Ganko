@@ -44,11 +44,16 @@ function isExcluded(relativePath: string, excludes: readonly string[]): boolean 
   return false;
 }
 
-function classify(path: string, solidFiles: Set<string>, cssFiles: Set<string>): void {
+function classify(path: string, solidFiles: Set<string>, cssFiles: Set<string>, log?: Logger): void {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  if (kind === "solid") solidFiles.add(key);
-  if (kind === "css") cssFiles.add(key);
+  if (kind === "solid") {
+    solidFiles.add(key);
+    if (log?.enabled) log.trace(`fileIndex: classified solid: ${key}`);
+  } else if (kind === "css") {
+    cssFiles.add(key);
+    if (log?.enabled) log.trace(`fileIndex: classified css: ${key}`);
+  }
 }
 
 /**
@@ -174,17 +179,26 @@ function scanDir(
       } else if (resolved.isFile) {
         if (hasExcludes && isExcluded(relative(rootPath, linkPath), excludes)) continue;
         if (hasGitignore && isGitignored(linkPath, false, gitignoreStack)) continue;
-        classify(linkPath, solidFiles, cssFiles);
+        classify(linkPath, solidFiles, cssFiles, log);
       }
       continue;
     }
 
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
+      if (SKIP_DIRS.has(entry.name)) {
+        if (log?.enabled) log.trace(`fileIndex: skip dir (built-in): ${join(dir, entry.name)}`);
+        continue;
+      }
       if (entry.name.startsWith(".")) continue;
       const childDir = join(dir, entry.name);
-      if (hasExcludes && isExcluded(relative(rootPath, childDir), excludes)) continue;
-      if (hasGitignore && isGitignored(childDir, true, gitignoreStack)) continue;
+      if (hasExcludes && isExcluded(relative(rootPath, childDir), excludes)) {
+        if (log?.enabled) log.trace(`fileIndex: skip dir (excluded): ${childDir}`);
+        continue;
+      }
+      if (hasGitignore && isGitignored(childDir, true, gitignoreStack)) {
+        if (log?.enabled) log.trace(`fileIndex: skip dir (gitignored): ${childDir}`);
+        continue;
+      }
       scanDir(childDir, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
       continue;
     }
@@ -192,7 +206,7 @@ function scanDir(
       const filePath = join(dir, entry.name);
       if (hasExcludes && isExcluded(relative(rootPath, filePath), excludes)) continue;
       if (hasGitignore && isGitignored(filePath, false, gitignoreStack)) continue;
-      classify(filePath, solidFiles, cssFiles);
+      classify(filePath, solidFiles, cssFiles, log);
     }
   }
 
@@ -236,7 +250,7 @@ export function createFileIndex(rootPath: string, excludes: readonly string[] = 
     },
 
     add(path) {
-      classify(path, solidFiles, cssFiles);
+      classify(path, solidFiles, cssFiles, log);
     },
 
     remove(path) {

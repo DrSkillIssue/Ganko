@@ -10,10 +10,17 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
+import { connect, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, unlinkSync, existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
+import {
+  writeMessage,
+  createResponseReader,
+  type DaemonResponse,
+  type LintRequestParams,
+} from "../../src/cli/daemon-protocol";
 
 const ENTRY = join(__dirname, "../../dist/entry.js");
 const NODE = process.execPath;
@@ -165,8 +172,36 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Start a daemon for a project root, wait for it to be ready, and
- * track its PID for cleanup.
+ * Connect to a daemon socket with a per-attempt timeout.
+ *
+ * @param sockPath - Unix domain socket path
+ * @param timeoutMs - Connection timeout in milliseconds
+ * @returns Connected socket
+ */
+function tryConnect(sockPath: string, timeoutMs = 2000): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(sockPath);
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      reject(new Error("connection timeout"));
+    });
+    socket.once("connect", () => {
+      socket.setTimeout(0);
+      socket.removeAllListeners("error");
+      resolve(socket);
+    });
+    socket.once("error", (err) => {
+      socket.destroy();
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Start a daemon for a project root, wait for it to accept socket
+ * connections, and track its PID for cleanup.
+ *
+ * Polls via direct socket connect instead of spawning CLI processes.
  */
 async function startDaemonAndWait(projectRoot: string): Promise<void> {
   const child = spawn(
@@ -179,30 +214,199 @@ async function startDaemonAndWait(projectRoot: string): Promise<void> {
   }
   child.unref();
 
-  /** Poll daemon status until it responds or we time out. */
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await sleep(250);
-    const { exitCode } = run(["daemon", "status", "--project-root", projectRoot], { timeout: 5000 });
-    if (exitCode === 0) return;
+  const sockPath = testSocketPath(projectRoot);
+
+  for (let attempt = 0; attempt < 80; attempt++) {
+    await sleep(50);
+    try {
+      const socket = await tryConnect(sockPath, 1000);
+      socket.destroy();
+      return;
+    } catch {
+      /* daemon not ready yet */
+    }
   }
-  throw new Error("daemon failed to start within 10s");
+  throw new Error("daemon failed to start within 4s");
 }
 
-function stopDaemon(projectRoot: string): RunResult {
-  return run(["daemon", "stop", "--project-root", projectRoot], { timeout: 10_000 });
+/**
+ * Send a typed request over a connected daemon socket and await the response.
+ *
+ * @param socket - Connected daemon socket
+ * @param message - Request message to send
+ * @param timeoutMs - Maximum time to wait for response
+ * @returns Parsed daemon response
+ */
+function ipcRequest(
+  socket: Socket,
+  message: Parameters<typeof writeMessage>[1],
+  timeoutMs = 30_000,
+): Promise<DaemonResponse> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const expectedId = "id" in message && typeof message.id === "number" ? message.id : null;
+
+    const feed = createResponseReader(
+      (response) => {
+        if (expectedId !== null && response.id !== expectedId) return;
+        cleanup();
+        resolve(response);
+      },
+      (errorMessage) => {
+        cleanup();
+        reject(new Error(errorMessage));
+      },
+    );
+
+    function onData(chunk: Buffer): void { feed(chunk); }
+    function onError(err: Error): void { cleanup(); reject(err); }
+    function onClose(): void { cleanup(); reject(new Error("connection closed before response")); }
+
+    function cleanup(): void {
+      clearTimeout(timer);
+      socket.removeListener("data", onData);
+      socket.removeListener("error", onError);
+      socket.removeListener("close", onClose);
+    }
+
+    socket.on("data", onData);
+    socket.on("error", onError);
+    socket.on("close", onClose);
+
+    if (!writeMessage(socket, message)) {
+      cleanup();
+      reject(new Error("failed to write to daemon socket"));
+    }
+  });
 }
 
+let nextRequestId = 1;
+
+interface DiagnosticResult {
+  readonly file: string;
+  readonly rule: string;
+  readonly severity: string;
+  readonly message: string;
+  readonly line: number;
+  readonly column: number;
+  readonly endLine: number;
+  readonly endColumn: number;
+}
+
+/**
+ * Lint via direct IPC socket. No process spawned.
+ *
+ * @param projectRoot - Absolute project root
+ * @param files - Optional specific files to lint
+ * @returns Diagnostics array
+ */
+async function ipcLint(projectRoot: string, files?: readonly string[]): Promise<readonly DiagnosticResult[]> {
+  const sockPath = testSocketPath(projectRoot);
+  const socket = await tryConnect(sockPath);
+  try {
+    const id = nextRequestId++;
+    const params: LintRequestParams = {
+      projectRoot,
+      files: files !== undefined ? files.map((f) => resolve(projectRoot, f)) : [],
+      exclude: [],
+      crossFile: true,
+      noEslintConfig: false,
+      logLevel: "error",
+    };
+    const response = await ipcRequest(socket, { kind: "lint-request", id, params });
+    if (response.kind === "lint-response") {
+      return response.diagnostics.map((d) => ({
+        file: d.file,
+        rule: d.rule,
+        severity: d.severity,
+        message: d.message,
+        line: d.loc.start.line,
+        column: d.loc.start.column,
+        endLine: d.loc.end.line,
+        endColumn: d.loc.end.column,
+      }));
+    }
+    if (response.kind === "error-response") {
+      throw new Error(`daemon error: ${response.message}`);
+    }
+    return [];
+  } finally {
+    socket.destroy();
+  }
+}
+
+
+/**
+ * Stop a daemon. Uses IPC when possible, falls back to CLI.
+ *
+ * Waits for the socket file to disappear so callers don't need
+ * a separate sleep.
+ */
+async function stopDaemon(projectRoot: string): Promise<RunResult> {
+  const sockPath = testSocketPath(projectRoot);
+  let cliResult: RunResult | undefined;
+
+  try {
+    const socket = await tryConnect(sockPath);
+    const id = nextRequestId++;
+    try {
+      await ipcRequest(socket, { kind: "shutdown-request", id }, 5000);
+    } catch { /* connection close during shutdown is expected */ }
+    socket.destroy();
+  } catch {
+    /** Daemon not reachable — fall back to CLI for the stdout message. */
+    cliResult = run(["daemon", "stop", "--project-root", projectRoot], { timeout: 10_000 });
+  }
+
+  /** Wait for socket and PID file cleanup (up to 3s under CI load). */
+  const pidPath = testPidPath(projectRoot);
+  for (let i = 0; i < 120; i++) {
+    if (!existsSync(sockPath) && !existsSync(pidPath)) break;
+    await sleep(25);
+  }
+
+  return cliResult ?? { stdout: "Daemon stopped", stderr: "", exitCode: 0 };
+}
+
+/**
+ * Check daemon status via CLI. Only used by tests that verify CLI output.
+ */
 function daemonStatus(projectRoot: string): RunResult {
   return run(["daemon", "status", "--project-root", projectRoot], { timeout: 5000 });
 }
 
-function lintJson(projectRoot: string, extra: string[] = []): { diagnostics: { file: string; rule: string; severity: string; message: string; line: number; column: number }[]; exitCode: number; stderr: string } {
-  const result = run(["lint", "--format", "json", ...extra], { cwd: projectRoot });
-  let diagnostics: { file: string; rule: string; severity: string; message: string; line: number; column: number }[] = [];
+/**
+ * Lint a project and return diagnostics.
+ *
+ * Uses direct IPC for daemon lint (no process spawn), falls back to
+ * CLI for `--no-daemon` or when extra CLI flags are present.
+ */
+async function lintJson(projectRoot: string, extra: string[] = []): Promise<{ diagnostics: DiagnosticResult[]; exitCode: number; stderr: string }> {
+  /** CLI flags like --no-daemon require spawning a real process. */
+  const flags = extra.filter((arg) => arg.startsWith("--"));
+  const fileArgs = extra.filter((arg) => !arg.startsWith("--"));
+
+  if (flags.length > 0) {
+    const result = run(["lint", "--format", "json", ...flags, ...fileArgs], { cwd: projectRoot });
+    const diagnostics: DiagnosticResult[] = JSON.parse(result.stdout || "[]");
+    return { diagnostics, exitCode: result.exitCode, stderr: result.stderr };
+  }
+
+  /** Direct IPC — no process spawned. Falls back to CLI if no daemon is reachable. */
   try {
-    diagnostics = JSON.parse(result.stdout || "[]");
-  } catch { /* empty */ }
-  return { diagnostics, exitCode: result.exitCode, stderr: result.stderr };
+    const diagnostics = await ipcLint(projectRoot, fileArgs.length > 0 ? fileArgs : undefined);
+    const exitCode = diagnostics.some((d) => d.severity === "error") ? 1 : 0;
+    return { diagnostics: [...diagnostics], exitCode, stderr: "" };
+  } catch {
+    /** Daemon not running — fall back to CLI. */
+    const result = run(["lint", "--format", "json", ...fileArgs], { cwd: projectRoot });
+    const diagnostics: DiagnosticResult[] = JSON.parse(result.stdout || "[]");
+    return { diagnostics, exitCode: result.exitCode, stderr: result.stderr };
+  }
 }
 
 describe("daemon integration", () => {
@@ -220,11 +424,17 @@ describe("daemon integration", () => {
       expect(status.stdout).toContain("Daemon running");
       expect(status.stdout).toContain(root);
 
-      const stop = stopDaemon(root);
+      /** Use CLI stop to verify real stdout output. */
+      const stop = run(["daemon", "stop", "--project-root", root], { timeout: 10_000 });
       expect(stop.stdout).toContain("Daemon stopped");
 
-      /** Give the daemon a moment to exit and clean up the socket. */
-      await sleep(500);
+      /** Wait for socket/PID cleanup before checking status. */
+      const sockPath = testSocketPath(root);
+      const pidPath = testPidPath(root);
+      for (let i = 0; i < 120; i++) {
+        if (!existsSync(sockPath) && !existsSync(pidPath)) break;
+        await sleep(25);
+      }
 
       const statusAfter = daemonStatus(root);
       expect(statusAfter.exitCode).toBe(1);
@@ -242,7 +452,7 @@ describe("daemon integration", () => {
     it("stop is idempotent when no daemon is running", () => {
       const root = createTempProject({ "tsconfig.json": TSCONFIG });
 
-      const stop = stopDaemon(root);
+      const stop = run(["daemon", "stop", "--project-root", root], { timeout: 10_000 });
       expect(stop.stdout).toContain("No daemon running");
     });
 
@@ -261,8 +471,7 @@ describe("daemon integration", () => {
       expect(secondStart.exitCode).toBe(1);
       expect(secondStart.stderr).toContain("already running");
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -274,15 +483,14 @@ describe("daemon integration", () => {
       });
 
       /** In-process baseline (no daemon). */
-      const baseline = lintJson(root, ["--no-daemon"]);
+      const baseline = await lintJson(root, ["--no-daemon"]);
 
       await startDaemonAndWait(root);
 
       /** Via daemon. */
-      const viaD = lintJson(root);
+      const viaD = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(viaD.exitCode).toBe(baseline.exitCode);
 
@@ -300,10 +508,9 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const result = lintJson(root);
+      const result = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(result.diagnostics.length).toBe(0);
     });
@@ -317,11 +524,10 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const goodOnly = lintJson(root, ["src/Good.tsx"]);
-      const badOnly = lintJson(root, ["src/Bad.tsx"]);
+      const goodOnly = await lintJson(root, ["src/Good.tsx"]);
+      const badOnly = await lintJson(root, ["src/Bad.tsx"]);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(goodOnly.diagnostics.length).toBe(0);
       expect(badOnly.diagnostics.length).toBeGreaterThan(0);
@@ -340,16 +546,15 @@ describe("daemon integration", () => {
 
       /** First lint — cold start: creates project, builds caches. */
       const t0 = performance.now();
-      lintJson(root);
+      await lintJson(root);
       const coldMs = performance.now() - t0;
 
       /** Second lint — warm: caches already populated. */
       const t1 = performance.now();
-      const warm = lintJson(root);
+      const warm = await lintJson(root);
       const warmMs = performance.now() - t1;
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       /** Warm lint should produce the same results. */
       expect(warm.diagnostics.length).toBeGreaterThan(0);
@@ -361,6 +566,31 @@ describe("daemon integration", () => {
       expect(typeof coldMs).toBe("number");
     });
 
+    it("warm cache path produces identical diagnostics to cold path (regression: silent drop)", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Counter.tsx": BUGGY_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — cold: builds graph and runs rules. */
+      const cold = await lintJson(root);
+
+      /** Second lint — warm: uses cached graph, must still run rules. */
+      const warm = await lintJson(root);
+
+      await stopDaemon(root);
+
+      /** Both runs must produce the exact same diagnostics.
+       * A regression here means the cached-graph path silently drops diagnostics. */
+      expect(warm.diagnostics.length).toBe(cold.diagnostics.length);
+      expect(warm.diagnostics.map((d) => `${d.rule}:${d.file}`).toSorted()).toEqual(
+        cold.diagnostics.map((d) => `${d.rule}:${d.file}`).toSorted(),
+      );
+      expect(cold.diagnostics.length).toBeGreaterThan(0);
+    });
+
     it("detects file changes between lint runs", async () => {
       const root = createTempProject({
         "tsconfig.json": TSCONFIG,
@@ -370,18 +600,17 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       /** First lint — clean. */
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.length).toBe(0);
 
       /** Introduce a bug. */
       writeFileSync(join(root, "src/App.tsx"), BUGGY_COMPONENT);
 
       /** Second lint — should pick up the change. */
-      const second = lintJson(root);
+      const second = await lintJson(root);
       expect(second.diagnostics.length).toBeGreaterThan(0);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("detects new files between lint runs", async () => {
@@ -392,15 +621,14 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
 
       /** Add a new file with issues. */
       writeFileSync(join(root, "src/New.tsx"), BUGGY_COMPONENT);
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(second.diagnostics.length).toBeGreaterThan(first.diagnostics.length);
       expect(second.diagnostics.some((d) => d.file.includes("New.tsx"))).toBe(true);
@@ -415,16 +643,15 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.some((d) => d.file.includes("Bad.tsx"))).toBe(true);
 
       /** Delete the buggy file. */
       unlinkSync(join(root, "src/Bad.tsx"));
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(second.diagnostics.every((d) => !d.file.includes("Bad.tsx"))).toBe(true);
     });
@@ -439,11 +666,10 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const withDaemon = lintJson(root);
-      const noDaemon = lintJson(root, ["--no-daemon"]);
+      const withDaemon = await lintJson(root);
+      const noDaemon = await lintJson(root, ["--no-daemon"]);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       /** Both should produce the same results. */
       const normalize = (diags: { rule: string; line: number; column: number }[]) =>
@@ -461,14 +687,13 @@ describe("daemon integration", () => {
       });
 
       /** No daemon started — lint should auto-start one or fall back gracefully. */
-      const result = lintJson(root);
+      const result = await lintJson(root);
 
       /** Should still produce diagnostics regardless of daemon path. */
       expect(result.diagnostics.length).toBeGreaterThan(0);
 
       /** Clean up any auto-started daemon. */
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -495,13 +720,12 @@ describe("daemon integration", () => {
         "src/Counter.tsx": BUGGY_COMPONENT,
       });
 
-      const baseline = lintJson(root, ["--no-daemon"]);
+      const baseline = await lintJson(root, ["--no-daemon"]);
 
       await startDaemonAndWait(root);
-      const viaD = lintJson(root);
+      const viaD = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       /** Cross-file results should be consistent. */
       const normalize = (diags: { file: string; rule: string; line: number; column: number }[]) =>
@@ -519,10 +743,9 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const result = lintJson(root);
+      const result = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       expect(result.diagnostics.length).toBe(0);
     });
@@ -536,11 +759,10 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       /** Stop the daemon. */
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       /** Next lint should fall back to in-process. */
-      const result = lintJson(root);
+      const result = await lintJson(root);
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
   });
@@ -557,11 +779,10 @@ describe("daemon integration", () => {
       /** Fire 3 sequential lints and verify consistent results. */
       const results = [];
       for (let i = 0; i < 3; i++) {
-        results.push(lintJson(root));
+        results.push(await lintJson(root));
       }
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       const normalize = (diags: { rule: string; line: number; column: number }[]) =>
         diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
@@ -574,6 +795,32 @@ describe("daemon integration", () => {
         if (!r) continue;
         expect(normalize(r.diagnostics)).toEqual(first);
       }
+    });
+
+    it("handles concurrent lint requests without corrupting results", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": BUGGY_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** Fire 3 concurrent lints — the daemon serializes them internally. */
+      const [a, b, c] = await Promise.all([
+        lintJson(root),
+        lintJson(root),
+        lintJson(root),
+      ]);
+
+      await stopDaemon(root);
+
+      /** All three must produce identical diagnostics. */
+      const normalize = (diags: { rule: string }[]) =>
+        diags.map((d) => d.rule).toSorted();
+
+      expect(a.diagnostics.length).toBeGreaterThan(0);
+      expect(normalize(b.diagnostics)).toEqual(normalize(a.diagnostics));
+      expect(normalize(c.diagnostics)).toEqual(normalize(a.diagnostics));
     });
   });
 
@@ -594,8 +841,7 @@ describe("daemon integration", () => {
       expect(status.exitCode).toBe(0);
       expect(status.stdout).toContain("Daemon running");
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -624,8 +870,7 @@ describe("daemon integration", () => {
       } catch { /* not running */ }
       expect(alive).toBe(true);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("cleans up PID file after daemon stops", async () => {
@@ -639,8 +884,7 @@ describe("daemon integration", () => {
       const pidPath = testPidPath(root);
       expect(existsSync(pidPath)).toBe(true);
 
-      stopDaemon(root);
-      await sleep(1000);
+      await stopDaemon(root);
 
       expect(existsSync(pidPath)).toBe(false);
     });
@@ -663,8 +907,7 @@ describe("daemon integration", () => {
       const mode = stats.mode & 0o777;
       expect(mode).toBe(0o600);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -684,7 +927,7 @@ describe("daemon integration", () => {
       await sleep(500);
 
       /** Lint should fall back to in-process gracefully. */
-      const result = lintJson(root);
+      const result = await lintJson(root);
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
   });
@@ -698,17 +941,16 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.length).toBeGreaterThan(0);
 
       /** Fix the bug. */
       writeFileSync(join(root, "src/App.tsx"), CLEAN_COMPONENT);
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
       expect(second.diagnostics.length).toBe(0);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("handles multiple files changing simultaneously", async () => {
@@ -720,14 +962,14 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.length).toBe(0);
 
       /** Make both files buggy at once. */
       writeFileSync(join(root, "src/A.tsx"), BUGGY_COMPONENT);
       writeFileSync(join(root, "src/B.tsx"), BUGGY_COMPONENT);
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
       const filesWithDiags = new Set(second.diagnostics.map((d) => {
         const parts = d.file.split("/");
         return parts[parts.length - 1];
@@ -735,8 +977,7 @@ describe("daemon integration", () => {
       expect(filesWithDiags.has("A.tsx")).toBe(true);
       expect(filesWithDiags.has("B.tsx")).toBe(true);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("handles file rename (delete + create) between lint runs", async () => {
@@ -747,19 +988,18 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.some((d) => d.file.includes("Old.tsx"))).toBe(true);
 
       /** Rename: delete old, create new with same content. */
       unlinkSync(join(root, "src/Old.tsx"));
       writeFileSync(join(root, "src/New.tsx"), BUGGY_COMPONENT);
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
       expect(second.diagnostics.every((d) => !d.file.includes("Old.tsx"))).toBe(true);
       expect(second.diagnostics.some((d) => d.file.includes("New.tsx"))).toBe(true);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("handles adding a new subdirectory with files", async () => {
@@ -770,18 +1010,17 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.length).toBe(0);
 
       /** Add a new subdirectory. */
       mkdirSync(join(root, "src/components"), { recursive: true });
       writeFileSync(join(root, "src/components/Widget.tsx"), BUGGY_COMPONENT);
 
-      const second = lintJson(root);
+      const second = await lintJson(root);
       expect(second.diagnostics.some((d) => d.file.includes("Widget.tsx"))).toBe(true);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -801,8 +1040,7 @@ describe("daemon integration", () => {
       const version = String(LSP_VERSION);
       expect(status.stdout).toContain(version);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -817,11 +1055,10 @@ describe("daemon integration", () => {
 
       /** Fire a lint and immediately stop — the lint should still produce results
        * because shutdown is serialized behind pending via pending.finally(). */
-      const lintResult = lintJson(root);
+      const lintResult = await lintJson(root);
       expect(lintResult.diagnostics.length).toBeGreaterThan(0);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -840,15 +1077,14 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const result = lintJson(root);
+      const result = await lintJson(root);
       expect(result.diagnostics.some((d) => d.file.includes("Buggy.tsx"))).toBe(true);
 
       /** Clean files should produce no diagnostics. */
       const cleanDiags = result.diagnostics.filter((d) => !d.file.includes("Buggy.tsx"));
       expect(cleanDiags.length).toBe(0);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -864,8 +1100,7 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
       expect(existsSync(sockPath)).toBe(true);
 
-      stopDaemon(root);
-      await sleep(1000);
+      await stopDaemon(root);
 
       expect(existsSync(sockPath)).toBe(false);
     });
@@ -884,10 +1119,9 @@ describe("daemon integration", () => {
       expect(existsSync(logPath)).toBe(true);
 
       /** Trigger some activity. */
-      lintJson(root);
+      await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(1000);
+      await stopDaemon(root);
 
       /** Log should have content after activity. */
       const logContent = readFileSync(logPath, "utf-8");
@@ -906,7 +1140,7 @@ describe("daemon integration", () => {
 
       await startDaemonAndWait(root);
 
-      const first = lintJson(root);
+      const first = await lintJson(root);
       const firstFiles = new Set(first.diagnostics.map((d) => d.file));
       expect(firstFiles.size).toBeGreaterThanOrEqual(1);
 
@@ -916,12 +1150,11 @@ describe("daemon integration", () => {
 
       /** Three consecutive lints — none should have phantom diagnostics. */
       for (let i = 0; i < 3; i++) {
-        const result = lintJson(root);
+        const result = await lintJson(root);
         expect(result.diagnostics.length).toBe(0);
       }
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
 
     it("correctly picks up a third file added after two lint runs", async () => {
@@ -933,20 +1166,19 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       /** Run 1 — clean. */
-      lintJson(root);
+      await lintJson(root);
 
       /** Run 2 — still clean. */
-      lintJson(root);
+      await lintJson(root);
 
       /** Add buggy file after two warm runs. */
       writeFileSync(join(root, "src/Late.tsx"), BUGGY_COMPONENT);
 
       /** Run 3 — must detect the new file. */
-      const third = lintJson(root);
+      const third = await lintJson(root);
       expect(third.diagnostics.some((d) => d.file.includes("Late.tsx"))).toBe(true);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
     });
   });
 
@@ -958,15 +1190,13 @@ describe("daemon integration", () => {
       });
 
       await startDaemonAndWait(root);
-      const first = lintJson(root);
-      stopDaemon(root);
-      await sleep(1000);
+      const first = await lintJson(root);
+      await stopDaemon(root);
 
       /** Start a fresh daemon. */
       await startDaemonAndWait(root);
-      const second = lintJson(root);
-      stopDaemon(root);
-      await sleep(500);
+      const second = await lintJson(root);
+      await stopDaemon(root);
 
       const normalize = (diags: { rule: string; line: number; column: number }[]) =>
         diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
@@ -984,7 +1214,7 @@ describe("daemon integration", () => {
       });
 
       /** Run with cross-file enabled (default) on a project with zero CSS. */
-      const result = lintJson(root, ["--no-daemon"]);
+      const result = await lintJson(root, ["--no-daemon"]);
 
       /** Should produce diagnostics without crashing. */
       expect(result.diagnostics.length).toBeGreaterThan(0);
@@ -997,9 +1227,8 @@ describe("daemon integration", () => {
       });
 
       await startDaemonAndWait(root);
-      const result = lintJson(root);
-      stopDaemon(root);
-      await sleep(500);
+      const result = await lintJson(root);
+      await stopDaemon(root);
 
       expect(result.diagnostics.length).toBeGreaterThan(0);
     });
@@ -1016,15 +1245,14 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       /** First request opens both files. */
-      const first = lintJson(root);
+      const first = await lintJson(root);
       expect(first.diagnostics.length).toBeGreaterThan(0);
 
       /** Delete Extra.tsx and re-lint. */
       rmSync(join(root, "src/Extra.tsx"));
-      const second = lintJson(root);
+      const second = await lintJson(root);
 
-      stopDaemon(root);
-      await sleep(500);
+      await stopDaemon(root);
 
       /** Fewer diagnostics after deletion — deleted file's diagnostics are gone. */
       expect(second.diagnostics.length).toBeLessThan(first.diagnostics.length);
@@ -1034,6 +1262,648 @@ describe("daemon integration", () => {
         (d) => d.file.includes("Extra.tsx"),
       );
       expect(deletedFileDiags).toHaveLength(0);
+    });
+  });
+
+  describe("CSS file change detection", () => {
+    /** Component that imports a CSS file — triggers cross-file analysis. */
+    const COMPONENT_WITH_CSS = [
+      'import { createSignal } from "solid-js";',
+      'import "./styles.css";',
+      "/**",
+      " * Animated card component.",
+      " * @returns Card element",
+      " */",
+      "export function Card() {",
+      "  const [open, setOpen] = createSignal(false);",
+      "  return <div class=\"card\">{open() ? \"open\" : \"closed\"}</div>;",
+      "}",
+    ].join("\n");
+
+    /** CSS with an animation that lacks a prefers-reduced-motion override. */
+    const CSS_WITH_ANIMATION_WARNING = [
+      "@keyframes fade-in {",
+      "  from { opacity: 0; }",
+      "  to { opacity: 1; }",
+      "}",
+      ".card {",
+      "  animation: fade-in 300ms ease-out;",
+      "}",
+    ].join("\n");
+
+    /** Fixed CSS: adds reduced-motion override to suppress the warning. */
+    const CSS_WITH_MOTION_OVERRIDE = [
+      "@keyframes fade-in {",
+      "  from { opacity: 0; }",
+      "  to { opacity: 1; }",
+      "}",
+      ".card {",
+      "  animation: fade-in 300ms ease-out;",
+      "}",
+      "@media (prefers-reduced-motion: reduce) {",
+      "  .card {",
+      "    animation: none;",
+      "  }",
+      "}",
+    ].join("\n");
+
+    /** Inert CSS: no animation, no warnings. */
+    const CSS_NO_ANIMATION = [
+      ".card {",
+      "  display: flex;",
+      "  padding: 1rem;",
+      "}",
+    ].join("\n");
+
+    it("detects CSS content changes between daemon lint runs", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Card.tsx": COMPONENT_WITH_CSS,
+        "src/styles.css": CSS_WITH_ANIMATION_WARNING,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — should have the reduced-motion warning. */
+      const first = await lintJson(root);
+      const motionWarnings1 = first.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings1.length).toBeGreaterThan(0);
+
+      /** Fix the CSS by adding reduced-motion override. */
+      writeFileSync(join(root, "src/styles.css"), CSS_WITH_MOTION_OVERRIDE);
+
+      /** Second lint — warning should be gone. */
+      const second = await lintJson(root);
+      const motionWarnings2 = second.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings2.length).toBe(0);
+
+      await stopDaemon(root);
+    });
+
+    it("detects CSS file added between daemon lint runs", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Card.tsx": COMPONENT_WITH_CSS,
+        "src/styles.css": CSS_NO_ANIMATION,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — no animation, no motion warnings. */
+      const first = await lintJson(root);
+      const motionWarnings1 = first.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings1.length).toBe(0);
+
+      /** Add a second CSS file with animation that lacks override. */
+      writeFileSync(join(root, "src/extra.css"), CSS_WITH_ANIMATION_WARNING);
+
+      /** Second lint — should detect the new CSS file's warning. */
+      const second = await lintJson(root);
+      const motionWarnings2 = second.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings2.length).toBeGreaterThan(0);
+
+      await stopDaemon(root);
+    });
+
+    it("detects CSS file deleted between daemon lint runs", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Card.tsx": COMPONENT_WITH_CSS,
+        "src/styles.css": CSS_WITH_ANIMATION_WARNING,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — has motion warning. */
+      const first = await lintJson(root);
+      const motionWarnings1 = first.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings1.length).toBeGreaterThan(0);
+
+      /** Delete the CSS file. */
+      unlinkSync(join(root, "src/styles.css"));
+
+      /** Second lint — warning must be gone (no CSS = no animation rule). */
+      const second = await lintJson(root);
+      const motionWarnings2 = second.diagnostics.filter(
+        (d) => d.rule === "css-require-reduced-motion-override",
+      );
+      expect(motionWarnings2.length).toBe(0);
+
+      await stopDaemon(root);
+    });
+
+    it("returns cached results when CSS has not changed", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Card.tsx": COMPONENT_WITH_CSS,
+        "src/styles.css": CSS_WITH_ANIMATION_WARNING,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — cold. */
+      const first = await lintJson(root);
+
+      /** Second lint — same files, should hit cache. */
+      const second = await lintJson(root);
+
+      await stopDaemon(root);
+
+      /** Results must be identical. */
+      const normalize = (diags: { rule: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      expect(normalize(second.diagnostics)).toEqual(normalize(first.diagnostics));
+    });
+
+    it("CSS changes produce results matching in-process analysis", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Card.tsx": COMPONENT_WITH_CSS,
+        "src/styles.css": CSS_WITH_ANIMATION_WARNING,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** Warm the cache with initial CSS. */
+      await lintJson(root);
+
+      /** Change CSS content. */
+      writeFileSync(join(root, "src/styles.css"), CSS_WITH_MOTION_OVERRIDE);
+
+      /** Daemon lint after CSS change. */
+      const daemonResult = await lintJson(root);
+
+      await stopDaemon(root);
+
+      /** In-process lint of the same state (ground truth). */
+      const inProcess = await lintJson(root, ["--no-daemon"]);
+
+      const normalize = (diags: { file: string; rule: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      expect(normalize(daemonResult.diagnostics)).toEqual(normalize(inProcess.diagnostics));
+    });
+  });
+
+  describe("cache invalidation gaps", () => {
+    /**
+     * Gap 1: externalCustomProperties never re-scanned after npm install.
+     *
+     * The daemon caches `externalCustomProperties` once and never re-reads
+     * node_modules. If a new dependency provides custom properties, the
+     * daemon misses them and the CSS graph treats `var(--lib-prop)` as
+     * unresolved.
+     */
+    describe("externalCustomProperties staleness", () => {
+      /** CSS that references a custom property provided by a library. */
+      const CSS_WITH_LIB_VAR = [
+        ".card {",
+        "  color: var(--lib-color);",
+        "}",
+      ].join("\n");
+
+      const COMPONENT_IMPORTS_CSS = [
+        'import { createSignal } from "solid-js";',
+        'import "./styles.css";',
+        "/**",
+        " * Card component.",
+        " * @returns Card element",
+        " */",
+        "export function Card() {",
+        "  const [open, setOpen] = createSignal(false);",
+        '  return <div class="card">{open() ? "open" : "closed"}</div>;',
+        "}",
+      ].join("\n");
+
+      /** Fake dependency JS that references a custom property name. */
+      const LIB_JS_WITH_PROP = 'export const theme = { color: "--lib-color" };\n';
+
+      it("picks up new dependency custom properties between daemon runs", async () => {
+        /** Start without the dependency installed. */
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "package.json": JSON.stringify({ name: "test-proj", dependencies: {} }),
+          "src/Card.tsx": COMPONENT_IMPORTS_CSS,
+          "src/styles.css": CSS_WITH_LIB_VAR,
+        });
+
+        await startDaemonAndWait(root);
+
+        /** First lint — no lib installed, `--lib-color` is unresolved. */
+        const first = await lintJson(root);
+        const unresolved1 = first.diagnostics.filter(
+          (d) => d.rule === "no-unresolved-custom-properties" && d.message.includes("--lib-color"),
+        );
+        expect(unresolved1.length).toBeGreaterThan(0);
+
+        /** "Install" the dependency by creating node_modules + updating package.json. */
+        mkdirSync(join(root, "node_modules/my-lib/dist"), { recursive: true });
+        writeFileSync(
+          join(root, "node_modules/my-lib/package.json"),
+          JSON.stringify({ name: "my-lib", version: "1.0.0" }),
+        );
+        writeFileSync(join(root, "node_modules/my-lib/dist/index.js"), LIB_JS_WITH_PROP);
+        writeFileSync(
+          join(root, "package.json"),
+          JSON.stringify({ name: "test-proj", dependencies: { "my-lib": "^1.0.0" } }),
+        );
+
+        /** Second lint — lib installed, `--lib-color` should now resolve. */
+        const second = await lintJson(root);
+        const unresolved2 = second.diagnostics.filter(
+          (d) => d.rule === "no-unresolved-custom-properties" && d.message.includes("--lib-color"),
+        );
+
+        /** Compare against in-process ground truth. */
+        const inProcess = await lintJson(root, ["--no-daemon"]);
+        const unresolvedInProc = inProcess.diagnostics.filter(
+          (d) => d.rule === "no-unresolved-custom-properties" && d.message.includes("--lib-color"),
+        );
+
+        await stopDaemon(root);
+
+        /** Daemon should match in-process (which re-scans fresh every run). */
+        expect(unresolved2.length).toBe(unresolvedInProc.length);
+      });
+    });
+
+    /**
+     * Gap 2: runAllCrossFileDiagnostics doesn't call setCachedCrossFileResults.
+     *
+     * Cross-file rules re-run from scratch every daemon request even when no
+     * files changed. This is a performance issue — results should be cached
+     * when generation counters haven't bumped.
+     *
+     * We verify that two identical runs produce the same results (correctness
+     * baseline). The actual perf optimization is out of scope for this test,
+     * but it validates the invariant that must hold if caching is added.
+     */
+    describe("cross-file result caching", () => {
+      /** Component referencing a CSS class that does NOT exist. */
+      const COMPONENT_WITH_UNDEFINED_CLASS = [
+        'import { createSignal } from "solid-js";',
+        'import "./styles.css";',
+        "/**",
+        " * Card component using undefined CSS class.",
+        " * @returns Card element",
+        " */",
+        "export function Card() {",
+        "  const [open, setOpen] = createSignal(false);",
+        '  return <div class="ghost">{open() ? "open" : "closed"}</div>;',
+        "}",
+      ].join("\n");
+
+      const CSS_DEFINES_CARD = [
+        ".card {",
+        "  display: flex;",
+        "}",
+      ].join("\n");
+
+      it("consecutive no-change runs produce identical cross-file diagnostics", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "src/Card.tsx": COMPONENT_WITH_UNDEFINED_CLASS,
+          "src/styles.css": CSS_DEFINES_CARD,
+        });
+
+        await startDaemonAndWait(root);
+
+        const first = await lintJson(root);
+        const second = await lintJson(root);
+        const third = await lintJson(root);
+
+        await stopDaemon(root);
+
+        const normalize = (diags: { rule: string; file: string; line: number; column: number }[]) =>
+          diags.map((d) => `${d.file}:${d.rule}:${d.line}:${d.column}`).toSorted();
+
+        expect(normalize(second.diagnostics)).toEqual(normalize(first.diagnostics));
+        expect(normalize(third.diagnostics)).toEqual(normalize(second.diagnostics));
+      });
+    });
+
+    /**
+     * Gap 3: ESLint override changes don't invalidate cross-file result cache.
+     *
+     * If ESLint config changes rule severity between daemon runs (e.g.
+     * turning a rule "off"), diagnostics must reflect the new config.
+     * This is a latent bug — currently masked because cross-file rules
+     * re-run every request (Gap 2), but becomes active if result caching
+     * is added.
+     */
+    describe("ESLint config change detection", () => {
+      it("reflects ESLint config override changes between daemon runs", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "src/Counter.tsx": BUGGY_COMPONENT,
+          "eslint.config.mjs": [
+            "export default [",
+            "  {",
+            '    rules: { "solid/no-destructure": "error" },',
+            "  },",
+            "];",
+          ].join("\n"),
+        });
+
+        await startDaemonAndWait(root);
+
+        /** First lint — no-destructure is "error". */
+        const first = await lintJson(root);
+        const destructureErrors1 = first.diagnostics.filter(
+          (d) => d.rule === "no-destructure",
+        );
+        expect(destructureErrors1.length).toBeGreaterThan(0);
+
+        /** Change ESLint config: turn no-destructure off. */
+        writeFileSync(
+          join(root, "eslint.config.mjs"),
+          [
+            "export default [",
+            "  {",
+            '    rules: { "solid/no-destructure": "off" },',
+            "  },",
+            "];",
+          ].join("\n"),
+        );
+
+        /** Second lint — no-destructure should be suppressed. */
+        const second = await lintJson(root);
+        const destructureErrors2 = second.diagnostics.filter(
+          (d) => d.rule === "no-destructure",
+        );
+
+        await stopDaemon(root);
+
+        expect(destructureErrors2.length).toBe(0);
+      });
+
+      it("reflects ESLint globalIgnores changes between daemon runs", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "src/Counter.tsx": BUGGY_COMPONENT,
+          "src/legacy/Old.tsx": BUGGY_COMPONENT,
+          "eslint.config.mjs": "export default [];",
+        });
+
+        await startDaemonAndWait(root);
+
+        /** First lint — both files produce diagnostics. */
+        const first = await lintJson(root);
+        const legacyDiags1 = first.diagnostics.filter(
+          (d) => d.file.includes("legacy/Old.tsx"),
+        );
+        expect(legacyDiags1.length).toBeGreaterThan(0);
+
+        /** Change ESLint config: add globalIgnores for legacy/. */
+        writeFileSync(
+          join(root, "eslint.config.mjs"),
+          [
+            "export default [",
+            '  { ignores: ["src/legacy/**"] },',
+            "];",
+          ].join("\n"),
+        );
+
+        /** Second lint — legacy file should be excluded. */
+        const second = await lintJson(root);
+        const legacyDiags2 = second.diagnostics.filter(
+          (d) => d.file.includes("legacy/Old.tsx"),
+        );
+
+        await stopDaemon(root);
+
+        expect(legacyDiags2.length).toBe(0);
+      });
+    });
+
+    /**
+     * Gap 4: Targeted --files lint serves stale cross-file diagnostics
+     * for non-targeted file changes.
+     *
+     * When using `ganko lint --files A.tsx`, only A.tsx is updateFile'd
+     * in the TS project service. If B.tsx was edited on disk, the daemon
+     * still holds B.tsx at its old version → cross-file rules use the
+     * stale SolidGraph for B.tsx.
+     */
+    describe("targeted --files + cross-file staleness", () => {
+      /** Component A references a CSS class "card". */
+      const COMPONENT_A = [
+        'import { createSignal } from "solid-js";',
+        'import "./styles.css";',
+        "/**",
+        " * Component A.",
+        " * @returns Element",
+        " */",
+        "export function CompA() {",
+        "  const [s, setS] = createSignal(false);",
+        '  return <div class="card">{s() ? "a" : "b"}</div>;',
+        "}",
+      ].join("\n");
+
+      /** Component B (initial) — references a CSS class "header". */
+      const COMPONENT_B_V1 = [
+        'import { createSignal } from "solid-js";',
+        'import "./styles.css";',
+        "/**",
+        " * Component B v1.",
+        " * @returns Element",
+        " */",
+        "export function CompB() {",
+        "  const [s, setS] = createSignal(false);",
+        '  return <div class="header">{s() ? "a" : "b"}</div>;',
+        "}",
+      ].join("\n");
+
+      /** Component B (edited) — now references an undefined CSS class "phantom". */
+      const COMPONENT_B_V2 = [
+        'import { createSignal } from "solid-js";',
+        'import "./styles.css";',
+        "/**",
+        " * Component B v2.",
+        " * @returns Element",
+        " */",
+        "export function CompB() {",
+        "  const [s, setS] = createSignal(false);",
+        '  return <div class="phantom">{s() ? "a" : "b"}</div>;',
+        "}",
+      ].join("\n");
+
+      const CSS_DEFINES_CLASSES = [
+        ".card { display: flex; }",
+        ".header { font-size: 2rem; }",
+      ].join("\n");
+
+      it("cross-file diagnostics reflect non-targeted file edits", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "src/A.tsx": COMPONENT_A,
+          "src/B.tsx": COMPONENT_B_V1,
+          "src/styles.css": CSS_DEFINES_CLASSES,
+        });
+
+        await startDaemonAndWait(root);
+
+        /** Full lint to warm caches. */
+        const warm = await lintJson(root);
+        const phantomWarm = warm.diagnostics.filter(
+          (d) => d.rule === "jsx-no-undefined-css-class" && d.message.includes("phantom"),
+        );
+        expect(phantomWarm.length).toBe(0);
+
+        /** Edit B.tsx on disk (non-targeted file). */
+        writeFileSync(join(root, "src/B.tsx"), COMPONENT_B_V2);
+
+        /** Targeted lint of A.tsx only — cross-file analysis should see B.tsx changes. */
+        const targeted = await lintJson(root, ["src/A.tsx"]);
+
+        /** Compare with in-process ground truth. */
+        const inProcess = await lintJson(root, ["--no-daemon", "src/A.tsx"]);
+
+        await stopDaemon(root);
+
+        const daemonPhantom = targeted.diagnostics.filter(
+          (d) => d.rule === "jsx-no-undefined-css-class" && d.message.includes("phantom"),
+        );
+        const inProcPhantom = inProcess.diagnostics.filter(
+          (d) => d.rule === "jsx-no-undefined-css-class" && d.message.includes("phantom"),
+        );
+
+        /** Daemon must match in-process — B.tsx's "phantom" class should
+         * appear (or not) identically in both. */
+        expect(daemonPhantom.length).toBe(inProcPhantom.length);
+      });
+
+      it("full lint after targeted lint reflects all changes", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG,
+          "src/A.tsx": COMPONENT_A,
+          "src/B.tsx": COMPONENT_B_V1,
+          "src/styles.css": CSS_DEFINES_CLASSES,
+        });
+
+        await startDaemonAndWait(root);
+
+        /** Warm caches with full lint. */
+        await lintJson(root);
+
+        /** Edit B.tsx. */
+        writeFileSync(join(root, "src/B.tsx"), COMPONENT_B_V2);
+
+        /** Targeted lint of A.tsx — may or may not see B.tsx changes. */
+        await lintJson(root, ["src/A.tsx"]);
+
+        /** Full lint — must see all changes including B.tsx. */
+        const full = await lintJson(root);
+
+        /** In-process ground truth. */
+        const inProcess = await lintJson(root, ["--no-daemon"]);
+
+        await stopDaemon(root);
+
+        const normalize = (diags: { file: string; rule: string; line: number; column: number }[]) =>
+          diags.map((d) => `${d.file}:${d.rule}:${d.line}:${d.column}`).toSorted();
+
+        expect(normalize(full.diagnostics)).toEqual(normalize(inProcess.diagnostics));
+      });
+    });
+
+    /**
+     * Gap 5: Version "0" fallback causes stale cache hits for files
+     * outside tsconfig coverage.
+     *
+     * When getScriptVersion returns null (file has no TS project),
+     * the daemon falls back to version "0". If the file changes between
+     * runs, the version stays "0" → cache hit → stale graph.
+     */
+    describe("version fallback for files outside tsconfig", () => {
+      /** A .jsx file not covered by tsconfig (which only includes *.tsx, *.ts). */
+      const JSX_V1 = [
+        "/**",
+        " * Component v1.",
+        " * @returns Element",
+        " */",
+        "export function Loose() {",
+        '  return <div class="card">v1</div>;',
+        "}",
+      ].join("\n");
+
+      const JSX_V2 = [
+        "/**",
+        " * Component v2 — now destructures props.",
+        " * @param props - Props",
+        " * @returns Element",
+        " */",
+        "export function Loose({ label }) {",
+        "  return <div>{label}</div>;",
+        "}",
+      ].join("\n");
+
+      /** tsconfig that only covers .tsx and .ts — excludes .jsx. */
+      const TSCONFIG_NO_JSX = JSON.stringify({
+        compilerOptions: {
+          target: "ESNext",
+          module: "ESNext",
+          moduleResolution: "bundler",
+          strict: true,
+          jsx: "preserve",
+          jsxImportSource: "solid-js",
+          skipLibCheck: true,
+          noEmit: true,
+        },
+        include: ["**/*.tsx", "**/*.ts"],
+      });
+
+      it("detects changes in files outside tsconfig between daemon runs", async () => {
+        const root = createTempProject({
+          "tsconfig.json": TSCONFIG_NO_JSX,
+          "src/Loose.jsx": JSX_V1,
+        });
+
+        await startDaemonAndWait(root);
+
+        /** First lint. */
+        const first = await lintJson(root);
+        const firstRules = first.diagnostics
+          .filter((d) => d.file.includes("Loose.jsx"))
+          .map((d) => d.rule)
+          .toSorted();
+
+        /** Change file content. */
+        writeFileSync(join(root, "src/Loose.jsx"), JSX_V2);
+
+        /** Second lint — should reflect new content. */
+        const second = await lintJson(root);
+        const secondRules = second.diagnostics
+          .filter((d) => d.file.includes("Loose.jsx"))
+          .map((d) => d.rule)
+          .toSorted();
+
+        /** In-process ground truth. */
+        const inProcess = await lintJson(root, ["--no-daemon"]);
+        const inProcRules = inProcess.diagnostics
+          .filter((d) => d.file.includes("Loose.jsx"))
+          .map((d) => d.rule)
+          .toSorted();
+
+        await stopDaemon(root);
+
+        /** Daemon second run must match in-process (which always reads fresh). */
+        expect(secondRules).toEqual(inProcRules);
+
+        /** The diagnostics should differ from the first run since content changed. */
+        expect(secondRules).not.toEqual(firstRules);
+      });
     });
   });
 });

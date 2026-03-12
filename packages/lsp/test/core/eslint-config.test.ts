@@ -177,6 +177,76 @@ describe("loadESLintConfig", () => {
 
       expect(result.overrides["signal-call"]).toBe("warn");
     });
+
+    it("does not treat ignores with languageOptions as global (regression: passthrough keys)", async () => {
+      const result = await loadESLintConfig(FIXTURES_DIR, "global-ignores-with-language-options.mjs");
+
+      /** The ignores entry has languageOptions — per ESLint semantics it is NOT global. */
+      expect(result.globalIgnores).toHaveLength(0);
+      expect(result.overrides["signal-call"]).toBe("warn");
+    });
+  });
+
+  describe("non-standard rule values (regression: strict schema)", () => {
+    it("extracts ganko overrides even when other rules have boolean values", async () => {
+      const result = await loadESLintConfig(FIXTURES_DIR, "boolean-rule-value.mjs");
+
+      /** A boolean rule value from another plugin must not cause the entire config to be rejected. */
+      expect(result.overrides["signal-call"]).toBe("warn");
+    });
+  });
+
+  describe("relative imports (regression: importFresh must preserve directory)", () => {
+    it("loads a config that uses a relative import to a sibling module", async () => {
+      const result = await loadESLintConfig(FIXTURES_DIR, "relative-import.mjs");
+
+      /** If importFresh copies the file to tmpdir(), relative import fails
+       * and EMPTY_ESLINT_RESULT is returned — both overrides would be missing. */
+      expect(result.overrides["signal-call"]).toBe("warn");
+      expect(result.overrides["no-banner-comments"]).toBe("off");
+    });
+
+    it("does not leave temporary files in the fixtures directory", async () => {
+      await loadESLintConfig(FIXTURES_DIR, "relative-import.mjs");
+
+      const { readdirSync } = await import("node:fs");
+      const files = readdirSync(FIXTURES_DIR);
+      const tempFiles = files.filter((f) => f.startsWith(".ganko-eslint-"));
+      expect(tempFiles).toHaveLength(0);
+    });
+  });
+
+  describe("CommonJS config (regression: importFresh must preserve .cjs extension)", () => {
+    it("loads a .cjs config and extracts overrides", async () => {
+      const result = await loadESLintConfig(FIXTURES_DIR, "cjs-config.cjs");
+
+      /** If importFresh renames .cjs to .mjs, the CJS module.exports syntax
+       * is interpreted as ESM, causing a parse error and EMPTY_ESLINT_RESULT. */
+      expect(result.overrides["signal-call"]).toBe("warn");
+      expect(result.overrides["no-banner-comments"]).toBe("off");
+    });
+  });
+
+  describe("function export (regression: Zod rejects non-object/array exports)", () => {
+    it("returns EMPTY_ESLINT_RESULT for a config that exports a function", async () => {
+      const result = await loadESLintConfig(FIXTURES_DIR, "function-export.mjs");
+
+      /** A function export is not a valid ESLint flat config. Zod validation
+       * must reject it gracefully rather than crashing. */
+      expect(result).toBe(EMPTY_ESLINT_RESULT);
+    });
+  });
+
+  describe("config reload (regression: importFresh cache-busting)", () => {
+    it("returns fresh results when the same config is loaded twice", async () => {
+      const first = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
+      const second = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
+
+      /** Both calls must return equivalent results — importFresh must bypass
+       * the module cache on each call. */
+      expect(second.overrides["signal-call"]).toBe(first.overrides["signal-call"]);
+      expect(Object.keys(second.overrides)).toEqual(Object.keys(first.overrides));
+    });
   });
 });
 

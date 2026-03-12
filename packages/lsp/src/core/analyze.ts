@@ -57,9 +57,13 @@ export function parseWithOptionalProgram(
   program: ts.Program | null,
   logger?: Logger,
 ): SolidInput {
-  return program
+  if (logger?.enabled) logger.trace(`parseWithOptionalProgram: ${path} program=${program !== null ? "yes" : "NO"} content=${content.length} chars`);
+  const t0 = performance.now();
+  const result = program
     ? parseContentWithProgram(path, content, program, logger)
     : parseContent(path, content, logger);
+  if (logger?.enabled) logger.trace(`parseWithOptionalProgram: ${path} parsed in ${(performance.now() - t0).toFixed(1)}ms`);
+  return result;
 }
 
 export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; emit: (d: Diagnostic) => void } {
@@ -108,30 +112,32 @@ export function runSingleFileDiagnostics(
   logger?: Logger,
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
+  const kind = classifyFile(key);
+  if (logger?.enabled) logger.trace(`runSingleFileDiagnostics ENTER: ${key} kind=${kind} content=${content !== undefined ? `${content.length} chars` : "from disk"}`);
 
   if (content === undefined) {
-    return project.run([key]);
+    const result = project.run([key]);
+    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (runner path)`);
+    return result;
   }
-
-  const kind = classifyFile(key);
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
     const program = project.getLanguageService(key)?.getProgram() ?? null;
+    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics: ${key} program=${program !== null ? "yes" : "NO"}`);
     analyzeInput(parseWithOptionalProgram(key, content, program, logger), emit);
+    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
     return results;
   }
 
   if (kind === "css") {
-    /* CSS rules require the full workspace CSSGraph for accurate
-       cross-file custom property resolution, duplicate detection,
-       and cascade analysis. Single-file analysis produces false
-       positives. CSS diagnostics are emitted by runCrossFileRules
-       which runs all CSS graph rules against the complete graph. */
+    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} 0 diags (css deferred to cross-file)`);
     return [];
   }
 
-  return project.run([key]);
+  const result = project.run([key]);
+  if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (fallback runner path)`);
+  return result;
 }
 
 /**
@@ -215,6 +221,7 @@ function rebuildGraphsAndRunCrossFileRules(
   for (const solidPath of fileIndex.solidFiles) {
     const version = project.getScriptVersion(solidPath) ?? "0";
     if (!cache.hasSolidGraph(solidPath, version)) {
+      if (log.enabled) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
       cache.getSolidGraph(solidPath, version, buildSolidGraphForPath(project, solidPath, log));
       rebuilt++;
     }
@@ -225,8 +232,13 @@ function rebuildGraphsAndRunCrossFileRules(
     const files: { path: string; content: string }[] = [];
     for (const cssPath of fileIndex.cssFiles) {
       const content = resolveContent(cssPath);
-      if (content !== null) files.push({ path: cssPath, content });
+      if (content !== null) {
+        files.push({ path: cssPath, content });
+      } else if (log.enabled) {
+        log.trace(`crossFile: CSS file unreadable: ${cssPath}`);
+      }
     }
+    if (log.enabled) log.trace(`crossFile: building CSSGraph from ${files.length} CSS files (tailwind=${tailwind !== null}, externalProps=${externalCustomProperties?.size ?? 0})`);
     const cssInput = buildCSSInput(files, log, tailwind, externalCustomProperties);
     return buildCSSGraph(cssInput);
   });

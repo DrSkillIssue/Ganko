@@ -21,7 +21,7 @@ Server settings, rule severity types, and Zod-validated schemas for the LSP init
 | `TraceLevel` | type | LSP protocol trace level |
 | `ACCESSIBILITY_POLICIES` | const | `["wcag-aa", "wcag-aaa", "mobile-first", "dense-ui", "large-text"]` |
 | `SEVERITY_LOOKUP` | const | String → `RuleSeverityOverride` lookup |
-| `NUMERIC_SEVERITY` | const | ESLint numeric severity → `RuleSeverityOverride` |
+| `numericSeverity` | function | ESLint numeric severity → `RuleSeverityOverride` |
 | `ESLINT_CONFIG_FILENAMES` | const | Candidate ESLint flat config filenames in resolution order |
 
 ### Extensions (`extensions`)

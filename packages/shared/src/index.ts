@@ -44,7 +44,7 @@ export {
   ACCESSIBILITY_POLICIES,
   ServerSettingsSchema,
   SEVERITY_LOOKUP,
-  NUMERIC_SEVERITY,
+  numericSeverity,
   ESLINT_CONFIG_FILENAMES,
   type RuleSeverityOverride,
   type RuleOverrides,

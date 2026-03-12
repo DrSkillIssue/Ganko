@@ -182,7 +182,8 @@ export const cssRequireReducedMotionOverride = defineCSSRule({
       for (let j = 0; j < resolved.length; j++) {
         const sel = resolved[j]
         if (!sel) continue
-        reduced.add(`${normalizeSelector(sel)}|${group}`)
+        const key = `${normalizeSelector(sel)}|${group}`
+        reduced.add(key)
       }
     }
 
@@ -204,7 +205,8 @@ export const cssRequireReducedMotionOverride = defineCSSRule({
       for (let j = 0; j < resolved.length; j++) {
         const sel = resolved[j]
         if (!sel) continue
-        if (reduced.has(`${normalizeSelector(sel)}|${group}`)) {
+        const key = `${normalizeSelector(sel)}|${group}`
+        if (reduced.has(key)) {
           covered = true
           break
         }

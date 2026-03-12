@@ -18,7 +18,7 @@ import type {
 import { summarizeSignalFacts } from "./consistency-domain"
 import { computeContentCompositionFingerprint } from "./content-composition"
 import { estimateBlockOffsetWithDeclaredFromHotSignals } from "./offset"
-import { readKnownNormalized } from "./signal-access"
+import { readKnownNormalized, isLayoutHidden } from "./signal-access"
 import type { LayoutGuardConditionProvenance } from "./guard-model"
 import { mergeEvidenceKind, toComparableExactValue } from "./util"
 
@@ -215,6 +215,8 @@ function isUnconditionallyOutOfFlow(
   return position === "absolute" || position === "fixed"
 }
 
+
+
 function collectCohortMetrics(input: {
   readonly children: readonly LayoutElementNode[]
   readonly axis: LayoutAxisModel
@@ -236,11 +238,16 @@ function collectCohortMetrics(input: {
     const node = input.children[i]
     if (!node) continue
 
-    // Skip children that are unconditionally out of flow (position: absolute/fixed).
-    // These elements don't participate in the parent's layout flow and should not
-    // affect sibling alignment analysis. Check the child node's own snapshot,
-    // not the measurement node's, because the child is the layout participant.
+    // Skip children that don't participate in the parent's layout flow:
+    // 1. Elements with display: none / hidden attribute generate no boxes at all.
+    // 2. Elements with position: absolute/fixed are out of flow.
+    // Check the child node's own snapshot, not the measurement node's, because
+    // the child is the layout participant.
     const childSnapshot = input.snapshotByElementNode.get(node)
+    if (isLayoutHidden(node, input.snapshotByElementNode)) {
+      excluded.add(node.key)
+      continue
+    }
     if (childSnapshot && isUnconditionallyOutOfFlow(childSnapshot)) {
       excluded.add(node.key)
       continue

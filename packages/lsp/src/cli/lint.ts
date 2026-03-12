@@ -463,8 +463,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
-  /* FIX #5: CLI never uses Runner/project.run() — only SolidPlugin is needed
-     for the TypeScript project service, not for plugin dispatch. */
+  if (log.enabled) log.trace(`lint: creating project with SolidPlugin only (root=${projectRoot})`);
   const project = createProject({
     rootPath: projectRoot,
     plugins: [SolidPlugin],
@@ -495,6 +494,8 @@ export async function runLint(args: readonly string[]): Promise<void> {
       cssContentMap.set(cssFile.path, cssFile.content);
     }
 
+    if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
+
     const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
     if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
 
@@ -520,18 +521,19 @@ export async function runLint(args: readonly string[]): Promise<void> {
       }
 
       const key = canonicalPath(path);
+      if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key} (${content.length} chars)`);
       project.updateFile(key, content);
       const program = project.getLanguageService(key)?.getProgram() ?? null;
+      if (log.enabled) log.trace(`lint: ${key} program=${program !== null ? "yes" : "NO"}`);
       const input = parseWithOptionalProgram(key, content, program, log);
       const graph = buildSolidGraph(input);
 
-      /* Pre-populate cache so cross-file phase gets O(1) hits. */
       const version = project.getScriptVersion(key) ?? "0";
       cache.setSolidGraph(key, version, graph);
 
-      /* Run single-file rules on the already-built graph. */
       const { results, emit } = createEmit(eslintResult.overrides);
       runSolidRules(graph, input.sourceCode, emit);
+      if (log.enabled) log.trace(`lint: ${key} → ${results.length} single-file diags`);
       for (let j = 0, dLen = results.length; j < dLen; j++) {
         const result = results[j];
         if (!result) continue;
