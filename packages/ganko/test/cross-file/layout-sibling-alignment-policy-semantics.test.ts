@@ -1,3 +1,4 @@
+import { noopLogger } from "@drskillissue/ganko-shared";
 import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import {
@@ -47,6 +48,7 @@ function collectDecisionClasses(tsx: string, css: string): readonly string[] {
     solids: [solidGraph],
     css: cssGraph,
     layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
   };
 
   const cases = collectAlignmentCases(context);
@@ -78,6 +80,7 @@ function collectProvenanceSignatures(tsx: string, files: readonly CssFixture[]):
     solids: [solidGraph],
     css: cssGraph,
     layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
   };
 
   const cases = collectAlignmentCases(context);
@@ -245,6 +248,7 @@ describe("layout alignment policy semantics", () => {
       solids: [solidGraph],
       css: cssGraph,
       layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
     };
 
     const cases = collectAlignmentCases(context);
@@ -670,6 +674,7 @@ describe("layout alignment policy semantics", () => {
       solids: [solidGraph],
       css: cssGraph,
       layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
     };
 
     const cases = collectAlignmentCases(context);

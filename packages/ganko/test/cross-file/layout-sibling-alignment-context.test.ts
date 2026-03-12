@@ -1,3 +1,4 @@
+import { noopLogger } from "@drskillissue/ganko-shared";
 import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import { analyzeCrossFileInput, buildLayoutGraph, collectAlignmentCases, evaluateAlignmentCase } from "../../src/cross-file";
@@ -252,6 +253,7 @@ describe("layout alignment context handling", () => {
       solids: [solidGraph],
       css: cssGraph,
       layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
     };
 
     const firstPass = collectAlignmentCases(context);
@@ -374,6 +376,7 @@ describe("layout alignment context handling", () => {
       solids: [solidGraph],
       css: cssGraph,
       layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
     };
 
     const cases = collectAlignmentCases(context);
@@ -430,6 +433,7 @@ describe("layout alignment context handling", () => {
       solids: [solidGraph],
       css: cssGraph,
       layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
     };
 
     const cases = collectAlignmentCases(context);

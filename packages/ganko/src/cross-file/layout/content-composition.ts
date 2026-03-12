@@ -569,29 +569,16 @@ function resolveInlineReplacedKindDivergence(
 }
 
 /**
- * CSS Box Alignment §9.3 defines exactly four shared alignment contexts where
- * siblings form a baseline-sharing group:
+ * Whether the alignment context uses baseline-sharing between siblings.
  *
- * 1. Inline-level boxes in the same line box (via `vertical-align`, default `baseline`)
- * 2. Table cells in the same row (via `vertical-align: baseline`)
- * 3. Flex items in the same flex line (via `align-items`/`align-self: baseline`)
- * 4. Grid items in the same row or column (via `align-items`/`align-self: baseline`)
+ * Delegates to the pre-computed `baselineRelevance` field on `AlignmentContext`,
+ * which is the single source of truth for whether baselines are consulted.
  *
- * Block-level siblings in a BFC have no shared alignment context (CSS2 §9.4.1) —
- * their vertical distance is determined exclusively by margins. Positioned elements
- * are out of flow entirely (CSS2 §9.3.1).
- *
- * For flex/grid, baseline alignment is opt-in (`align-items` defaults to `stretch`
- * for flex, `normal` for grid). When `align-items` is null, the rule can't confirm
- * non-baseline alignment, so we conservatively assume baseline sharing is possible.
+ * See `context-model.ts::BaselineRelevance` for the CSS spec references
+ * governing each context kind.
  */
 function hasSharedBaselineAlignment(context: AlignmentContext): boolean {
-  if (context.kind === "inline-formatting" || context.kind === "table-cell") return true
-  if (context.kind === "flex-cross-axis" || context.kind === "grid-cross-axis") {
-    const alignItems = context.parentAlignItems
-    return alignItems === null || alignItems === "baseline"
-  }
-  return false
+  return context.baselineRelevance === "relevant"
 }
 
 /**

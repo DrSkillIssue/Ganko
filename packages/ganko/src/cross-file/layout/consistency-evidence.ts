@@ -60,10 +60,18 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
     input.cohortProfile.medianLineHeightPx,
   )
 
-  const baselineStrength = resolveBaselineStrength(input, lineHeight)
-  const contextStrength = resolveContextStrength(input, lineHeight)
-  const replacedStrength = resolveReplacedControlStrength(input, lineHeight)
-  const compositionStrength = resolveContentCompositionStrength(input)
+  // When the alignment context uses purely geometric positioning (e.g. flex
+  // `align-items: center`, table-cell `vertical-align: middle`), baselines are
+  // never consulted. All baseline-dependent evidence factors are suppressed.
+  // See `context-model.ts::BaselineRelevance` for CSS spec references.
+  const baselinesIrrelevant = input.context.baselineRelevance === "irrelevant"
+
+
+
+  const baselineStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
+  const contextStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
+  const replacedStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
+  const compositionStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContentCompositionStrength(input)
   const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
   const provenance = input.cohortProvenance
   const atoms = buildEvidenceAtoms(
@@ -449,4 +457,5 @@ function toNegativeContribution(strength: number, maxPenalty: number, valueKind:
   }
 }
 
+const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: "exact" }
 

@@ -2,6 +2,7 @@ import type { CrossRuleContext } from "../rule"
 import type {
   AlignmentContext,
   AlignmentContextKind,
+  BaselineRelevance,
   ContextCertainty,
   InlineDirectionModel,
   LayoutAxisModel,
@@ -67,6 +68,10 @@ export function createAlignmentContextForParent(
   const contextCertainty = combineCertainty(classified.certainty, axis.certainty)
   const certainty = combineCertainty(contextCertainty, inlineDirection.certainty)
 
+  const baselineRelevance = computeBaselineRelevance(classified.kind, parentAlignItems, parentPlaceItems)
+
+
+
   const out: AlignmentContext = {
     kind: classified.kind,
     certainty,
@@ -82,6 +87,7 @@ export function createAlignmentContextForParent(
     parentAlignItems,
     parentPlaceItems,
     hasPositionedOffset: positionedOffset.hasPositionedOffset,
+    baselineRelevance,
     evidence,
   }
 
@@ -366,4 +372,113 @@ export function getContextElementRef(
   const refsInFile = context.layout.elementRefsBySolidFileAndId.get(alignmentContext.parentSolidFile)
   if (!refsInFile) return null
   return refsInFile.get(alignmentContext.parentElementId) ?? null
+}
+
+/**
+ * Non-baseline alignment values for flex/grid `align-items`.
+ * When the parent uses one of these, flex/grid items are positioned by
+ * margin box geometry (CSS Flexbox §8.3, CSS Grid §10.6), not baselines.
+ */
+const FLEX_GRID_GEOMETRIC_ALIGN_ITEMS: ReadonlySet<string> = new Set([
+  "center", "flex-start", "flex-end", "start", "end", "stretch",
+  "self-start", "self-end", "normal",
+])
+
+/**
+ * Computes baseline relevance at context construction time.
+ *
+ * For flex/grid, the parent's `align-items` fully determines whether baselines
+ * are consulted. For table cells, baseline relevance depends on the cohort's
+ * per-element `vertical-align` consensus, which isn't available until after
+ * cohort aggregation. Table cells default to `"relevant"` (conservative) and
+ * are finalized via {@link finalizeTableCellBaselineRelevance}.
+ */
+function computeBaselineRelevance(
+  kind: AlignmentContextKind,
+  parentAlignItems: string | null,
+  parentPlaceItems: string | null,
+): BaselineRelevance {
+  if (kind === "flex-cross-axis" || kind === "grid-cross-axis") {
+    const effective = resolveEffectiveAlignItems(parentAlignItems, parentPlaceItems)
+    // Null means we can't confirm non-baseline alignment — conservatively
+    // assume baselines may participate.
+    if (effective === null) return "relevant"
+    return FLEX_GRID_GEOMETRIC_ALIGN_ITEMS.has(effective) ? "irrelevant" : "relevant"
+  }
+
+  // Table cells: deferred to post-cohort finalization.
+  // Inline formatting, block flow, positioned: baselines always relevant.
+  return "relevant"
+}
+
+/**
+ * Resolves the effective `align-items` value from `align-items` and `place-items`.
+ * `place-items` is a shorthand: `<align-items> <justify-items>`. The block-axis
+ * (align) component is the first token.
+ */
+function resolveEffectiveAlignItems(
+  alignItems: string | null,
+  placeItems: string | null,
+): string | null {
+  if (alignItems !== null) return alignItems
+  if (placeItems === null) return null
+  const firstToken = placeItems.split(/\s+/)[0]
+  return firstToken ?? null
+}
+
+/**
+ * Non-baseline `vertical-align` values for table cells (CSS2 §17.5.3).
+ * When ALL cells in a row use one of these values, content is positioned
+ * geometrically and baselines are never consulted.
+ */
+const TABLE_CELL_GEOMETRIC_VERTICAL_ALIGN: ReadonlySet<string> = new Set([
+  "middle", "top", "bottom",
+])
+
+/**
+ * Finalizes `baselineRelevance` for table-cell contexts after cohort aggregation.
+ *
+ * Table-cell baseline relevance requires cohort-level data (the per-element
+ * `vertical-align` consensus) that isn't available at initial context construction.
+ * This function is called after `buildCohortIndex` completes.
+ *
+ * Per CSS2 §17.5.3, baseline alignment only occurs when at least one cell
+ * uses `vertical-align: baseline`. When the entire cohort agrees on a
+ * geometric value (`middle`, `top`, `bottom`), baselines are irrelevant.
+ *
+ * @param contextByParentNode - Mutable context map to update in-place
+ * @param cohortVerticalAlignConsensus - Per-parent resolved consensus value
+ *   (null if conflicted, unknown, or no comparable data)
+ */
+export function finalizeTableCellBaselineRelevance(
+  contextByParentNode: Map<LayoutElementNode, AlignmentContext>,
+  cohortVerticalAlignConsensus: ReadonlyMap<LayoutElementNode, string | null>,
+): void {
+  for (const [parent, consensusValue] of cohortVerticalAlignConsensus) {
+    const context = contextByParentNode.get(parent)
+    if (!context) continue
+    if (context.kind !== "table-cell") continue
+    if (consensusValue === null) continue
+    if (!TABLE_CELL_GEOMETRIC_VERTICAL_ALIGN.has(consensusValue)) continue
+
+    // Replace with finalized context — all fields identical except baselineRelevance.
+    contextByParentNode.set(parent, {
+      kind: context.kind,
+      certainty: context.certainty,
+      parentSolidFile: context.parentSolidFile,
+      parentElementId: context.parentElementId,
+      parentElementKey: context.parentElementKey,
+      parentTag: context.parentTag,
+      axis: context.axis,
+      axisCertainty: context.axisCertainty,
+      inlineDirection: context.inlineDirection,
+      inlineDirectionCertainty: context.inlineDirectionCertainty,
+      parentDisplay: context.parentDisplay,
+      parentAlignItems: context.parentAlignItems,
+      parentPlaceItems: context.parentPlaceItems,
+      hasPositionedOffset: context.hasPositionedOffset,
+      baselineRelevance: "irrelevant",
+      evidence: context.evidence,
+    })
+  }
 }

@@ -23,6 +23,7 @@ export function buildMeasurementNodeIndex(
     const candidates = resolveMeasurementCandidates(root, childrenByParentNode, snapshotByElementNode, candidateCache)
     const measurement = resolveMeasurementNode(root, candidates)
     measurementByRootKey.set(root.key, measurement)
+
   }
 
   return measurementByRootKey

@@ -249,7 +249,7 @@ function rebuildGraphsAndRunCrossFileRules(
 
   const t0 = performance.now();
   runCrossFileRules(
-    { solids: solidGraphs, css: cssGraph, layout: layoutGraph },
+    { solids: solidGraphs, css: cssGraph, layout: layoutGraph, logger: log },
     emit,
     log,
   );

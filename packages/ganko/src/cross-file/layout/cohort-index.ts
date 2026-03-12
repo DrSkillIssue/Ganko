@@ -81,6 +81,13 @@ interface CohortSignalIndex {
 
 export interface CohortIndex {
   readonly statsByParentNode: ReadonlyMap<LayoutElementNode, LayoutCohortStats>
+  /**
+   * Per-parent resolved vertical-align consensus value for the cohort.
+   * Non-null when all comparable siblings agree on a single value (e.g. "middle").
+   * Null when siblings conflict, have no comparable data, or the context is non-table.
+   * Used by {@link finalizeTableCellBaselineRelevance} to update context post-aggregation.
+   */
+  readonly verticalAlignConsensusByParent: ReadonlyMap<LayoutElementNode, string | null>
   readonly conditionalSignals: number
   readonly totalSignals: number
   readonly unimodalFalseCount: number
@@ -95,6 +102,7 @@ export function buildCohortIndex(input: {
   readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
 }): CohortIndex {
   const statsByParentNode = new Map<LayoutElementNode, LayoutCohortStats>()
+  const verticalAlignConsensusByParent = new Map<LayoutElementNode, string | null>()
   const profileBuffers = createCohortProfileBuffers()
 
   let conditionalSignals = 0
@@ -180,6 +188,8 @@ export function buildCohortIndex(input: {
       excludedElementKeys: cohortMetricsResult.excludedElementKeys,
     })
 
+    verticalAlignConsensusByParent.set(parent, resolveVerticalAlignConsensus(signalIndex.verticalAlign))
+
     conditionalSignals += counts.conditional
     totalSignals += counts.total
     if (!profile.unimodal) unimodalFalseCount++
@@ -187,6 +197,7 @@ export function buildCohortIndex(input: {
 
   return {
     statsByParentNode,
+    verticalAlignConsensusByParent,
     conditionalSignals,
     totalSignals,
     unimodalFalseCount,
@@ -1267,4 +1278,22 @@ function swap(values: number[], left: number, right: number): void {
   const rightValue = values[right] ?? 0
   values[left] = rightValue
   values[right] = leftValue
+}
+
+/**
+ * Resolves the cohort's vertical-align consensus value.
+ *
+ * Returns the single agreed-upon value when ALL comparable siblings use the
+ * same `vertical-align` keyword. Returns null when siblings conflict, have
+ * no comparable data, or the count map is empty.
+ *
+ * Used to finalize table-cell `baselineRelevance` after cohort aggregation.
+ */
+function resolveVerticalAlignConsensus(aggregate: CohortSignalAggregate): string | null {
+  if (aggregate.comparableCount === 0) return null
+  if (aggregate.countsByValue.size !== 1) return null
+  // Exactly one distinct value — all comparable siblings agree.
+  const firstEntry = aggregate.countsByValue.entries().next()
+  if (firstEntry.done) return null
+  return firstEntry.value[0]
 }

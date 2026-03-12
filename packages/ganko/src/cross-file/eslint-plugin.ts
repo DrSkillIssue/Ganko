@@ -10,7 +10,7 @@
  * Uses createBatchPluginAdapter: all cross-file rules share one analysis
  * pass per SourceCode instance, avoiding redundant graph construction.
  */
-import { CSS_EXTENSIONS, canonicalPath, matchesExtension } from "@drskillissue/ganko-shared"
+import { CSS_EXTENSIONS, canonicalPath, matchesExtension, noopLogger } from "@drskillissue/ganko-shared"
 import { createBatchPluginAdapter, buildSolidInputFromContext } from "../eslint-adapter"
 import type { RuleContext } from "../eslint-adapter"
 import type { CrossRuleContext } from "./rule"
@@ -60,6 +60,7 @@ function buildCrossContext(context: RuleContext): CrossRuleContext {
     solids: [solidGraph],
     css: cssGraph,
     layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
   }
 }
 

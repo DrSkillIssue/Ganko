@@ -85,15 +85,35 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
     category: "css-layout",
   },
   check(context, emit) {
+    const log = context.logger
     const detections = runLayoutDetector(context, siblingAlignmentDetector)
     const uniqueDetections = dedupeDetectionsBySubject(detections)
+
+    if (log.enabled) {
+      log.debug(
+        `[sibling-alignment] raw=${detections.length} deduped=${uniqueDetections.length}`,
+      )
+    }
 
     for (let i = 0; i < uniqueDetections.length; i++) {
       const detection = uniqueDetections[i]
       if (!detection) continue
 
+      const subjectTag = detection.caseData.subject.tag ?? "element"
+      const parentTag = detection.caseData.cohort.parentTag ?? "container"
+      const subjectFile = detection.caseData.subject.solidFile
+      const subjectId = detection.caseData.subject.elementId
+      const logPrefix = `[sibling-alignment] <${subjectTag}> in <${parentTag}> (${subjectFile}#${subjectId})`
+
       // Skip low-confidence detections where the rule itself is uncertain.
-      if (detection.evidence.confidence < MIN_CONFIDENCE_THRESHOLD) continue
+      if (detection.evidence.confidence < MIN_CONFIDENCE_THRESHOLD) {
+        if (log.enabled) {
+          log.debug(
+            `${logPrefix} SKIP: confidence=${detection.evidence.confidence.toFixed(2)} < threshold=${MIN_CONFIDENCE_THRESHOLD}`,
+          )
+        }
+        continue
+      }
 
       // Skip detections with negligible estimated offset when offset is the
       // primary evidence factor. Sub-pixel and 1px differences are standard
@@ -106,7 +126,15 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         estimatedOffset !== null
         && Math.abs(estimatedOffset) < MIN_OFFSET_PX_THRESHOLD
         && !hasNonOffsetPrimaryEvidence(detection.evidence.topFactors)
-      ) continue
+      ) {
+        if (log.enabled) {
+          log.debug(
+            `${logPrefix} SKIP: offset=${estimatedOffset.toFixed(2)}px < ${MIN_OFFSET_PX_THRESHOLD}px`
+            + ` (no non-offset primary evidence, topFactors=[${detection.evidence.topFactors.join(",")}])`,
+          )
+        }
+        continue
+      }
 
       // Skip detections where the cohort's parent (or any ancestor) is out of
       // normal flow. Elements inside fixed/absolute containers don't participate
@@ -116,17 +144,27 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         context.layout,
         detection.caseData.cohort.parentElementKey,
         detection.caseData.subject.solidFile,
-      )) continue
+      )) {
+        if (log.enabled) {
+          log.debug(`${logPrefix} SKIP: out-of-flow ancestor`)
+        }
+        continue
+      }
 
       const subjectRef = readNodeRefById(
         context.layout,
         detection.caseData.subject.solidFile,
         detection.caseData.subject.elementId,
       )
-      if (!subjectRef) continue
+      if (!subjectRef) {
+        if (log.enabled) {
+          log.debug(`${logPrefix} SKIP: no node ref`)
+        }
+        continue
+      }
 
-      const subject = detection.caseData.subject.tag ?? "element"
-      const parent = detection.caseData.cohort.parentTag ?? "container"
+      const subject = subjectTag
+      const parent = parentTag
       const severity = formatFixed(detection.evidence.severity)
       const confidence = formatFixed(detection.evidence.confidence)
       const offset = detection.evidence.estimatedOffsetPx
@@ -139,6 +177,17 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
       const causes = detection.evidence.causes.length === 0
         ? "alignment signals indicate an outlier"
         : detection.evidence.causes.join("; ")
+
+      if (log.enabled) {
+        log.debug(
+          `${logPrefix} EMIT: severity=${severity} confidence=${confidence}`
+          + ` offset=${offset?.toFixed(2) ?? "null"}`
+          + ` posterior=[${detection.evidence.posteriorLower.toFixed(3)},${detection.evidence.posteriorUpper.toFixed(3)}]`
+          + ` evidenceMass=${detection.evidence.evidenceMass.toFixed(3)}`
+          + ` topFactors=[${detection.evidence.topFactors.join(",")}]`
+          + ` causes=[${causes}]`,
+        )
+      }
 
       emit(
         createDiagnostic(

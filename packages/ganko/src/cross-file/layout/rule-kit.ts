@@ -49,6 +49,7 @@ export function runLayoutDetector<TCase>(
   const cases = detector.collect(context)
   const startedAt = performance.now()
   const out: LayoutDetection<TCase>[] = []
+  const log = context.logger
 
   for (let i = 0; i < cases.length; i++) {
     const current = cases[i]
@@ -63,11 +64,34 @@ export function runLayoutDetector<TCase>(
         result.evidence.posteriorLower,
         result.evidence.posteriorUpper,
       )
+      if (log.enabled) {
+        log.debug(
+          `[${detector.id}] accept case=${i}`
+          + ` severity=${result.evidence.severity.toFixed(2)}`
+          + ` confidence=${result.evidence.confidence.toFixed(2)}`
+          + ` posterior=[${result.evidence.posteriorLower.toFixed(3)},${result.evidence.posteriorUpper.toFixed(3)}]`
+          + ` evidenceMass=${result.evidence.evidenceMass.toFixed(3)}`
+          + ` context=${result.evidence.contextKind}`
+          + ` offset=${result.evidence.estimatedOffsetPx?.toFixed(2) ?? "null"}`
+          + ` topFactors=[${result.evidence.topFactors.join(",")}]`
+          + ` causes=[${result.evidence.causes.join("; ")}]`,
+        )
+      }
       out.push({ caseData: current, evidence: result.evidence })
       continue
     }
 
     recordPolicyMetrics(context, result.evidenceMass, result.posteriorLower, result.posteriorUpper)
+
+    if (log.enabled) {
+      log.debug(
+        `[${detector.id}] reject case=${i}`
+        + ` reason=${result.reason}`
+        + ` detail=${result.detail ?? "none"}`
+        + ` posterior=[${result.posteriorLower.toFixed(3)},${result.posteriorUpper.toFixed(3)}]`
+        + ` evidenceMass=${result.evidenceMass.toFixed(3)}`,
+      )
+    }
 
     if (result.reason === "low-evidence") {
       context.layout.perf.casesRejectedLowEvidence++

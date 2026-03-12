@@ -66,8 +66,9 @@ function dedupeCSSFiles(files: readonly CSSFile[]): CSSFile[] {
  *
  * @param context Pre-built Solid, CSS, and layout graphs
  * @param emit Diagnostic emitter
+ * @param log Optional logger for diagnostics
  */
-export function runCrossFileRules(context: CrossRuleContext, emit: Emit, log?: Logger): void {
+export function runCrossFileRules(context: CrossRuleContext, emit: Emit, log?: Logger | undefined): void {
   if (context.solids.length === 0) return
 
   const trackedEmit: Emit = (diagnostic) => {
@@ -94,6 +95,7 @@ export function runCrossFileRules(context: CrossRuleContext, emit: Emit, log?: L
  *
  * @param input Parsed Solid and CSS inputs
  * @param emit Diagnostic emitter
+ * @param logger Optional logger for diagnostics
  */
 export function analyzeCrossFileInput(input: CrossFileInput, emit: Emit, logger: Logger = noopLogger): void {
   const solids = Array.isArray(input.solid) ? input.solid : [input.solid]
@@ -111,6 +113,7 @@ export function analyzeCrossFileInput(input: CrossFileInput, emit: Emit, logger:
     solids: solidGraphs,
     css: cssGraph,
     layout: buildLayoutGraph(solidGraphs, cssGraph, logger),
+    logger,
   }
   runCrossFileRules(context, emit, logger)
 }
@@ -179,6 +182,7 @@ export const CrossFilePlugin: Plugin<"cross-file"> = {
       solids: solidGraphs,
       css: cssGraph,
       layout: buildLayoutGraph(solidGraphs, cssGraph),
+      logger: noopLogger,
     }
 
     runCrossFileRules(context, emit)
