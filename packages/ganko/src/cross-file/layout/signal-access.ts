@@ -175,6 +175,34 @@ export function readKnownNormalizedWithGuard(snapshot: LayoutSignalSnapshot, nam
   return value.normalized
 }
 
+/**
+ * Returns true when the element is unconditionally removed from the rendering
+ * tree and generates no boxes.
+ *
+ * Checks three sources:
+ * 1. HTML `hidden` attribute — UA stylesheet maps to `display: none`
+ * 2. Tailwind `hidden` utility class — maps to `display: none`
+ * 3. Explicit `display: none` via CSS signal
+ *
+ * Elements matching any of these cannot participate in layout, alignment, or
+ * baseline propagation and must be excluded from cohort and measurement analysis.
+ */
+export function isLayoutHidden(
+  node: LayoutElementNode,
+  snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
+): boolean {
+  if (node.attributes.has("hidden")) return true
+  if (node.classTokenSet.has("hidden")) return true
+
+  const snapshot = snapshotByElementNode.get(node)
+  if (snapshot) {
+    const display = readKnownNormalized(snapshot, "display")
+    if (display === "none") return true
+  }
+
+  return false
+}
+
 export function hasEffectivePosition(snapshot: LayoutSignalSnapshot): boolean {
   const position = readKnownNormalized(snapshot, "position")
   if (position === null) return false

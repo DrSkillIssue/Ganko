@@ -96,6 +96,8 @@ export function createTypeScriptProjectService(
   return {
     getProgramForFile(filePath: string, content?: string): ts.Program | null {
       const key = canonicalPath(filePath);
+      if (log?.enabled) log.trace(`getProgramForFile ENTER: ${key} (content=${content !== undefined ? `${content.length} chars` : "from disk"})`);
+
       if (content !== undefined) {
         service.openClientFile(key, content);
       } else {
@@ -114,13 +116,31 @@ export function createTypeScriptProjectService(
         return null;
       }
 
-      return project.getLanguageService(true).getProgram() ?? null;
+      if (log?.enabled) {
+        const projectName = project.getProjectName();
+        const isConfigured = project.projectKind === 1;
+        log.trace(`getProgramForFile: project=${projectName} kind=${isConfigured ? "configured" : "inferred"} for ${key}`);
+      }
+
+      const program = project.getLanguageService(true).getProgram() ?? null;
+      if (log?.enabled) {
+        if (program) {
+          const sf = program.getSourceFile(key);
+          log.trace(`getProgramForFile EXIT: program obtained, sourceFile=${sf !== undefined ? "found" : "MISSING"} for ${key}`);
+        } else {
+          log.trace(`getProgramForFile EXIT: NO program for ${key}`);
+        }
+      }
+      return program;
     },
 
     getLanguageServiceForFile(filePath: string): ts.LanguageService | null {
       const key = canonicalPath(filePath);
+      if (log?.enabled) log.trace(`getLanguageServiceForFile ENTER: ${key}`);
+
       let scriptInfo = service.getScriptInfo(key);
       if (!scriptInfo) {
+        if (log?.enabled) log.trace(`getLanguageServiceForFile: no cached scriptInfo, opening ${key}`);
         service.openClientFile(key);
         scriptInfo = service.getScriptInfo(key);
         if (!scriptInfo) {
@@ -135,18 +155,32 @@ export function createTypeScriptProjectService(
         return null;
       }
 
+      if (log?.enabled) {
+        const projectName = project.getProjectName();
+        const isConfigured = project.projectKind === 1;
+        log.trace(`getLanguageServiceForFile EXIT: project=${projectName} kind=${isConfigured ? "configured" : "inferred"} for ${key}`);
+      }
+
       return project.getLanguageService(true);
     },
 
     getScriptVersionForFile(filePath: string): string | null {
       const key = canonicalPath(filePath);
       const scriptInfo = service.getScriptInfo(key);
-      if (!scriptInfo) return null;
+      if (!scriptInfo) {
+        if (log?.enabled) log.trace(`getScriptVersionForFile: no scriptInfo for ${key}`);
+        return null;
+      }
 
       const project = service.getDefaultProjectForFile(scriptInfo.fileName, true);
-      if (!project) return null;
+      if (!project) {
+        if (log?.enabled) log.trace(`getScriptVersionForFile: no project for ${key}`);
+        return null;
+      }
 
-      return project.getScriptVersion(key);
+      const version = project.getScriptVersion(key);
+      if (log?.enabled) log.trace(`getScriptVersionForFile: ${key} → version=${version}`);
+      return version;
     },
 
     updateFile(filePath: string, content: string): void {

@@ -1,5 +1,6 @@
 import type { LayoutElementNode } from "./graph"
 import type { LayoutSignalSnapshot } from "./signal-model"
+import { isLayoutHidden } from "./signal-access"
 
 interface MeasurementCandidateSet {
   readonly firstControlOrReplacedDescendant: LayoutElementNode | null
@@ -123,6 +124,10 @@ function resolveMeasurementCandidates(
   for (let i = 0; i < children.length; i++) {
     const child = children[i]
     if (!child) continue
+
+    // Skip children that generate no boxes (display: none / hidden attribute).
+    // These elements cannot contribute to baseline propagation or alignment.
+    if (isLayoutHidden(child, snapshotByElementNode)) continue
 
     if (firstControlOrReplacedDescendant === null && (child.isControl || child.isReplaced)) {
       firstControlOrReplacedDescendant = child

@@ -85,12 +85,18 @@ export const SEVERITY_LOOKUP: Readonly<Record<string, RuleSeverityOverride>> = {
   off: "off",
 };
 
-/** Maps numeric ESLint severity to RuleSeverityOverride. */
-export const NUMERIC_SEVERITY: Readonly<Record<number, RuleSeverityOverride>> = {
-  0: "off",
-  1: "warn",
-  2: "error",
-};
+/**
+ * Maps numeric ESLint severity to RuleSeverityOverride.
+ *
+ * @param n - ESLint numeric severity (0 = off, 1 = warn, 2 = error)
+ * @returns the corresponding override, or `undefined` for unrecognized values
+ */
+export function numericSeverity(n: number): RuleSeverityOverride | undefined {
+  if (n === 0) return "off";
+  if (n === 1) return "warn";
+  if (n === 2) return "error";
+  return undefined;
+}
 
 /** Candidate filenames for ESLint flat config, checked in order. */
 export const ESLINT_CONFIG_FILENAMES = [

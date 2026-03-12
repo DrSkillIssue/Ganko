@@ -94,6 +94,27 @@ export class GraphCache {
   }
 
   /**
+   * Get a cached SolidGraph without building on miss.
+   *
+   * Returns the cached graph if the version matches, null otherwise.
+   * Use when the caller has already confirmed the entry exists via
+   * `hasSolidGraph` and wants to avoid allocating a builder closure.
+   *
+   * @param path Absolute file path
+   * @param version Script version string from the TS project service
+   */
+  getCachedSolidGraph(path: string, version: string): SolidGraph | null {
+    const key = canonicalPath(path)
+    const cached = this.solids.get(key)
+    if (cached !== undefined && cached.version === version) {
+      if (this.log.enabled) this.log.debug(`getCachedSolidGraph HIT: ${key} v=${version}`)
+      return cached.graph
+    }
+    if (this.log.enabled) this.log.debug(`getCachedSolidGraph MISS: ${key} v=${version}`)
+    return null
+  }
+
+  /**
    * Get or build a SolidGraph for a file path.
    *
    * Returns the cached graph if the version matches.

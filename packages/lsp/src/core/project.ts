@@ -67,9 +67,14 @@ export function createProject(config: ProjectConfig): Project {
   if (log !== undefined) tsOptions.log = log;
   const tsService: TypeScriptProjectService = createTypeScriptProjectService(tsOptions);
 
+  if (log?.enabled) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
+
   return {
     run(files) {
-      return runner.run(files);
+      if (log?.enabled) log.trace(`project.run: ${files.length} files`);
+      const result = runner.run(files);
+      if (log?.enabled) log.trace(`project.run: ${result.length} diagnostics from ${files.length} files`);
+      return result;
     },
 
     getLanguageService(path) {
@@ -93,10 +98,12 @@ export function createProject(config: ProjectConfig): Project {
     },
 
     setPlugins(plugins) {
+      if (log?.enabled) log.trace(`project.setPlugins: [${plugins.map(p => p.kind).join(", ")}]`);
       runner = createRunner({ plugins });
     },
 
     setRuleOverrides(overrides) {
+      if (log?.enabled) log.trace(`project.setRuleOverrides: ${Object.keys(overrides).length} overrides`);
       runner.setRuleOverrides(overrides);
     },
 

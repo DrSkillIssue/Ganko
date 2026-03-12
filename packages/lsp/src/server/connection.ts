@@ -894,14 +894,18 @@ function publishFileDiagnostics(
   const key = canonicalPath(path);
   const kind = classifyFile(key);
   const resolved = content ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined);
+  if (context.log.enabled) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
   const t0 = performance.now();
   const singleFile = runDiagnostics(project, context.diagCache, key, resolved, context.serverState.ruleOverrides, context.log);
+  if (context.log.enabled) context.log.trace(`publishFileDiagnostics: ${key} singleFile=${singleFile.length} in ${(performance.now() - t0).toFixed(1)}ms`);
 
   let crossFile: readonly Diagnostic[];
   if (includeCrossFile && context.fileIndex && context.project) {
+    if (context.log.enabled) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${context.fileIndex.solidFiles.size} cssFiles=${context.fileIndex.cssFiles.size})`);
     crossFile = runCrossFileDiagnostics(key, context.fileIndex, context.project, context.graphCache, context.tailwindValidator, context.resolveContent, context.serverState.ruleOverrides, context.externalCustomProperties);
   } else {
     crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
+    if (context.log.enabled) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);
   }
 
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
