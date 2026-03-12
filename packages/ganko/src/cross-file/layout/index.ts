@@ -23,6 +23,7 @@ export { toLayoutElementKey } from "./graph"
 export type {
   AlignmentContext,
   AlignmentContextKind,
+  BaselineRelevance,
   ContextCertainty,
   InlineDirectionModel,
   LayoutAxisModel,
@@ -77,7 +78,7 @@ export {
   normalizeSignalMap,
   normalizeSignalMapWithCounts,
 } from "./signal-normalization"
-export { classifyAlignmentContext, getContextElementRef } from "./context-classification"
+export { classifyAlignmentContext, getContextElementRef, finalizeTableCellBaselineRelevance } from "./context-classification"
 export { formatAlignmentCauses, orderAlignmentFindings } from "./diagnostics"
 export { buildLayoutGraph } from "./build"
 export type { LayoutPerfStats, LayoutPerfStatsMutable } from "./perf"

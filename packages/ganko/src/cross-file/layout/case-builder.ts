@@ -1,5 +1,5 @@
 import type { CrossRuleContext } from "../rule"
-import type { ContextCertainty } from "./context-model"
+import type { AlignmentContext, ContextCertainty } from "./context-model"
 import type { LayoutElementNode } from "./graph"
 import type {
   AlignmentCase,
@@ -23,6 +23,8 @@ export function collectAlignmentCases(context: CrossRuleContext): readonly Align
 
   for (const [parent, children] of context.layout.childrenByParentNode) {
     if (children.length < 2) continue
+
+
 
     const alignmentContext = context.layout.contextByParentNode.get(parent)
     if (!alignmentContext) {
@@ -55,6 +57,20 @@ export function collectAlignmentCases(context: CrossRuleContext): readonly Align
         throw new Error(`missing subject cohort stats for ${measurementNode.key}`)
       }
 
+      // When the measurement node was resolved by descending into the child
+      // (i.e. measurementNode !== child), the child may establish an independent
+      // formatting context with geometric alignment (e.g. inline-flex items-center).
+      // In that case, the measurement node's baseline characteristics are shielded
+      // from the grandparent's alignment context. Propagate the child's
+      // baselineRelevance to suppress false positives from baseline-dependent
+      // evidence factors.
+      const effectiveAlignmentContext = resolveEffectiveAlignmentContext(
+        alignmentContext,
+        child,
+        measurementNode,
+        context.layout.contextByParentNode,
+      )
+
       const subjectDeclaredOffsetDeviation = computeDeviation(
         subjectStats.declaredOffset,
         subjectStats.baselineProfile.medianDeclaredOffsetPx,
@@ -71,7 +87,7 @@ export function collectAlignmentCases(context: CrossRuleContext): readonly Align
       out.push(
         buildAlignmentCase(
           parent,
-          alignmentContext,
+          effectiveAlignmentContext,
           cohortStats.profile,
           subjectStats.signals,
           subjectStats.identifiability,
@@ -90,6 +106,8 @@ export function collectAlignmentCases(context: CrossRuleContext): readonly Align
       context.layout.perf.casesCollected++
     }
   }
+
+
 
   context.layout.perf.caseBuildMs += performance.now() - startedAt
   out.sort(compareAlignmentCaseOrder)
@@ -273,6 +291,61 @@ function collectCohortContentCompositions(
   }
 
   return out
+}
+
+/**
+ * When the measurement node differs from the cohort child, the child may
+ * establish an independent formatting context with geometric alignment
+ * (e.g. `display: inline-flex; align-items: center`). In that scenario the
+ * measurement node's baseline characteristics are shielded from the
+ * grandparent's alignment context — baselines never propagate across a
+ * formatting context boundary that uses geometric alignment.
+ *
+ * This function checks whether the child has its own alignment context
+ * with `baselineRelevance: "irrelevant"`, and if so, returns a derived
+ * context that propagates the irrelevance to the grandparent's case.
+ * Otherwise the original parent alignment context is returned unchanged.
+ */
+function resolveEffectiveAlignmentContext(
+  parentContext: AlignmentContext,
+  child: LayoutElementNode,
+  measurementNode: LayoutElementNode,
+  contextByParentNode: ReadonlyMap<LayoutElementNode, AlignmentContext>,
+): AlignmentContext {
+  // No indirection — the child IS the measurement node.
+  if (child === measurementNode) return parentContext
+
+  // Already irrelevant — nothing to propagate.
+  if (parentContext.baselineRelevance === "irrelevant") return parentContext
+
+  // Check whether the child itself is a parent in the layout graph with
+  // its own alignment context. If it uses geometric alignment internally,
+  // its descendant's baseline characteristics are invisible to the
+  // grandparent.
+  const childContext = contextByParentNode.get(child)
+  if (!childContext) return parentContext
+  if (childContext.baselineRelevance !== "irrelevant") return parentContext
+
+  // The child shields its descendants' baselines from the grandparent.
+  // Derive a new context with baselineRelevance overridden.
+  return {
+    kind: parentContext.kind,
+    certainty: parentContext.certainty,
+    parentSolidFile: parentContext.parentSolidFile,
+    parentElementId: parentContext.parentElementId,
+    parentElementKey: parentContext.parentElementKey,
+    parentTag: parentContext.parentTag,
+    axis: parentContext.axis,
+    axisCertainty: parentContext.axisCertainty,
+    inlineDirection: parentContext.inlineDirection,
+    inlineDirectionCertainty: parentContext.inlineDirectionCertainty,
+    parentDisplay: parentContext.parentDisplay,
+    parentAlignItems: parentContext.parentAlignItems,
+    parentPlaceItems: parentContext.parentPlaceItems,
+    hasPositionedOffset: parentContext.hasPositionedOffset,
+    baselineRelevance: "irrelevant",
+    evidence: parentContext.evidence,
+  }
 }
 
 function compareAlignmentCaseOrder(left: AlignmentCase, right: AlignmentCase): number {

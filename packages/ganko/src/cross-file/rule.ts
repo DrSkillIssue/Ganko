@@ -2,11 +2,13 @@ import type { BaseRule } from "../graph"
 import type { SolidGraph } from "../solid/impl"
 import type { CSSGraph } from "../css/impl"
 import type { LayoutGraph } from "./layout"
+import type { Logger } from "@drskillissue/ganko-shared"
 
 export interface CrossRuleContext {
   readonly solids: readonly SolidGraph[]
   readonly css: CSSGraph
   readonly layout: LayoutGraph
+  readonly logger: Logger
 }
 
 /**

@@ -1,3 +1,4 @@
+import { noopLogger } from "@drskillissue/ganko-shared";
 import { describe, expect, it } from "vitest";
 import { buildSolidGraph } from "../../src/solid/plugin";
 import { buildCSSGraph } from "../../src/css/plugin";
@@ -22,6 +23,7 @@ function collectDecisionsFromFixture(tsx: string, css: string): readonly Alignme
     solids: [solidGraph],
     css: cssGraph,
     layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
   };
 
   const cases = collectAlignmentCases(context);

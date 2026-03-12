@@ -14,6 +14,26 @@ export type LayoutContextContainerKind = "table" | "flex" | "grid" | "inline" | 
 
 export type ContextCertainty = "resolved" | "conditional" | "unknown"
 
+/**
+ * Whether the CSS formatting context consults baselines for vertical positioning.
+ *
+ * - `"relevant"`: Baselines participate in alignment (e.g. flex `align-items: baseline`,
+ *   table-cell `vertical-align: baseline`, inline formatting context).
+ * - `"irrelevant"`: The alignment model is purely geometric; baselines are never
+ *   consulted (e.g. flex `align-items: center`, table-cell `vertical-align: middle`
+ *   with uniform cohort agreement).
+ *
+ * Computed once at context construction for flex/grid (parent-level data suffices).
+ * For table-cell contexts, finalized after cohort aggregation when the cohort's
+ * vertical-align consensus is known.
+ *
+ * CSS spec references:
+ * - Flex: CSS Flexbox §8.3, §9.6 — `center` aligns by margin box center, not baselines.
+ * - Grid: CSS Grid §10.6 — analogous to flex.
+ * - Table: CSS2 §17.5.3 — `middle` centers cell content geometrically.
+ */
+export type BaselineRelevance = "relevant" | "irrelevant"
+
 export interface LayoutContextEvidence {
   readonly containerKind: LayoutContextContainerKind
   readonly containerKindCertainty: ContextCertainty
@@ -37,5 +57,6 @@ export interface AlignmentContext {
   readonly parentAlignItems: string | null
   readonly parentPlaceItems: string | null
   readonly hasPositionedOffset: boolean
+  readonly baselineRelevance: BaselineRelevance
   readonly evidence: LayoutContextEvidence
 }

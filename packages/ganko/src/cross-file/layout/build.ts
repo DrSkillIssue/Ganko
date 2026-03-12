@@ -34,7 +34,7 @@ import { compileSelectorMatcher } from "./selector-match"
 import { resolveRuleGuard } from "./guard-model"
 import { buildSignalSnapshotIndex } from "./signal-collection"
 import { readNumericSignalEvidence, readNormalizedSignalEvidence } from "./signal-access"
-import { createAlignmentContextForParent } from "./context-classification"
+import { createAlignmentContextForParent, finalizeTableCellBaselineRelevance } from "./context-classification"
 import { buildCohortIndex } from "./cohort-index"
 import { buildMeasurementNodeIndex } from "./measurement-node"
 import {
@@ -208,6 +208,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
       elementById.set(record.element.id, node)
       nodeByElementId.set(record.element.id, node)
       elementRefsById.set(record.element.id, { solid, element: record.element })
+
       if (parentElementId !== null) lastChildByParentId.set(parentElementId, node)
       if (parentNode !== null) {
         const children = childrenByParentNodeMutable.get(parentNode)
@@ -299,6 +300,13 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     snapshotByElementNode,
     snapshotHotSignalsByElementKey: factIndex.snapshotHotSignalsByElementKey,
   })
+
+  // Finalize table-cell baselineRelevance now that cohort vertical-align
+  // consensus is available. This is a two-phase construction: contexts are
+  // built before cohort indexing (cohort needs axis data), then table-cell
+  // contexts are refined with cohort-level vertical-align consensus.
+  finalizeTableCellBaselineRelevance(contextByParentNode, cohortIndex.verticalAlignConsensusByParent)
+
   perf.conditionalSignals = cohortIndex.conditionalSignals
   perf.totalSignals = cohortIndex.totalSignals
   perf.cohortUnimodalFalse = cohortIndex.unimodalFalseCount
@@ -694,7 +702,7 @@ function buildContextIndex(
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
   perf: LayoutPerfStatsMutable,
-): ReadonlyMap<LayoutElementNode, AlignmentContext> {
+): Map<LayoutElementNode, AlignmentContext> {
   const out = new Map<LayoutElementNode, AlignmentContext>()
 
   for (const [parent, children] of childrenByParentNode) {

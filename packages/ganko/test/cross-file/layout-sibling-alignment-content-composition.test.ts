@@ -1,3 +1,4 @@
+import { noopLogger } from "@drskillissue/ganko-shared";
 import { describe, expect, it } from "vitest";
 import { buildSolidGraph } from "../../src/solid/plugin";
 import { buildCSSGraph } from "../../src/css/plugin";
@@ -21,6 +22,7 @@ function collectDecisionsFromFixture(tsx: string, css: string): readonly Alignme
     solids: [solidGraph],
     css: cssGraph,
     layout: buildLayoutGraph([solidGraph], cssGraph),
+    logger: noopLogger,
   };
 
   const cases = collectAlignmentCases(context);
@@ -53,8 +55,10 @@ function hasCompositionFinding(decisions: readonly AlignmentDecision[]): boolean
 
 describe("content composition baseline detection", () => {
   // Test 1: Data table with sortable and non-sortable column headers
-  // The composition factor contributes alongside existing baseline/replaced signals
-  it("flags sortable header with inline-flex icon among text-only headers", () => {
+  // All cells use vertical-align: middle → CSS2 §17.5.3 geometric centering,
+  // baselines never consulted. The inline-flex sort-icon inside one cell is
+  // irrelevant because cell-to-cell alignment is geometric.
+  it("does not flag sortable header with inline-flex icon when all headers use vertical-align: middle", () => {
     const decisions = collectDecisionsFromFixture(
       `
         import "./layout.css";
@@ -84,7 +88,7 @@ describe("content composition baseline detection", () => {
       `,
     );
 
-    expect(hasAcceptedDecision(decisions)).toBe(true);
+    expect(hasAcceptedDecision(decisions)).toBe(false);
   });
 
   // Test 2: Same header, but sort wrapper uses inline-flex alignment (mitigated)
@@ -541,7 +545,11 @@ describe("content composition baseline detection", () => {
   });
 
   // Test 14: Pricing table — one cell has inline status indicator
-  it("flags table cell with inline-block dot among text-only cells", () => {
+  // CSS2 §17.5.3: `vertical-align: middle` on table cells positions content
+  // at the geometric center of the row, bypassing baseline alignment entirely.
+  // Content composition divergence cannot cause visible misalignment when all
+  // cells use `vertical-align: middle`.
+  it("does not flag table cell with inline-block dot when all cells use vertical-align: middle", () => {
     const decisions = collectDecisionsFromFixture(
       `
         import "./layout.css";
@@ -577,7 +585,7 @@ describe("content composition baseline detection", () => {
       `,
     );
 
-    expect(hasAcceptedDecision(decisions)).toBe(true);
+    expect(hasAcceptedDecision(decisions)).toBe(false);
   });
 
   // Test 15: Flex parent with align-items: baseline — should fire
