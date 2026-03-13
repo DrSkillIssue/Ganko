@@ -579,7 +579,50 @@ function setupLifecycleHandlers(context: ServerContext): void {
       }
     }
 
+    /** Collect which open files rediagnoseAffected will already cover,
+     * so we avoid publishing diagnostics twice for the same file. */
+    const alreadyDiagnosed = new Set<string>();
+    {
+      const needed = new Set<FileKind>();
+      for (let i = 0, len = paths.length; i < len; i++) {
+        const p = paths[i];
+        if (!p) continue;
+        const deps = CROSS_FILE_DEPENDENTS[classifyFile(p)];
+        for (const dep of deps) needed.add(dep);
+      }
+      if (needed.size > 0) {
+        const open = getOpenDocumentPaths(context.documentState);
+        for (let i = 0, len = open.length; i < len; i++) {
+          const p = open[i];
+          if (!p) continue;
+          if (needed.has(classifyFile(p))) alreadyDiagnosed.add(p);
+        }
+      }
+    }
+
     context.rediagnoseAffected(paths);
+
+    /** Re-diagnose any changed files that are currently open but were NOT
+     * already covered by rediagnoseAffected. Without this, an AI coder that
+     * writes to disk triggers didChangeWatchedFiles but the changed file
+     * itself is never re-diagnosed — cross-file diagnostics go missing. */
+    if (context.project) {
+      const project = context.project;
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        if (!path) continue;
+        const key = canonicalPath(path);
+        if (alreadyDiagnosed.has(key)) continue;
+        const uri = context.documentState.pathIndex.get(key);
+        if (uri === undefined) continue;
+        if (!context.documentState.openDocuments.has(uri)) continue;
+
+        const doc = context.documents.get(uri);
+        const content = doc !== undefined ? doc.getText() : undefined;
+        if (context.log.enabled) context.log.debug(`didChangeWatchedFiles: re-diagnosing open file ${key}`);
+        publishFileDiagnostics(context, project, key, content);
+      }
+    }
   });
 
   connection.onDidChangeConfiguration(async (params) => {

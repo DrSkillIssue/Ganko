@@ -46,7 +46,7 @@
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await Promise.all(['dist', 'node_modules'].map((p) => rm(p, { recursive: true, force: true })));\"",
     "lint": "eslint src",
     "dev": "tsup --watch",
-    "test": "vitest",
+    "test": "vitest run",
     "test:watch": "vitest --watch",
     "tsc": "tsc --noEmit"
   },

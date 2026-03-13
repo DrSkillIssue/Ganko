@@ -118,3 +118,6 @@ typings/
 
 # VS Code extension build artifacts
 *.vsix
+
+# bun test no-op directory (see bunfig.toml)
+.bun-test-unused
