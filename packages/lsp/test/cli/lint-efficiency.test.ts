@@ -59,7 +59,7 @@ function parseSolidGraphRebuilds(stderr: string): { rebuilt: number; total: numb
 describe("lint pipeline efficiency", () => {
   it("cross-file phase rebuilds zero SolidGraphs when single-file phase pre-populates cache", () => {
     const { stderr } = runLint(
-      ["--verbose", "--format", "json"],
+      ["--verbose", "--format", "json", "--no-daemon"],
       MULTI_FILE_APP,
     );
 
@@ -93,7 +93,7 @@ describe("lint pipeline efficiency", () => {
 
   it("single-file analysis phase completes before cross-file begins", () => {
     const { stderr } = runLint(
-      ["--verbose", "--format", "json"],
+      ["--verbose", "--format", "json", "--no-daemon"],
       MULTI_FILE_APP,
     );
 
@@ -107,7 +107,7 @@ describe("lint pipeline efficiency", () => {
 
   it("total solid files in file index matches files analyzed in single-file phase", () => {
     const { stderr } = runLint(
-      ["--verbose", "--format", "json"],
+      ["--verbose", "--format", "json", "--no-daemon"],
       MULTI_FILE_APP,
     );
 

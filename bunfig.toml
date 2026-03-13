@@ -1,0 +1,5 @@
+[test]
+# Bare `bun test` is not used — this monorepo uses vitest.
+# Restrict to a no-op glob so `bun test` exits immediately
+# instead of hanging while scanning the workspace.
+root = ".bun-test-unused"

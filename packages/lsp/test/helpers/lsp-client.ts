@@ -170,6 +170,16 @@ export class LSPClient {
     });
   }
 
+  /** Send a workspace/didChangeWatchedFiles notification (simulates external file write). */
+  sendWatchedFilesChanged(changes: ReadonlyArray<{ filePath: string; type: 1 | 2 | 3 }>): void {
+    this.sendNotification("workspace/didChangeWatchedFiles", {
+      changes: changes.map(c => ({
+        uri: pathToFileURL(c.filePath).toString(),
+        type: c.type,
+      })),
+    });
+  }
+
   /** Send a save notification for an open file. */
   saveFile(filePath: string, content: string, version: number): void {
     const uri = pathToFileURL(filePath).toString();
@@ -177,6 +187,19 @@ export class LSPClient {
     this.sendNotification("textDocument/didSave", {
       textDocument: { uri, version },
       text: content,
+    });
+  }
+
+  /** Send a workspace/didChangeConfiguration notification. */
+  sendConfigurationChange(settings: JsonRpcParams): void {
+    this.sendNotification("workspace/didChangeConfiguration", { settings });
+  }
+
+  /** Close a file in the server. */
+  closeFile(filePath: string): void {
+    const uri = pathToFileURL(filePath).toString();
+    this.sendNotification("textDocument/didClose", {
+      textDocument: { uri },
     });
   }
 
@@ -253,29 +276,48 @@ export class LSPClient {
   }
 
   /**
-   * Collect ALL diagnostics publications for a file within a time window.
-   * Returns every publication received during the window.
-   *
-   * Use this to observe the Phase 2 → Phase 4 publication sequence.
+   * Collect diagnostics publications for a file. Resolves once publications
+   * stop arriving (no new publication within `settleMs`) or `timeoutMs` is
+   * reached. This avoids waiting the full timeout when diagnostics arrive
+   * quickly.
    */
-  collectDiagnostics(filePath: string, windowMs: number): Promise<PublishedDiagnostics[]> {
+  collectDiagnostics(filePath: string, timeoutMs: number, settleMs = 800): Promise<PublishedDiagnostics[]> {
     const uri = pathToFileURL(filePath).toString();
     const collected: PublishedDiagnostics[] = [];
 
     return new Promise<PublishedDiagnostics[]>((resolve) => {
+      let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (settleTimer !== null) clearTimeout(settleTimer);
+        const idx = this.diagnosticListeners.indexOf(listener);
+        if (idx >= 0) this.diagnosticListeners.splice(idx, 1);
+      };
+
+      const done = () => {
+        cleanup();
+        resolve(collected);
+      };
+
+      const resetSettle = () => {
+        if (settleTimer !== null) clearTimeout(settleTimer);
+        settleTimer = setTimeout(done, settleMs);
+      };
+
       const listener = (pub: PublishedDiagnostics) => {
         if (pub.uri === uri) {
           collected.push(pub);
+          resetSettle();
         }
       };
 
       this.diagnosticListeners.push(listener);
 
-      setTimeout(() => {
-        const idx = this.diagnosticListeners.indexOf(listener);
-        if (idx >= 0) this.diagnosticListeners.splice(idx, 1);
-        resolve(collected);
-      }, windowMs);
+      // Start initial settle timer (handles case where diagnostics arrive before this call)
+      resetSettle();
+
+      // Hard timeout — resolve with whatever we have
+      setTimeout(done, timeoutMs);
     });
   }
 
