@@ -855,6 +855,12 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       const pidPath = testPidPath(root);
+
+      /** PID file is written asynchronously after the socket is ready. */
+      for (let i = 0; i < 80; i++) {
+        if (existsSync(pidPath)) break;
+        await sleep(50);
+      }
       expect(existsSync(pidPath)).toBe(true);
 
       const pidContent = readFileSync(pidPath, "utf-8").trim();
@@ -882,6 +888,11 @@ describe("daemon integration", () => {
       await startDaemonAndWait(root);
 
       const pidPath = testPidPath(root);
+
+      for (let i = 0; i < 80; i++) {
+        if (existsSync(pidPath)) break;
+        await sleep(50);
+      }
       expect(existsSync(pidPath)).toBe(true);
 
       await stopDaemon(root);
@@ -922,6 +933,10 @@ describe("daemon integration", () => {
 
       /** Get the daemon PID and kill it brutally. */
       const pidPath = testPidPath(root);
+      for (let i = 0; i < 80; i++) {
+        if (existsSync(pidPath)) break;
+        await sleep(50);
+      }
       const pid = Number(readFileSync(pidPath, "utf-8").trim());
       process.kill(pid, "SIGKILL");
       await sleep(500);
