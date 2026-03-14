@@ -453,15 +453,25 @@ function isInlineContinuationDisplay(display: string): boolean {
  * Returns 0 when there is no divergence or when all siblings share the same
  * composition (no outlier to flag).
  */
-export function resolveCompositionDivergenceStrength(
+export interface CompositionDivergenceResult {
+  readonly strength: number
+  readonly majorityClassification: ContentCompositionClassification
+}
+
+const NO_DIVERGENCE: CompositionDivergenceResult = Object.freeze({
+  strength: 0,
+  majorityClassification: ContentCompositionClassification.Unknown,
+})
+
+export function resolveCompositionDivergence(
   subjectFingerprint: ContentCompositionFingerprint,
   allFingerprints: readonly ContentCompositionFingerprint[],
   parentContext: AlignmentContext | null,
-): number {
-  if (allFingerprints.length < 2) return 0
+): CompositionDivergenceResult {
+  if (allFingerprints.length < 2) return NO_DIVERGENCE
 
   if (parentContext !== null && !hasSharedBaselineAlignment(parentContext)) {
-    return 0
+    return NO_DIVERGENCE
   }
 
   const countByClassification = new Map<ContentCompositionClassification, number>()
@@ -476,10 +486,6 @@ export function resolveCompositionDivergenceStrength(
   const subjectNormalized = normalizeClassificationForComparison(subjectFingerprint.classification)
   const subjectCount = countByClassification.get(subjectNormalized) ?? 0
 
-  if (subjectCount === allFingerprints.length) {
-    return resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints)
-  }
-
   let majorityClassification: ContentCompositionClassification = ContentCompositionClassification.Unknown
   let majorityCount = 0
   for (const [classification, count] of countByClassification) {
@@ -489,45 +495,49 @@ export function resolveCompositionDivergenceStrength(
     }
   }
 
+  if (subjectCount === allFingerprints.length) {
+    return { strength: resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints), majorityClassification }
+  }
+
   if (subjectNormalized === majorityClassification) {
-    return resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints)
+    return { strength: resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints), majorityClassification }
   }
 
   if (subjectNormalized === ContentCompositionClassification.Unknown) {
-    return 0
+    return { strength: 0, majorityClassification }
   }
 
   const cal = alignmentStrengthCalibration
 
   if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) {
-    return cal.compositionMixedUnmitigatedOutlierStrength
+    return { strength: cal.compositionMixedUnmitigatedOutlierStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) {
-    return cal.compositionMixedOutlierAmongReplacedStrength
+    return { strength: cal.compositionMixedOutlierAmongReplacedStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.TextOnly) {
-    return cal.compositionTextOutlierAmongMixedStrength
+    return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.ReplacedOnly) {
-    return cal.compositionTextOutlierAmongMixedStrength
+    return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.ReplacedOnly) {
-    return cal.compositionMixedOutlierAmongReplacedStrength
+    return { strength: cal.compositionMixedOutlierAmongReplacedStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.TextOnly) {
-    return cal.compositionTextOutlierAmongMixedStrength
+    return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
   }
 
   if (majorityClassification === ContentCompositionClassification.Unknown) {
-    return 0
+    return { strength: 0, majorityClassification }
   }
 
-  return cal.compositionUnknownPenalty
+  return { strength: cal.compositionUnknownPenalty, majorityClassification }
 }
 
 /**
@@ -577,29 +587,7 @@ function hasSharedBaselineAlignment(context: AlignmentContext): boolean {
 /**
  * Resolves the majority classification for diagnostic messages.
  */
-export function resolveMajorityClassification(
-  allFingerprints: readonly ContentCompositionFingerprint[],
-): ContentCompositionClassification {
-  const countByClassification = new Map<ContentCompositionClassification, number>()
-  for (let i = 0; i < allFingerprints.length; i++) {
-    const fp = allFingerprints[i]
-    if (!fp) continue
-    const normalized = normalizeClassificationForComparison(fp.classification)
-    const existing = countByClassification.get(normalized) ?? 0
-    countByClassification.set(normalized, existing + 1)
-  }
 
-  let majorityClassification: ContentCompositionClassification = ContentCompositionClassification.Unknown
-  let majorityCount = 0
-  for (const [classification, count] of countByClassification) {
-    if (count > majorityCount) {
-      majorityCount = count
-      majorityClassification = classification
-    }
-  }
-
-  return majorityClassification
-}
 
 function normalizeClassificationForComparison(
   classification: ContentCompositionClassification,

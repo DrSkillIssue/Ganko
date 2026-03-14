@@ -72,3 +72,10 @@ export interface AlignmentContext {
   readonly baselineRelevance: BaselineRelevance
   readonly evidence: LayoutContextEvidence
 }
+
+export function deriveAlignmentContext(
+  base: AlignmentContext,
+  overrides: { readonly baselineRelevance: BaselineRelevance },
+): AlignmentContext {
+  return { ...base, ...overrides }
+}

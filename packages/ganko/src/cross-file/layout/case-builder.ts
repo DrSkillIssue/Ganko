@@ -1,5 +1,5 @@
 import type { CrossRuleContext } from "../rule"
-import { ContextCertainty, type AlignmentContext } from "./context-model"
+import { ContextCertainty, deriveAlignmentContext, type AlignmentContext } from "./context-model"
 import type { LayoutElementNode } from "./graph"
 import {
   AlignmentTextContrast,
@@ -328,28 +328,7 @@ function resolveEffectiveAlignmentContext(
   if (!childContext) return parentContext
   if (childContext.baselineRelevance !== "irrelevant") return parentContext
 
-  // The child shields its descendants' baselines from the grandparent.
-  // Derive a new context with baselineRelevance overridden.
-  return {
-    kind: parentContext.kind,
-    certainty: parentContext.certainty,
-    parentSolidFile: parentContext.parentSolidFile,
-    parentElementId: parentContext.parentElementId,
-    parentElementKey: parentContext.parentElementKey,
-    parentTag: parentContext.parentTag,
-    axis: parentContext.axis,
-    axisCertainty: parentContext.axisCertainty,
-    inlineDirection: parentContext.inlineDirection,
-    inlineDirectionCertainty: parentContext.inlineDirectionCertainty,
-    parentDisplay: parentContext.parentDisplay,
-    parentAlignItems: parentContext.parentAlignItems,
-    parentPlaceItems: parentContext.parentPlaceItems,
-    hasPositionedOffset: parentContext.hasPositionedOffset,
-    crossAxisIsBlockAxis: parentContext.crossAxisIsBlockAxis,
-    crossAxisIsBlockAxisCertainty: parentContext.crossAxisIsBlockAxisCertainty,
-    baselineRelevance: "irrelevant",
-    evidence: parentContext.evidence,
-  }
+  return deriveAlignmentContext(parentContext, { baselineRelevance: "irrelevant" })
 }
 
 function compareAlignmentCaseOrder(left: AlignmentCase, right: AlignmentCase): number {

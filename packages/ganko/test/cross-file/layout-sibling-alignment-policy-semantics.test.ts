@@ -15,6 +15,7 @@ import {
   buildConsistencyEvidence,
   formatAlignmentCauses,
   CohortSubjectMembership,
+  ContentCompositionClassification,
   EvidenceValueKind,
   type AlignmentSignalFinding,
   type CohortIdentifiability,
@@ -108,6 +109,7 @@ function createPolicyEvidence(
     contextStrength: 0.7,
     replacedStrength: 0.4,
     compositionStrength: 0,
+    majorityClassification: ContentCompositionClassification.Unknown,
     identifiability,
     factSummary: {
       exact: 12,
@@ -190,6 +192,7 @@ function createLowMassPolicyEvidence(): ConsistencyEvidence {
     contextStrength: 0,
     replacedStrength: 0,
     compositionStrength: 0,
+    majorityClassification: ContentCompositionClassification.Unknown,
     identifiability: createResolvedIdentifiability(),
     factSummary: {
       exact: 2,

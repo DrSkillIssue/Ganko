@@ -96,8 +96,7 @@ export {
   formatCompositionClassification,
   formatCompositionFixSuggestion,
   resolveCompositionCoverage,
-  resolveCompositionDivergenceStrength,
-  resolveMajorityClassification,
+  resolveCompositionDivergence,
 } from "./content-composition"
 export { collectAlignmentCases } from "./case-builder"
 export type { AlignmentEvaluationDecision, AlignmentRejectionDetail, AlignmentRejectionReason } from "./scoring"

@@ -17,7 +17,7 @@ import {
   resolveAlignmentFactorContract,
 } from "./calibration"
 import { ContextCertainty } from "./context-model"
-import { resolveCompositionDivergenceStrength } from "./content-composition"
+import { resolveCompositionDivergence, type CompositionDivergenceResult } from "./content-composition"
 import { clamp, mergeEvidenceKind } from "./util"
 
 export interface ConsistencyEvidence {
@@ -27,6 +27,7 @@ export interface ConsistencyEvidence {
   readonly contextStrength: number
   readonly replacedStrength: number
   readonly compositionStrength: number
+  readonly majorityClassification: ContentCompositionClassification
   readonly identifiability: CohortIdentifiability
   readonly factSummary: AlignmentCase["cohortFactSummary"]
   readonly atoms: readonly EvidenceAtom[]
@@ -80,7 +81,8 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
   const baselineStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
   const contextStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
   const replacedStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
-  const compositionStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContentCompositionStrength(input)
+  const compositionResult = (baselinesIrrelevant || suppressAll) ? null : resolveContentCompositionStrength(input)
+  const compositionStrength = compositionResult ? compositionResult.evidence : ZERO_STRENGTH
   const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
   const provenance = input.cohortProvenance
   const atoms = buildEvidenceAtoms(
@@ -102,6 +104,7 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
     contextStrength: contextStrength.strength,
     replacedStrength: replacedStrength.strength,
     compositionStrength: compositionStrength.strength,
+    majorityClassification: compositionResult ? compositionResult.divergence.majorityClassification : ContentCompositionClassification.Unknown,
     identifiability: input.subjectIdentifiability,
     factSummary,
     atoms,
@@ -247,17 +250,25 @@ function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: Streng
   }
 }
 
-function resolveContentCompositionStrength(input: AlignmentCase): StrengthEvidence {
-  const divergenceStrength = resolveCompositionDivergenceStrength(
+interface CompositionStrengthResult {
+  readonly evidence: StrengthEvidence
+  readonly divergence: CompositionDivergenceResult
+}
+
+function resolveContentCompositionStrength(input: AlignmentCase): CompositionStrengthResult {
+  const divergence = resolveCompositionDivergence(
     input.subjectContentComposition,
     input.cohortContentCompositions,
     input.context,
   )
 
-  if (divergenceStrength <= 0) {
+  if (divergence.strength <= 0) {
     return {
-      strength: 0,
-      kind: EvidenceValueKind.Exact,
+      evidence: {
+        strength: 0,
+        kind: EvidenceValueKind.Exact,
+      },
+      divergence,
     }
   }
 
@@ -265,8 +276,11 @@ function resolveContentCompositionStrength(input: AlignmentCase): StrengthEviden
   const kind: EvidenceValueKind = subjectClassification === ContentCompositionClassification.Unknown ? EvidenceValueKind.Conditional : EvidenceValueKind.Exact
 
   return {
-    strength: clamp(divergenceStrength, 0, 1),
-    kind,
+    evidence: {
+      strength: clamp(divergence.strength, 0, 1),
+      kind,
+    },
+    divergence,
   }
 }
 

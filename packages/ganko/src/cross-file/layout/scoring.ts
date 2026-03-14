@@ -7,7 +7,7 @@ import type {
   EvidenceAtom,
   PosteriorInterval,
 } from "./signal-model"
-import { buildConsistencyEvidence } from "./consistency-evidence"
+import { buildConsistencyEvidence, type ConsistencyEvidence } from "./consistency-evidence"
 import {
   applyConsistencyPolicy,
   type ConsistencyRejectDetail,
@@ -16,7 +16,6 @@ import {
 import {
   formatCompositionClassification,
   formatCompositionFixSuggestion,
-  resolveMajorityClassification,
 } from "./content-composition"
 import { clamp } from "./util"
 
@@ -50,7 +49,7 @@ export function evaluateAlignmentCase(input: AlignmentCase): AlignmentEvaluation
     }
   }
 
-  const signalFindings = buildFindingsFromAtoms(evidence.atoms, input)
+  const signalFindings = buildFindingsFromAtoms(evidence.atoms, input, evidence)
 
   return {
     kind: "accept",
@@ -72,13 +71,13 @@ export function evaluateAlignmentCase(input: AlignmentCase): AlignmentEvaluation
   }
 }
 
-function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: AlignmentCase): readonly AlignmentSignalFinding[] {
+function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: AlignmentCase, evidence: ConsistencyEvidence): readonly AlignmentSignalFinding[] {
   const byKind = new Map<AlignmentFindingKind, AlignmentSignalFinding>()
 
   for (let i = 0; i < atoms.length; i++) {
     const atom = atoms[i]
     if (!atom) continue
-    const factor = toFindingFactor(atom.factorId, input)
+    const factor = toFindingFactor(atom.factorId, input, evidence)
     if (factor === null) continue
 
     const meanContribution = (atom.contribution.min + atom.contribution.max) / 2
@@ -108,6 +107,7 @@ function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: Alignment
 function toFindingFactor(
   factorId: AlignmentFactorId,
   input: AlignmentCase,
+  evidence: ConsistencyEvidence,
 ): {
   readonly kind: AlignmentFindingKind
   readonly message: string
@@ -141,18 +141,16 @@ function toFindingFactor(
     case "content-composition-conflict":
       return {
         kind: "content-composition-conflict",
-        message: formatContentCompositionFinding(input),
+        message: formatContentCompositionFinding(input, evidence),
       }
     default:
       return null
   }
 }
 
-function formatContentCompositionFinding(input: AlignmentCase): string {
+function formatContentCompositionFinding(input: AlignmentCase, evidence: ConsistencyEvidence): string {
   const subjectClassification = formatCompositionClassification(input.subjectContentComposition.classification)
-  const majorityClassification = formatCompositionClassification(
-    resolveMajorityClassification(input.cohortContentCompositions),
-  )
+  const majorityClassification = formatCompositionClassification(evidence.majorityClassification)
   const fixSuggestion = formatCompositionFixSuggestion(input.subjectContentComposition)
   return `siblings have identical CSS but different content composition (subject: ${subjectClassification}, majority: ${majorityClassification}; fix: ${fixSuggestion})`
 }

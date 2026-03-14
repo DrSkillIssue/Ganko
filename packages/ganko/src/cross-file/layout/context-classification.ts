@@ -1,6 +1,7 @@
 import type { CrossRuleContext } from "../rule"
 import {
   ContextCertainty,
+  deriveAlignmentContext,
   type AlignmentContext,
   type AlignmentContextKind,
   type BaselineRelevance,
@@ -501,26 +502,6 @@ export function finalizeTableCellBaselineRelevance(
     if (consensusValue === null) continue
     if (!TABLE_CELL_GEOMETRIC_VERTICAL_ALIGN.has(consensusValue)) continue
 
-    // Replace with finalized context — all fields identical except baselineRelevance.
-    contextByParentNode.set(parent, {
-      kind: context.kind,
-      certainty: context.certainty,
-      parentSolidFile: context.parentSolidFile,
-      parentElementId: context.parentElementId,
-      parentElementKey: context.parentElementKey,
-      parentTag: context.parentTag,
-      axis: context.axis,
-      axisCertainty: context.axisCertainty,
-      inlineDirection: context.inlineDirection,
-      inlineDirectionCertainty: context.inlineDirectionCertainty,
-      parentDisplay: context.parentDisplay,
-      parentAlignItems: context.parentAlignItems,
-      parentPlaceItems: context.parentPlaceItems,
-      hasPositionedOffset: context.hasPositionedOffset,
-      crossAxisIsBlockAxis: context.crossAxisIsBlockAxis,
-      crossAxisIsBlockAxisCertainty: context.crossAxisIsBlockAxisCertainty,
-      baselineRelevance: "irrelevant",
-      evidence: context.evidence,
-    })
+    contextByParentNode.set(parent, deriveAlignmentContext(context, { baselineRelevance: "irrelevant" }))
   }
 }
