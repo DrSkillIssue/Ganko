@@ -1,4 +1,4 @@
-import { signalCall, asyncTracked, childrenHelperMisuse, cleanupScope, derivedSignal, effectAsMount, effectAsMemo, inlineComponent, noTopLevelSignalCall, resourceAccessUnchecked, refEarlyAccess, resourceRefetchLoop, signalInLoop, transitionPendingUnchecked, storeReactiveBreak } from "./reactivity"
+import { signalCall, asyncTracked, childrenHelperMisuse, cleanupScope, derivedSignal, effectAsMount, effectAsMemo, inlineComponent, noTopLevelSignalCall, resourceAccessUnchecked, refEarlyAccess, resourceRefetchLoop, signalInLoop, transitionPendingUnchecked, storeReactiveBreak, resourceImplicitSuspense } from "./reactivity"
 import { avoidObjectAssign, noBannerComments, noInlineImports, stringConcatInLoop, missingJsdocComments, noAiSlopComments, avoidConditionalSpreads, avoidNonNullAssertions, avoidObjectSpread, avoidTypeCasting, avoidUnsafeTypeAnnotations, eventHandlers, noArrayHandlers, noDestructure } from "./correctness"
 import { imports, noReactDeps, noReactSpecificProps, preferMemoComplexStyles, batchOptimization, indexVsFor, preferShow, selfClosingComp, styleProp, preferFor } from "./solid"
 import { componentsReturnOnce, jsxNoDuplicateProps, jsxNoScriptUrl, jsxNoUndef, jsxUsesVars, noInnerhtml, noUnknownNamespaces, showTruthyConversion, suspenseBoundaryMissing, validateJsxNesting } from "./jsx"
@@ -20,6 +20,7 @@ export const rules = [
   signalInLoop,
   transitionPendingUnchecked,
   storeReactiveBreak,
+  resourceImplicitSuspense,
   noBannerComments,
   avoidObjectAssign,
   noInlineImports,
