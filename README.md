@@ -330,7 +330,7 @@ The tables below are synced with the current generated manifest and include Soli
 | `solid/no-top-level-signal-call` | Disallow calling signals at component top-level (captures stale snapshots) | error |
 | `solid/ref-early-access` | Detect accessing refs before they are assigned (before mount) | error |
 | `solid/resource-access-unchecked` | Detect accessing resource data without checking loading/error state. | error |
-| `solid/resource-implicit-suspense` | Detect createResource without initialValue that implicitly triggers Suspense boundaries. | warn |
+| `solid/resource-implicit-suspense` | Detect createResource that implicitly triggers or permanently breaks Suspense boundaries. | warn |
 | `solid/resource-refetch-loop` | Detect refetch() calls inside createEffect which can cause infinite loops | error |
 | `solid/signal-call` | Require signals to be called as functions when used in tracked contexts | error |
 | `solid/signal-in-loop` | Detect problematic signal usage inside For/Index loop callbacks | error |

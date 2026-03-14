@@ -1795,5 +1795,215 @@ describe("resource-implicit-suspense", () => {
       `)
       expect(diagnostics).toHaveLength(0)
     })
+
+    it("errors even with initialValue — Suspense increment still fires", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(fetchCountries, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <div>
+                <Show when={showForm()}>
+                  <CountryForm />
+                </Show>
+              </div>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("conditionalSuspense")
+      expect(at(diagnostics, 0).severity).toBe("error")
+    })
+  })
+
+  describe("ERROR: missing ErrorBoundary (error path)", () => {
+    it("errors when async fetcher has no ErrorBoundary before Suspense", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(async () => {
+            const res = await fetch("/api/countries");
+            return res.json();
+          }, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <CountryForm />
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("missingErrorBoundary")
+      expect(at(diagnostics, 0).severity).toBe("error")
+    })
+
+    it("errors when fetcher has explicit throw without ErrorBoundary", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(async () => {
+            const res = await fetch("/api/countries");
+            if (!res.ok) throw new Error("Failed");
+            return res.json();
+          }, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <CountryForm />
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("missingErrorBoundary")
+    })
+
+    it("errors when referenced async fetcher lacks ErrorBoundary", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        async function fetchCountries() {
+          const res = await fetch("/api/countries");
+          return res.json();
+        }
+        function CountryForm() {
+          const [countries] = createResource(fetchCountries, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <CountryForm />
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("missingErrorBoundary")
+    })
+
+    it("errors with source + async fetcher and no ErrorBoundary", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserDetail() {
+          const [user] = createResource(() => userId(), async (id) => {
+            const res = await fetch("/api/users/" + id);
+            return res.json();
+          }, { initialValue: null });
+          return <div>{user()?.name}</div>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <UserDetail />
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("missingErrorBoundary")
+    })
+
+    it("no error when ErrorBoundary wraps the component before Suspense", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(async () => {
+            const res = await fetch("/api/countries");
+            return res.json();
+          }, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <ErrorBoundary fallback={<div>Error</div>}>
+                <CountryForm />
+              </ErrorBoundary>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("no error when ErrorBoundary is between component and Suspense", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function DataPanel() {
+          const [data] = createResource(async () => {
+            const res = await fetch("/api/data");
+            return res.json();
+          }, { initialValue: null });
+          return <div>{data()}</div>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <div>
+                <ErrorBoundary fallback={<span>Something went wrong</span>}>
+                  <DataPanel />
+                </ErrorBoundary>
+              </div>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("no error when fetcher is a non-async function with no calls", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function StaticData() {
+          const [data] = createResource(() => ({ name: "test" }));
+          return <div>{data()?.name}</div>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <StaticData />
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("emits both loading and error path diagnostics when both apply", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(async () => {
+            const res = await fetch("/api/countries");
+            return res.json();
+          });
+          return (
+            <Show when={!countries.loading} fallback={<div>Loading...</div>}>
+              <ul>{countries()}</ul>
+            </Show>
+          );
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <CountryForm />
+            </Suspense>
+          );
+        }
+      `)
+      const messageIds = diagnostics.map(d => d.messageId)
+      expect(messageIds).toContain("loadingMismatch")
+      expect(messageIds).toContain("missingErrorBoundary")
+    })
   })
 })
