@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest"
 import { checkRule, applyAllFixes, at } from "../test-utils"
-import { storeReactiveBreak, derivedSignal, effectAsMemo, effectAsMount, cleanupScope, signalCall, signalInLoop, noTopLevelSignalCall } from "../../../src/solid/rules/reactivity"
+import { storeReactiveBreak, derivedSignal, effectAsMemo, effectAsMount, cleanupScope, signalCall, signalInLoop, noTopLevelSignalCall, resourceImplicitSuspense } from "../../../src/solid/rules/reactivity"
 
 describe("store-reactive-break", () => {
   const check = (code: string) => checkRule(storeReactiveBreak, code)
@@ -1597,6 +1597,203 @@ describe("signal-in-loop", () => {
       `)
       expect(diagnostics).toHaveLength(1)
       expect(at(diagnostics, 0).messageId).toBe("derivedCallInvariant")
+    })
+  })
+})
+
+describe("resource-implicit-suspense", () => {
+  const check = (code: string) => checkRule(resourceImplicitSuspense, code)
+
+  it("metadata", () => {
+    expect(resourceImplicitSuspense.id).toBe("resource-implicit-suspense")
+  })
+
+  describe("valid patterns", () => {
+    it("allows createResource with initialValue", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserList() {
+          const [users] = createResource(fetchUsers, { initialValue: [] });
+          return <div>{users().length}</div>;
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("allows createResource with source and initialValue", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserDetail() {
+          const [user] = createResource(() => id(), fetchUser, { initialValue: null });
+          return <div>{user()?.name}</div>;
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("allows createResource with initialValue and loading check", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserList() {
+          const [users] = createResource(fetchUsers, { initialValue: [] });
+          return (
+            <Show when={!users.loading}>
+              <div>{users().length}</div>
+            </Show>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+
+    it("allows createResource without loading check and no conditional mount", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserList() {
+          const [users] = createResource(fetchUsers);
+          return <div>{users()?.length}</div>;
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
+    })
+  })
+
+  describe("WARN: loading mismatch", () => {
+    it("warns when createResource has no initialValue but reads .loading", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function UserList() {
+          const [users] = createResource(fetchUsers);
+          return (
+            <Show when={!users.loading} fallback={<div>Loading...</div>}>
+              <div>{users().length}</div>
+            </Show>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("loadingMismatch")
+      expect(at(diagnostics, 0).severity).toBe("warn")
+    })
+
+    it("warns with source + fetcher overload and loading check", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryList() {
+          const [countries] = createResource(() => regionId(), fetchCountries);
+          return (
+            <Show when={!countries.loading} fallback={<span>Loading countries...</span>}>
+              <ul>{countries()}</ul>
+            </Show>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("loadingMismatch")
+    })
+
+    it("warns when loading is checked in conditional expression", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function DataView() {
+          const [data] = createResource(fetchData);
+          return <div>{data.loading ? "Loading..." : data()?.value}</div>;
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("loadingMismatch")
+    })
+  })
+
+  describe("ERROR: conditional mount with distant Suspense", () => {
+    it("errors when resource component is inside Show within distant Suspense", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(fetchCountries);
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <div>
+                <Show when={showForm()}>
+                  <CountryForm />
+                </Show>
+              </div>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("conditionalSuspense")
+      expect(at(diagnostics, 0).severity).toBe("error")
+    })
+
+    it("errors when resource component is inside Dialog", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function SearchResults() {
+          const [results] = createResource(fetchResults);
+          return <div>{results()}</div>;
+        }
+        function Layout() {
+          return (
+            <Suspense fallback={<div />}>
+              <main>
+                <Dialog>
+                  <SearchResults />
+                </Dialog>
+              </main>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("conditionalSuspense")
+    })
+
+    it("errors when resource component is inside Modal", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function SettingsPanel() {
+          const [settings] = createResource(fetchSettings);
+          return <div>{settings()}</div>;
+        }
+        function App() {
+          return (
+            <Suspense fallback={<div />}>
+              <Modal>
+                <SettingsPanel />
+              </Modal>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("conditionalSuspense")
+    })
+
+    it("no error when resource component has nearby Suspense", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(fetchCountries);
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <Show when={showForm()}>
+                <Suspense fallback={<span>Loading form...</span>}>
+                  <CountryForm />
+                </Suspense>
+              </Show>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(0)
     })
   })
 })
