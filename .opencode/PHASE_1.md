@@ -9,7 +9,6 @@
 export const enum SignalGuard { Unconditional = 0, Conditional = 1 }
 ```
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 

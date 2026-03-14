@@ -55,9 +55,9 @@ export const layoutSignalNames = [
 
 export type LayoutSignalName = (typeof layoutSignalNames)[number]
 
-export type LayoutSignalSource = "selector" | "inline-style"
+export const enum LayoutSignalSource { Selector = 0, InlineStyle = 1 }
 
-export type LayoutSignalGuard = "unconditional" | "conditional"
+export const enum LayoutSignalGuard { Unconditional = 0, Conditional = 1 }
 
 export interface LayoutGuardProvenance {
   readonly kind: LayoutSignalGuard
@@ -65,7 +65,7 @@ export interface LayoutGuardProvenance {
   readonly key: string
 }
 
-export type LayoutSignalUnit = "px" | "unitless" | "keyword" | "unknown"
+export const enum LayoutSignalUnit { Px = 0, Unitless = 1, Keyword = 2, Unknown = 3 }
 
 export interface LayoutKnownSignalValue {
   readonly kind: "known"
@@ -92,7 +92,7 @@ export interface LayoutUnknownSignalValue {
 
 export type LayoutSignalValue = LayoutKnownSignalValue | LayoutUnknownSignalValue
 
-export type LayoutTextualContentState = "yes" | "no" | "unknown" | "dynamic-text"
+export const enum LayoutTextualContentState { Yes = 0, No = 1, Unknown = 2, DynamicText = 3 }
 
 export interface LayoutSignalSnapshot {
   readonly solidFile: string
@@ -123,9 +123,9 @@ export interface AlignmentCohort {
   readonly siblingCount: number
 }
 
-export type AlignmentTextContrast = "different" | "same" | "unknown"
+export const enum AlignmentTextContrast { Different = 0, Same = 1, Unknown = 2 }
 
-export type SignalConflictValue = "conflict" | "aligned" | "unknown"
+export const enum SignalConflictValue { Conflict = 0, Aligned = 1, Unknown = 2 }
 
 export interface SignalConflictEvidence {
   readonly value: SignalConflictValue
@@ -140,7 +140,7 @@ export interface AlignmentCohortSignals {
   readonly textContrastWithPeers: AlignmentTextContrast
 }
 
-export type CohortSubjectMembership = "dominant" | "nondominant" | "ambiguous" | "insufficient"
+export const enum CohortSubjectMembership { Dominant = 0, Nondominant = 1, Ambiguous = 2, Insufficient = 3 }
 
 export interface CohortIdentifiability {
   readonly dominantShare: number
@@ -265,13 +265,10 @@ export type AlignmentFactorId =
   | "content-composition-conflict"
   | "context-certainty"
 
-export type ContentCompositionClassification =
-  | "text-only"
-  | "replaced-only"
-  | "mixed-unmitigated"
-  | "mixed-mitigated"
-  | "block-segmented"
-  | "unknown"
+export const enum ContentCompositionClassification {
+  TextOnly = 0, ReplacedOnly = 1, MixedUnmitigated = 2,
+  MixedMitigated = 3, BlockSegmented = 4, Unknown = 5,
+}
 
 /**
  * Distinguishes intrinsically-replaced elements (img, svg, video, canvas) from
@@ -294,7 +291,7 @@ export interface ContentCompositionFingerprint {
   readonly hasOnlyBlockChildren: boolean
 }
 
-export type EvidenceValueKind = "exact" | "interval" | "conditional" | "unknown"
+export const enum EvidenceValueKind { Exact = 0, Interval = 1, Conditional = 2, Unknown = 3 }
 
 export interface EvidenceWitness<T> {
   readonly value: T | null

@@ -15,7 +15,7 @@ import type {
   LayoutReservedSpaceFact,
 } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import type { LayoutGuardProvenance, LayoutSignalName, LayoutSignalGuard, LayoutSignalSnapshot } from "./signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, type LayoutGuardProvenance, type LayoutSignalName, type LayoutSignalSnapshot } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
 import type { LayoutRuleGuard } from "./guard-model"
@@ -54,7 +54,7 @@ export function collectMonitoredDeclarations(
 ): readonly MonitoredDeclaration[] {
   const out: MonitoredDeclaration[] = []
   const declarations = selector.rule.declarations
-  const signalGuard: LayoutSignalGuard = guard.kind === "conditional" ? "conditional" : "unconditional"
+  const signalGuard: LayoutSignalGuard = guard.kind === "conditional" ? LayoutSignalGuard.Conditional : LayoutSignalGuard.Unconditional
   const guardProvenance: LayoutGuardProvenance = {
     kind: signalGuard,
     conditions: guard.conditions,
@@ -221,7 +221,7 @@ function augmentCascadeWithTailwind(
   if (classTokens.length === 0) return
 
   const guardProvenance: LayoutGuardProvenance = {
-    kind: "unconditional",
+    kind: LayoutSignalGuard.Unconditional,
     conditions: [],
     key: "always",
   }
@@ -242,8 +242,8 @@ function augmentCascadeWithTailwind(
       if (cascade.has(property)) continue
       cascade.set(property, {
         value,
-        source: "selector",
-        guard: "unconditional",
+        source: LayoutSignalSource.Selector,
+        guard: LayoutSignalGuard.Unconditional,
         guardProvenance,
       })
     }
@@ -271,7 +271,7 @@ export function buildCascadeMapForElement(
       const property = declaration.property
       const newDeclaration: LayoutCascadedDeclaration = {
         value: declaration.value,
-        source: "selector",
+        source: LayoutSignalSource.Selector,
         guard: declaration.guard,
         guardProvenance: declaration.guardProvenance,
       }
@@ -296,15 +296,15 @@ export function buildCascadeMapForElement(
 
   const inlinePosition = createInlineCascadePosition()
   const inlineGuardProvenance: LayoutGuardProvenance = {
-    kind: "unconditional",
+    kind: LayoutSignalGuard.Unconditional,
     conditions: [],
     key: "always",
   }
   for (const [property, value] of node.inlineStyleValues) {
     const newDeclaration: LayoutCascadedDeclaration = {
       value,
-      source: "inline-style",
-      guard: "unconditional",
+      source: LayoutSignalSource.InlineStyle,
+      guard: LayoutSignalGuard.Unconditional,
       guardProvenance: inlineGuardProvenance,
     }
 
@@ -350,7 +350,7 @@ function doesCandidateOverride(
   const incomingSource = incoming.declaration.source
 
   if (existingSource !== incomingSource) {
-    if (incomingSource === "inline-style") {
+    if (incomingSource === LayoutSignalSource.InlineStyle) {
       if (existing.position.isImportant && !incoming.position.isImportant) return false
       return true
     }
@@ -470,7 +470,7 @@ export function buildConditionalDeltaIndex(
               byProperty.set(property, bucket)
             }
 
-            if (declaration.guard === "conditional") {
+            if (declaration.guard === LayoutSignalGuard.Conditional) {
               bucket.conditional.add(expandedEntry.value)
               continue
             }

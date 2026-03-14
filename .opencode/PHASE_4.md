@@ -2,7 +2,6 @@
 
 **Goal:** Eliminate per-element allocations on hot paths, reduce Map lookups in signal extraction, remove array allocations for overflow token parsing.
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 

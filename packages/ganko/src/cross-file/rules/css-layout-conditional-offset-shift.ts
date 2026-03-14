@@ -5,6 +5,7 @@ import {
   hasEffectivePosition,
   isEquivalentOffset,
   layoutOffsetSignals,
+  LayoutSignalGuard,
   type LayoutGraph,
   type LayoutSignalName,
   type LayoutSignalSnapshot,
@@ -79,7 +80,7 @@ function collectConditionalOffsets(
 
     const signal = snapshot.signals.get(name)
     if (!signal) continue
-    if (signal.guard !== "conditional") continue
+    if (signal.guard !== LayoutSignalGuard.Conditional) continue
     if (signal.kind !== "known") continue
     if (signal.px === null) continue
     if (Math.abs(signal.px) <= 0.25) continue
@@ -116,7 +117,7 @@ function hasEffectivePositionForConditionalOffset(
   const position = snapshot.signals.get("position")
   if (!position) return false
   if (position.kind !== "known") return false
-  if (position.guard !== "conditional") return false
+  if (position.guard !== LayoutSignalGuard.Conditional) return false
   if (position.guardProvenance.key !== guardKey) return false
   return position.normalized !== "static"
 }

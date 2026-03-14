@@ -1,4 +1,4 @@
-import type { EvidenceValueKind, NumericEvidenceValue } from "./signal-model"
+import { EvidenceValueKind, type NumericEvidenceValue } from "./signal-model"
 
 /**
  * Form control elements that behave as replaced elements for baseline
@@ -14,23 +14,15 @@ export function clamp(value: number, min: number, max: number): number {
   return value
 }
 
-export function kindRank(kind: EvidenceValueKind): number {
-  if (kind === "exact") return 0
-  if (kind === "interval") return 1
-  if (kind === "conditional") return 2
-  return 3
-}
-
 export function mergeEvidenceKind(left: EvidenceValueKind, right: EvidenceValueKind): EvidenceValueKind {
-  if (kindRank(left) >= kindRank(right)) return left
-  return right
+  return left > right ? left : right
 }
 
 export function toComparableExactValue(value: NumericEvidenceValue): number | null {
   if (value.value !== null) {
-    if (value.kind !== "exact") return null
+    if (value.kind !== EvidenceValueKind.Exact) return null
     return value.value
   }
-  if (value.kind === "exact") return 0
+  if (value.kind === EvidenceValueKind.Exact) return 0
   return null
 }

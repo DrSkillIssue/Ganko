@@ -2,7 +2,6 @@
 
 **Goal:** Remove dead code, deduplicate types, consolidate overlapping tag sets and regex constants.
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 

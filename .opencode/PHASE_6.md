@@ -2,7 +2,6 @@
 
 **Goal:** Extract shared helpers to eliminate duplicated logic patterns, merge redundant computation passes.
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 

@@ -2,7 +2,6 @@
 
 **Goal:** Remove duplicate/derivable fields from per-element objects, share cohort data by reference, bound perf arrays.
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 

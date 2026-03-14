@@ -12,7 +12,7 @@ export type AlignmentContextKind =
 
 export type LayoutContextContainerKind = "table" | "flex" | "grid" | "inline" | "block"
 
-export type ContextCertainty = "resolved" | "conditional" | "unknown"
+export const enum ContextCertainty { Resolved = 0, Conditional = 1, Unknown = 2 }
 
 /**
  * Whether the CSS formatting context consults baselines for vertical positioning.

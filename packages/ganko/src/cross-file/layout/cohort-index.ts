@@ -1,19 +1,22 @@
-import type { ContextCertainty, LayoutAxisModel, AlignmentContext } from "./context-model"
+import { ContextCertainty, type LayoutAxisModel, type AlignmentContext } from "./context-model"
 import type { LayoutElementNode } from "./graph"
-import type {
-  AlignmentCohortProfile,
-  AlignmentCohortSignals,
-  AlignmentElementEvidence,
+import {
   AlignmentTextContrast,
-  CohortIdentifiability,
-  EvidenceProvenance,
+  CohortSubjectMembership,
   EvidenceValueKind,
-  LayoutCohortStats,
-  LayoutCohortSubjectStats,
-  LayoutSignalSnapshot,
-  LayoutSnapshotHotSignals,
-  NumericEvidenceValue,
-  SignalConflictEvidence,
+  LayoutTextualContentState,
+  SignalConflictValue,
+  type AlignmentCohortProfile,
+  type AlignmentCohortSignals,
+  type AlignmentElementEvidence,
+  type CohortIdentifiability,
+  type EvidenceProvenance,
+  type LayoutCohortStats,
+  type LayoutCohortSubjectStats,
+  type LayoutSignalSnapshot,
+  type LayoutSnapshotHotSignals,
+  type NumericEvidenceValue,
+  type SignalConflictEvidence,
 } from "./signal-model"
 import { summarizeSignalFacts } from "./consistency-domain"
 import { computeContentCompositionFingerprint } from "./content-composition"
@@ -683,9 +686,9 @@ function buildCohortSignalIndex(metrics: readonly CohortMetrics[]): CohortSignal
   const alignSelfCounts = new Map<string, number>()
   const placeSelfCounts = new Map<string, number>()
 
-  let verticalAlignMergedKind: EvidenceValueKind = "exact"
-  let alignSelfMergedKind: EvidenceValueKind = "exact"
-  let placeSelfMergedKind: EvidenceValueKind = "exact"
+  let verticalAlignMergedKind: EvidenceValueKind = EvidenceValueKind.Exact
+  let alignSelfMergedKind: EvidenceValueKind = EvidenceValueKind.Exact
+  let placeSelfMergedKind: EvidenceValueKind = EvidenceValueKind.Exact
   let verticalAlignComparableCount = 0
   let alignSelfComparableCount = 0
   let placeSelfComparableCount = 0
@@ -704,9 +707,9 @@ function buildCohortSignalIndex(metrics: readonly CohortMetrics[]): CohortSignal
     const verticalAlign = resolveComparableVerticalAlign(metric.hotSignals.verticalAlign, isControlOrReplaced)
 
     if (isControlOrReplaced) controlOrReplacedCount++
-    if (snapshot.textualContent === "yes" || snapshot.textualContent === "dynamic-text") textYesCount++
-    if (snapshot.textualContent === "no") textNoCount++
-    if (snapshot.textualContent === "unknown") textUnknownCount++
+    if (snapshot.textualContent === LayoutTextualContentState.Yes || snapshot.textualContent === LayoutTextualContentState.DynamicText) textYesCount++
+    if (snapshot.textualContent === LayoutTextualContentState.No) textNoCount++
+    if (snapshot.textualContent === LayoutTextualContentState.Unknown) textUnknownCount++
 
     if (verticalAlign.value !== null) {
       verticalAlignMergedKind = mergeEvidenceKind(verticalAlignMergedKind, verticalAlign.kind)
@@ -738,17 +741,17 @@ function buildCohortSignalIndex(metrics: readonly CohortMetrics[]): CohortSignal
   return {
     byKey,
     verticalAlign: {
-      mergedKind: verticalAlignComparableCount === 0 ? "unknown" : verticalAlignMergedKind,
+      mergedKind: verticalAlignComparableCount === 0 ? EvidenceValueKind.Unknown : verticalAlignMergedKind,
       comparableCount: verticalAlignComparableCount,
       countsByValue: verticalAlignCounts,
     },
     alignSelf: {
-      mergedKind: alignSelfComparableCount === 0 ? "unknown" : alignSelfMergedKind,
+      mergedKind: alignSelfComparableCount === 0 ? EvidenceValueKind.Unknown : alignSelfMergedKind,
       comparableCount: alignSelfComparableCount,
       countsByValue: alignSelfCounts,
     },
     placeSelf: {
-      mergedKind: placeSelfComparableCount === 0 ? "unknown" : placeSelfMergedKind,
+      mergedKind: placeSelfComparableCount === 0 ? EvidenceValueKind.Unknown : placeSelfMergedKind,
       comparableCount: placeSelfComparableCount,
       countsByValue: placeSelfCounts,
     },
@@ -798,11 +801,11 @@ function collectSubjectCohortSignals(
   const tableCellControlFallback =
     context.kind === "table-cell"
     && subject.isControlOrReplaced
-    && verticalAlign.value === "unknown"
+    && verticalAlign.value === SignalConflictValue.Unknown
     && index.byKey.size > index.controlOrReplacedCount
   const normalizedVerticalAlign: SignalConflictEvidence = tableCellControlFallback
     ? {
-        value: "conflict",
+        value: SignalConflictValue.Conflict,
         kind: verticalAlignKind,
       }
     : verticalAlign
@@ -843,7 +846,7 @@ function resolveComparableVerticalAlign(
   return {
     present: verticalAlign.present,
     value: "baseline",
-    kind: "exact",
+    kind: EvidenceValueKind.Exact,
   }
 }
 
@@ -870,20 +873,20 @@ function finalizeConflictEvidence(
 ): SignalConflictEvidence {
   if (subjectValue === null) {
     return {
-      value: "unknown",
+      value: SignalConflictValue.Unknown,
       kind,
     }
   }
 
   if (!sawComparablePeer) {
     return {
-      value: "unknown",
+      value: SignalConflictValue.Unknown,
       kind,
     }
   }
 
   return {
-    value: sawConflict ? "conflict" : "aligned",
+    value: sawConflict ? SignalConflictValue.Conflict : SignalConflictValue.Aligned,
     kind,
   }
 }
@@ -894,23 +897,23 @@ function resolveIndexedTextContrastWithPeers(
   subjectIsControlOrReplaced: boolean,
   tableCellControlFallback: boolean,
 ): AlignmentTextContrast {
-  if (subjectTextualContent === "unknown") return "unknown"
+  if (subjectTextualContent === LayoutTextualContentState.Unknown) return AlignmentTextContrast.Unknown
 
   const unknownPeers = index.textUnknownCount
   const cohortSize = index.byKey.size
-  if (subjectTextualContent === "yes" || subjectTextualContent === "dynamic-text") {
-    if (index.textNoCount > 0) return "different"
-    if (unknownPeers > 0) return "unknown"
-    return "same"
+  if (subjectTextualContent === LayoutTextualContentState.Yes || subjectTextualContent === LayoutTextualContentState.DynamicText) {
+    if (index.textNoCount > 0) return AlignmentTextContrast.Different
+    if (unknownPeers > 0) return AlignmentTextContrast.Unknown
+    return AlignmentTextContrast.Same
   }
 
-  if (index.textYesCount > 0) return "different"
-  if (tableCellControlFallback) return "different"
+  if (index.textYesCount > 0) return AlignmentTextContrast.Different
+  if (tableCellControlFallback) return AlignmentTextContrast.Different
   if (subjectIsControlOrReplaced && index.controlOrReplacedCount === 1 && cohortSize >= 3 && unknownPeers > 0) {
-    return "different"
+    return AlignmentTextContrast.Different
   }
-  if (unknownPeers > 0) return "unknown"
-  return "same"
+  if (unknownPeers > 0) return AlignmentTextContrast.Unknown
+  return AlignmentTextContrast.Same
 }
 
 function resolveSubjectIdentifiability(
@@ -936,7 +939,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "insufficient",
+      subjectMembership: CohortSubjectMembership.Insufficient,
       ambiguous: true,
       kind,
     }
@@ -946,7 +949,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "dominant",
+      subjectMembership: CohortSubjectMembership.Dominant,
       ambiguous: false,
       kind,
     }
@@ -956,7 +959,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "insufficient",
+      subjectMembership: CohortSubjectMembership.Insufficient,
       ambiguous: true,
       kind,
     }
@@ -967,7 +970,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "insufficient",
+      subjectMembership: CohortSubjectMembership.Insufficient,
       ambiguous: true,
       kind,
     }
@@ -980,7 +983,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "ambiguous",
+      subjectMembership: CohortSubjectMembership.Ambiguous,
       ambiguous: true,
       kind,
     }
@@ -990,7 +993,7 @@ function resolveSubjectIdentifiability(
     return {
       dominantShare: profile.dominantClusterShare,
       subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-      subjectMembership: "dominant",
+      subjectMembership: CohortSubjectMembership.Dominant,
       ambiguous: false,
       kind,
     }
@@ -999,7 +1002,7 @@ function resolveSubjectIdentifiability(
   return {
     dominantShare: profile.dominantClusterShare,
     subjectExcludedDominantShare: subjectBaselineProfile.dominantClusterShare,
-    subjectMembership: "nondominant",
+      subjectMembership: CohortSubjectMembership.Nondominant,
     ambiguous: false,
     kind,
   }
@@ -1031,13 +1034,13 @@ function resolveControlRoleIdentifiability(
     return {
       dominantShare,
       subjectExcludedDominantShare: excludedDominantShare,
-      subjectMembership: subjectMembership === "ambiguous" ? "dominant" : subjectMembership,
+      subjectMembership: subjectMembership === CohortSubjectMembership.Ambiguous ? CohortSubjectMembership.Dominant : subjectMembership,
       ambiguous: false,
       kind,
     }
   }
 
-  if (subjectMembership === "ambiguous") {
+  if (subjectMembership === CohortSubjectMembership.Ambiguous) {
     return {
       dominantShare,
       subjectExcludedDominantShare: excludedDominantShare,
@@ -1060,10 +1063,10 @@ function resolveRoleMembership(
   controlCount: number,
   nonControlCount: number,
   subjectIsControlOrReplaced: boolean,
-): "dominant" | "nondominant" | "ambiguous" {
-  if (controlCount === nonControlCount) return "ambiguous"
+): CohortSubjectMembership {
+  if (controlCount === nonControlCount) return CohortSubjectMembership.Ambiguous
   const dominantRoleIsControl = controlCount > nonControlCount
-  return dominantRoleIsControl === subjectIsControlOrReplaced ? "dominant" : "nondominant"
+  return dominantRoleIsControl === subjectIsControlOrReplaced ? CohortSubjectMembership.Dominant : CohortSubjectMembership.Nondominant
 }
 
 function resolveExcludedRoleDominantShare(
@@ -1154,7 +1157,7 @@ function buildGuardKey(guards: readonly LayoutGuardConditionProvenance[]): strin
 }
 
 function resolveCohortEvidenceKind(metrics: readonly CohortMetrics[]): EvidenceValueKind {
-  let kind: EvidenceValueKind = "exact"
+  let kind: EvidenceValueKind = EvidenceValueKind.Exact
 
   for (let i = 0; i < metrics.length; i++) {
     const metric = metrics[i]
@@ -1176,9 +1179,9 @@ function incrementCount(counts: Map<string, number>, key: string): void {
 }
 
 function toEvidenceKind(certainty: ContextCertainty): EvidenceValueKind {
-  if (certainty === "resolved") return "exact"
-  if (certainty === "conditional") return "conditional"
-  return "unknown"
+  if (certainty === ContextCertainty.Resolved) return EvidenceValueKind.Exact
+  if (certainty === ContextCertainty.Conditional) return EvidenceValueKind.Conditional
+  return EvidenceValueKind.Unknown
 }
 
 function computeMedian(values: number[]): number | null {

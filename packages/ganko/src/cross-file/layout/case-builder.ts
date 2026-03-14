@@ -1,18 +1,20 @@
 import type { CrossRuleContext } from "../rule"
-import type { AlignmentContext, ContextCertainty } from "./context-model"
+import { ContextCertainty, type AlignmentContext } from "./context-model"
 import type { LayoutElementNode } from "./graph"
-import type {
-  AlignmentCase,
-  AlignmentFactorCoverage,
-  CohortIdentifiability,
-  ContentCompositionFingerprint,
-  EvidenceProvenance,
-  EvidenceValueKind,
-  NumericEvidenceValue,
-  SignalConflictEvidence,
+import {
   AlignmentTextContrast,
-  AlignmentCohortProfile,
-  AlignmentCohortSignals,
+  EvidenceValueKind,
+  LayoutTextualContentState,
+  SignalConflictValue,
+  type AlignmentCase,
+  type AlignmentFactorCoverage,
+  type CohortIdentifiability,
+  type ContentCompositionFingerprint,
+  type EvidenceProvenance,
+  type NumericEvidenceValue,
+  type SignalConflictEvidence,
+  type AlignmentCohortProfile,
+  type AlignmentCohortSignals,
 } from "./signal-model"
 import { resolveCompositionCoverage } from "./content-composition"
 import { clamp, toComparableExactValue } from "./util"
@@ -226,34 +228,34 @@ function coverageFromNumeric(value: NumericEvidenceValue): number {
 
 function coverageFromConflict(value: SignalConflictEvidence): number {
   const certainty = coverageFromKind(value.kind)
-  if (value.value === "unknown") return certainty * 0.4
+  if (value.value === SignalConflictValue.Unknown) return certainty * 0.4
   return certainty
 }
 
 function coverageFromTextContrast(value: AlignmentTextContrast): number {
-  if (value === "unknown") return 0.35
+  if (value === AlignmentTextContrast.Unknown) return 0.35
   return 1
 }
 
 function coverageFromSubjectText(
   subjectTextualContent: AlignmentCase["subject"]["snapshot"]["textualContent"],
 ): number {
-  if (subjectTextualContent === "unknown") return 0.35
+  if (subjectTextualContent === LayoutTextualContentState.Unknown) return 0.35
   return 1
 }
 
 
 
 function coverageFromContextCertainty(certainty: ContextCertainty): number {
-  if (certainty === "resolved") return 1
-  if (certainty === "conditional") return 0.55
+  if (certainty === ContextCertainty.Resolved) return 1
+  if (certainty === ContextCertainty.Conditional) return 0.55
   return 0.25
 }
 
 function coverageFromKind(kind: EvidenceValueKind): number {
-  if (kind === "exact") return 1
-  if (kind === "interval") return 0.78
-  if (kind === "conditional") return 0.5
+  if (kind === EvidenceValueKind.Exact) return 1
+  if (kind === EvidenceValueKind.Interval) return 0.78
+  if (kind === EvidenceValueKind.Conditional) return 0.5
   return 0.2
 }
 

@@ -6,17 +6,18 @@ import { noopLogger } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 
-import type {
-  LayoutCascadedDeclaration,
-  LayoutContainingBlockFact,
-  LayoutElementNode,
-  LayoutFlowParticipationFact,
-  LayoutGraph,
-  LayoutMatchEdge,
-  LayoutReservedSpaceFact,
-  LayoutReservedSpaceReason,
-  LayoutScrollContainerFact,
-  LayoutStyleRuleNode,
+import {
+  LayoutScrollAxis,
+  type LayoutCascadedDeclaration,
+  type LayoutContainingBlockFact,
+  type LayoutElementNode,
+  type LayoutFlowParticipationFact,
+  type LayoutGraph,
+  type LayoutMatchEdge,
+  type LayoutReservedSpaceFact,
+  type LayoutReservedSpaceReason,
+  type LayoutScrollContainerFact,
+  type LayoutStyleRuleNode,
 } from "./graph"
 import { toLayoutElementKey } from "./graph"
 import { collectCSSScopeBySolidFile } from "./scope"
@@ -24,10 +25,12 @@ import { createLayoutPerfStats, type LayoutPerfStatsMutable } from "./perf"
 import { createLayoutModuleResolver } from "./module-resolver"
 import { createLayoutComponentHostResolver } from "./component-host"
 import type { AlignmentContext } from "./context-model"
-import type {
-  LayoutSignalName,
-  LayoutSignalSnapshot,
-  LayoutSnapshotHotSignals,
+import {
+  LayoutSignalGuard,
+  LayoutTextualContentState,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
+  type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { isControlTag, isReplacedTag } from "./signal-normalization"
 import { compileSelectorMatcher } from "./selector-match"
@@ -383,7 +386,7 @@ function buildElementFactIndex(
     if (!node) continue
     const snapshot = snapshotByElementNode.get(node)
 
-    if (node.textualContent === "unknown" && node.siblingCount >= 2) {
+    if (node.textualContent === LayoutTextualContentState.Unknown && node.siblingCount >= 2) {
       dynamicSlotCandidateElements.push(node)
     }
 
@@ -567,7 +570,7 @@ function hasPositiveOrDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.guard !== "unconditional") return false
+  if (signal.guard !== LayoutSignalGuard.Unconditional) return false
 
   let normalized = ""
   if (signal.kind === "known") {
@@ -588,7 +591,7 @@ function hasPositiveOrDeclaredDimension(
 function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
   const signal = snapshot.signals.get("aspect-ratio")
   if (!signal) return false
-  if (signal.guard !== "unconditional") return false
+  if (signal.guard !== LayoutSignalGuard.Unconditional) return false
 
   let normalized = ""
   if (signal.kind === "known") {
@@ -627,10 +630,10 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   const xScroll = shorthandAxis.x
   const yScroll = yFromLonghand === null ? shorthandAxis.y : yFromLonghand
 
-  const hasConditionalScroll = (overflowSignal?.guard === "conditional" && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === "conditional" && yFromLonghand === true)
-  const hasUnconditionalScroll = (overflowSignal?.guard === "unconditional" && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === "unconditional" && yFromLonghand === true)
+  const hasConditionalScroll = (overflowSignal?.guard === LayoutSignalGuard.Conditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard === LayoutSignalGuard.Conditional && yFromLonghand === true)
+  const hasUnconditionalScroll = (overflowSignal?.guard === LayoutSignalGuard.Unconditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard === LayoutSignalGuard.Unconditional && yFromLonghand === true)
 
   return {
     isScrollContainer: xScroll || yScroll,
@@ -671,11 +674,11 @@ function parseSingleAxisScroll(value: string | null): boolean | null {
   return SCROLLABLE_VALUES.has(first)
 }
 
-function toScrollAxis(x: boolean, y: boolean): LayoutScrollContainerFact["axis"] {
-  if (x && y) return "both"
-  if (x) return "x"
-  if (y) return "y"
-  return "none"
+function toScrollAxis(x: boolean, y: boolean): LayoutScrollAxis {
+  if (x && y) return LayoutScrollAxis.Both
+  if (x) return LayoutScrollAxis.X
+  if (y) return LayoutScrollAxis.Y
+  return LayoutScrollAxis.None
 }
 
 function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlowParticipationFact {
@@ -695,8 +698,8 @@ function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlo
   return {
     inFlow: !outOfFlow,
     position,
-    hasConditionalOutOfFlow: signal.guard === "conditional" && outOfFlow,
-    hasUnconditionalOutOfFlow: signal.guard === "unconditional" && outOfFlow,
+    hasConditionalOutOfFlow: signal.guard === LayoutSignalGuard.Conditional && outOfFlow,
+    hasUnconditionalOutOfFlow: signal.guard === LayoutSignalGuard.Unconditional && outOfFlow,
   }
 }
 

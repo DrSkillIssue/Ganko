@@ -3,18 +3,20 @@ import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { SolidGraph } from "../../solid/impl"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { AlignmentContext } from "./context-model"
-import type {
-  LayoutCohortStats,
-  LayoutGuardProvenance,
-  LayoutSignalName,
+import {
+  type LayoutCohortStats,
+  type LayoutGuardProvenance,
+  type LayoutSignalName,
   LayoutSignalGuard,
-  LayoutSnapshotHotSignals,
-  LayoutSignalSnapshot,
+  LayoutSignalSource,
+  type LayoutSnapshotHotSignals,
+  type LayoutSignalSnapshot,
+  LayoutTextualContentState,
 } from "./signal-model"
 
 export interface LayoutCascadedDeclaration {
   readonly value: string
-  readonly source: "selector" | "inline-style"
+  readonly source: LayoutSignalSource
   readonly guard: LayoutSignalGuard
   readonly guardProvenance: LayoutGuardProvenance
 }
@@ -39,7 +41,7 @@ export interface LayoutElementNode {
   readonly selectorDispatchKeys: readonly string[]
   readonly attributes: ReadonlyMap<string, string | null>
   readonly inlineStyleValues: ReadonlyMap<string, string>
-  readonly textualContent: "yes" | "no" | "unknown" | "dynamic-text"
+  readonly textualContent: LayoutTextualContentState
   readonly isControl: boolean
   readonly isReplaced: boolean
 }
@@ -85,7 +87,7 @@ export interface LayoutReservedSpaceFact {
   readonly hasUsableAspectRatio: boolean
 }
 
-export type LayoutScrollAxis = "x" | "y" | "both" | "none"
+export const enum LayoutScrollAxis { None = 0, X = 1, Y = 2, Both = 3 }
 
 export interface LayoutScrollContainerFact {
   readonly isScrollContainer: boolean

@@ -1,10 +1,11 @@
-import type {
-  AlignmentCohortFactSummary,
-  LayoutKnownSignalValue,
-  LayoutSignalName,
-  LayoutSignalSnapshot,
-  LayoutSignalValue,
-  LayoutUnknownSignalValue,
+import {
+  LayoutSignalGuard,
+  type AlignmentCohortFactSummary,
+  type LayoutKnownSignalValue,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
+  type LayoutSignalValue,
+  type LayoutUnknownSignalValue,
 } from "./signal-model"
 
 export type LayoutSignalFact =
@@ -118,7 +119,7 @@ function accumulateSnapshotFacts(
   },
 ): void {
   for (const value of snapshot.signals.values()) {
-    if (value.guard === "conditional") {
+    if (value.guard === LayoutSignalGuard.Conditional) {
       sink.addConditional()
       continue
     }
@@ -138,7 +139,7 @@ function accumulateSnapshotFacts(
 }
 
 function toFact(value: LayoutSignalValue): LayoutSignalFact {
-  if (value.guard === "conditional") {
+  if (value.guard === LayoutSignalGuard.Conditional) {
     if (value.kind === "known") return toConditionalFactFromKnown(value)
     const reason = `${value.reason} [${value.guardProvenance.key}]`
     return {

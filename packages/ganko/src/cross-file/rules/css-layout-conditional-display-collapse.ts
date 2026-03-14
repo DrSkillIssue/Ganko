@@ -4,6 +4,7 @@ import {
   readFlowParticipationFact,
   readKnownNormalizedWithGuard,
   readReservedSpaceFact,
+  LayoutSignalGuard,
 } from "../layout"
 import { defineCrossRule } from "../rule"
 import { emitLayoutDiagnostic, isFlowRelevantBySiblingsOrText } from "./rule-runtime"
@@ -35,7 +36,7 @@ export const cssLayoutConditionalDisplayCollapse = defineCrossRule({
       if (!display || !COLLAPSING_DISPLAYS.has(display)) continue
 
       const displaySignal = snapshot.signals.get("display")
-      if (!displaySignal || displaySignal.guard !== "conditional") continue
+      if (!displaySignal || displaySignal.guard !== LayoutSignalGuard.Conditional) continue
       const flow = readFlowParticipationFact(context.layout, node)
       if (!flow.inFlow) continue
       if (!isFlowRelevantBySiblingsOrText(node, snapshot.textualContent)) continue

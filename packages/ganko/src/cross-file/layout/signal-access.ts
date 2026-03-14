@@ -1,10 +1,12 @@
-import type {
+import {
   EvidenceValueKind,
-  EvidenceWitness,
-  LayoutKnownSignalValue,
-  LayoutSignalName,
-  LayoutSignalSnapshot,
+  LayoutSignalGuard,
+  type EvidenceWitness,
+  type LayoutKnownSignalValue,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
 } from "./signal-model"
+import { LayoutScrollAxis } from "./graph"
 import type {
   LayoutConditionalSignalDeltaFact,
   LayoutContainingBlockFact,
@@ -36,7 +38,7 @@ const EMPTY_LAYOUT_RESERVED_SPACE_FACT: LayoutReservedSpaceFact = Object.freeze(
 })
 const EMPTY_LAYOUT_SCROLL_CONTAINER_FACT: LayoutScrollContainerFact = Object.freeze({
   isScrollContainer: false,
-  axis: "none",
+  axis: LayoutScrollAxis.None,
   overflow: null,
   overflowY: null,
   hasConditionalScroll: false,
@@ -78,9 +80,9 @@ export function readKnownSignalWithGuard(
 }
 
 function toEvidenceKind(value: LayoutKnownSignalValue): EvidenceValueKind {
-  if (value.guard === "conditional") return "conditional"
-  if (value.quality === "estimated") return "interval"
-  return "exact"
+  if (value.guard === LayoutSignalGuard.Conditional) return EvidenceValueKind.Conditional
+  if (value.quality === "estimated") return EvidenceValueKind.Interval
+  return EvidenceValueKind.Exact
 }
 
 export function readNumericSignalEvidence(
@@ -91,21 +93,21 @@ export function readNumericSignalEvidence(
   if (!value) {
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
   if (value.kind !== "known") {
-    if (value.guard === "conditional") {
+    if (value.guard === LayoutSignalGuard.Conditional) {
       return {
         value: null,
-        kind: "conditional",
+        kind: EvidenceValueKind.Conditional,
       }
     }
 
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
@@ -123,21 +125,21 @@ export function readNormalizedSignalEvidence(
   if (!value) {
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
   if (value.kind !== "known") {
-    if (value.guard === "conditional") {
+    if (value.guard === LayoutSignalGuard.Conditional) {
       return {
         value: null,
-        kind: "conditional",
+        kind: EvidenceValueKind.Conditional,
       }
     }
 
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
@@ -153,7 +155,7 @@ export function readKnownSignal(
 ): LayoutKnownSignalValue | null {
   const value = readKnownSignalWithGuard(snapshot, name)
   if (!value) return null
-  if (value.guard !== "unconditional") return null
+  if (value.guard !== LayoutSignalGuard.Unconditional) return null
   return value
 }
 

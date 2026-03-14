@@ -1,15 +1,15 @@
 import type { CrossRuleContext } from "../rule"
-import type {
-  AlignmentContext,
-  AlignmentContextKind,
-  BaselineRelevance,
+import {
   ContextCertainty,
-  InlineDirectionModel,
-  LayoutAxisModel,
-  LayoutContextEvidence,
+  type AlignmentContext,
+  type AlignmentContextKind,
+  type BaselineRelevance,
+  type InlineDirectionModel,
+  type LayoutAxisModel,
+  type LayoutContextEvidence,
 } from "./context-model"
 import type { LayoutElementNode, LayoutElementRef } from "./graph"
-import type { LayoutSignalSnapshot } from "./signal-model"
+import { EvidenceValueKind, LayoutSignalGuard, type LayoutSignalSnapshot } from "./signal-model"
 import { readKnownSignalWithGuard, readNormalizedSignalEvidence } from "./signal-access"
 
 const WHITESPACE_RE = /\s+/
@@ -105,7 +105,7 @@ function classifyKind(
   if (evidence.hasTableSemantics) {
     return {
       kind: "table-cell",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -272,7 +272,7 @@ function resolveAxis(snapshot: LayoutSignalSnapshot): {
   if (!snapshot.signals.has("writing-mode")) {
     return {
       value: "horizontal-tb",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -303,7 +303,7 @@ function resolveInlineDirection(snapshot: LayoutSignalSnapshot): {
   if (!snapshot.signals.has("direction")) {
     return {
       value: "ltr",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -322,9 +322,9 @@ function resolveInlineDirection(snapshot: LayoutSignalSnapshot): {
 }
 
 function toContextCertainty(kind: ReturnType<typeof readNormalizedSignalEvidence>["kind"]): ContextCertainty {
-  if (kind === "exact") return "resolved"
-  if (kind === "interval" || kind === "conditional") return "conditional"
-  return "unknown"
+  if (kind === EvidenceValueKind.Exact) return ContextCertainty.Resolved
+  if (kind === EvidenceValueKind.Interval || kind === EvidenceValueKind.Conditional) return ContextCertainty.Conditional
+  return ContextCertainty.Unknown
 }
 
 function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
@@ -335,7 +335,7 @@ function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
   if (!position) {
     return {
       hasPositionedOffset: false,
-      certainty: "unknown",
+      certainty: ContextCertainty.Unknown,
     }
   }
 
@@ -372,13 +372,13 @@ function resolveCrossAxisIsBlockAxis(
   _axis: LayoutAxisModel,
 ): { readonly value: boolean; readonly certainty: ContextCertainty } {
   if (kind !== "flex-cross-axis" && kind !== "grid-cross-axis") {
-    return { value: true, certainty: "resolved" }
+    return { value: true, certainty: ContextCertainty.Resolved }
   }
 
   if (kind === "flex-cross-axis") {
     const signal = readKnownSignalWithGuard(snapshot, "flex-direction")
     if (!signal) {
-      return { value: true, certainty: "resolved" }
+      return { value: true, certainty: ContextCertainty.Resolved }
     }
     const certainty = resolveSignalCertainty(signal)
     return { value: FLEX_ROW_VALUES.has(signal.normalized), certainty }
@@ -386,7 +386,7 @@ function resolveCrossAxisIsBlockAxis(
 
   const signal = readKnownSignalWithGuard(snapshot, "grid-auto-flow")
   if (!signal) {
-    return { value: true, certainty: "resolved" }
+    return { value: true, certainty: ContextCertainty.Resolved }
   }
   const certainty = resolveSignalCertainty(signal)
   return { value: !signal.normalized.startsWith("column"), certainty }
@@ -395,15 +395,13 @@ function resolveCrossAxisIsBlockAxis(
 function resolveSignalCertainty(
   value: ReturnType<typeof readKnownSignalWithGuard>,
 ): ContextCertainty {
-  if (!value) return "unknown"
-  if (value.guard === "conditional") return "conditional"
-  return "resolved"
+  if (!value) return ContextCertainty.Unknown
+  if (value.guard === LayoutSignalGuard.Conditional) return ContextCertainty.Conditional
+  return ContextCertainty.Resolved
 }
 
 function combineCertainty(left: ContextCertainty, right: ContextCertainty): ContextCertainty {
-  if (left === "unknown" || right === "unknown") return "unknown"
-  if (left === "conditional" || right === "conditional") return "conditional"
-  return "resolved"
+  return left > right ? left : right
 }
 
 export function getContextElementRef(

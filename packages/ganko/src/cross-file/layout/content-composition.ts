@@ -1,13 +1,14 @@
 import type { AlignmentContext } from "./context-model"
 import type { LayoutElementNode } from "./graph"
 import { CONTROL_ELEMENT_TAGS } from "./util"
-import type {
+import {
   ContentCompositionClassification,
-  ContentCompositionFingerprint,
-  InlineReplacedKind,
-  LayoutSignalName,
-  LayoutSignalSnapshot,
-  LayoutSnapshotHotSignals,
+  LayoutTextualContentState,
+  type ContentCompositionFingerprint,
+  type InlineReplacedKind,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
+  type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { alignmentStrengthCalibration } from "./calibration"
 
@@ -102,7 +103,7 @@ export function computeContentCompositionFingerprint(
     inlineChildCount: 0,
   }
 
-  if (elementNode.textualContent === "yes" || elementNode.textualContent === "dynamic-text") {
+  if (elementNode.textualContent === LayoutTextualContentState.Yes || elementNode.textualContent === LayoutTextualContentState.DynamicText) {
     state.hasTextContent = true
   }
 
@@ -124,7 +125,7 @@ export function computeContentCompositionFingerprint(
       wrappingContextMitigates: false,
       hasVerticalAlignMitigation: false,
       mixedContentDepth: 0,
-      classification: "block-segmented",
+      classification: ContentCompositionClassification.BlockSegmented,
       analyzableChildCount: 0,
       totalChildCount: 0,
       hasOnlyBlockChildren: false,
@@ -232,7 +233,7 @@ function walkInlineDescendants(
       continue
     }
 
-    if (child.textualContent === "yes" || child.textualContent === "dynamic-text") {
+    if (child.textualContent === LayoutTextualContentState.Yes || child.textualContent === LayoutTextualContentState.DynamicText) {
       state.hasTextContent = true
     }
 
@@ -310,7 +311,7 @@ function containsMixedContent(
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
   snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>,
 ): boolean {
-  const hasText = node.textualContent === "yes" || node.textualContent === "dynamic-text"
+  const hasText = node.textualContent === LayoutTextualContentState.Yes || node.textualContent === LayoutTextualContentState.DynamicText
   const hasReplaced = false
   return scanMixedContent(node, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByElementKey, { hasText, hasReplaced })
 }
@@ -348,7 +349,7 @@ function scanMixedContent(
       continue
     }
 
-    if (child.textualContent === "yes" || child.textualContent === "dynamic-text") {
+    if (child.textualContent === LayoutTextualContentState.Yes || child.textualContent === LayoutTextualContentState.DynamicText) {
       found.hasText = true
       if (found.hasReplaced) return true
     }
@@ -385,36 +386,36 @@ function classifyFromState(
   hasOnlyBlockChildren: boolean,
 ): ContentCompositionClassification {
   if (hasOnlyBlockChildren) {
-    return "block-segmented"
+    return ContentCompositionClassification.BlockSegmented
   }
 
   if (state.totalChildCount === 0 && !state.hasTextContent) {
-    if (elementNode.textualContent === "unknown") return "unknown"
-    if (elementNode.textualContent === "yes" || elementNode.textualContent === "dynamic-text") {
-      return "text-only"
+    if (elementNode.textualContent === LayoutTextualContentState.Unknown) return ContentCompositionClassification.Unknown
+    if (elementNode.textualContent === LayoutTextualContentState.Yes || elementNode.textualContent === LayoutTextualContentState.DynamicText) {
+      return ContentCompositionClassification.TextOnly
     }
-    return "unknown"
+    return ContentCompositionClassification.Unknown
   }
 
   if (state.analyzableChildCount === 0 && state.totalChildCount > 0) {
-    return "unknown"
+    return ContentCompositionClassification.Unknown
   }
 
   if (state.hasTextContent && state.hasInlineReplaced) {
-    if (state.wrappingContextMitigates) return "mixed-mitigated"
-    if (state.hasVerticalAlignMitigation) return "mixed-mitigated"
-    return "mixed-unmitigated"
+    if (state.wrappingContextMitigates) return ContentCompositionClassification.MixedMitigated
+    if (state.hasVerticalAlignMitigation) return ContentCompositionClassification.MixedMitigated
+    return ContentCompositionClassification.MixedUnmitigated
   }
 
   if (!state.hasTextContent && state.hasInlineReplaced) {
-    return "replaced-only"
+    return ContentCompositionClassification.ReplacedOnly
   }
 
   if (state.hasTextContent && !state.hasInlineReplaced) {
-    return "text-only"
+    return ContentCompositionClassification.TextOnly
   }
 
-  return "unknown"
+  return ContentCompositionClassification.Unknown
 }
 
 function isIntrinsicReplacedTag(tag: string): boolean {
@@ -487,7 +488,7 @@ export function resolveCompositionDivergenceStrength(
     return resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints)
   }
 
-  let majorityClassification: ContentCompositionClassification = "unknown"
+  let majorityClassification: ContentCompositionClassification = ContentCompositionClassification.Unknown
   let majorityCount = 0
   for (const [classification, count] of countByClassification) {
     if (count > majorityCount) {
@@ -500,37 +501,37 @@ export function resolveCompositionDivergenceStrength(
     return resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints)
   }
 
-  if (subjectNormalized === "unknown") {
+  if (subjectNormalized === ContentCompositionClassification.Unknown) {
     return 0
   }
 
   const cal = alignmentStrengthCalibration
 
-  if (majorityClassification === "text-only" && subjectNormalized === "mixed-unmitigated") {
+  if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) {
     return cal.compositionMixedUnmitigatedOutlierStrength
   }
 
-  if (majorityClassification === "replaced-only" && subjectNormalized === "mixed-unmitigated") {
+  if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) {
     return cal.compositionMixedOutlierAmongReplacedStrength
   }
 
-  if (majorityClassification === "mixed-unmitigated" && subjectNormalized === "text-only") {
+  if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.TextOnly) {
     return cal.compositionTextOutlierAmongMixedStrength
   }
 
-  if (majorityClassification === "mixed-unmitigated" && subjectNormalized === "replaced-only") {
+  if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.ReplacedOnly) {
     return cal.compositionTextOutlierAmongMixedStrength
   }
 
-  if (majorityClassification === "text-only" && subjectNormalized === "replaced-only") {
+  if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.ReplacedOnly) {
     return cal.compositionMixedOutlierAmongReplacedStrength
   }
 
-  if (majorityClassification === "replaced-only" && subjectNormalized === "text-only") {
+  if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.TextOnly) {
     return cal.compositionTextOutlierAmongMixedStrength
   }
 
-  if (majorityClassification === "unknown") {
+  if (majorityClassification === ContentCompositionClassification.Unknown) {
     return 0
   }
 
@@ -596,7 +597,7 @@ export function resolveMajorityClassification(
     countByClassification.set(normalized, existing + 1)
   }
 
-  let majorityClassification: ContentCompositionClassification = "unknown"
+  let majorityClassification: ContentCompositionClassification = ContentCompositionClassification.Unknown
   let majorityCount = 0
   for (const [classification, count] of countByClassification) {
     if (count > majorityCount) {
@@ -608,18 +609,11 @@ export function resolveMajorityClassification(
   return majorityClassification
 }
 
-/**
- * Normalizes classification for cohort comparison purposes.
- * `mixed-mitigated` is treated as equivalent to `text-only` since
- * the alignment issue is resolved.
- * `block-segmented` is treated as `text-only` since there is no
- * inline baseline interaction between children.
- */
 function normalizeClassificationForComparison(
   classification: ContentCompositionClassification,
 ): ContentCompositionClassification {
-  if (classification === "mixed-mitigated") return "text-only"
-  if (classification === "block-segmented") return "text-only"
+  if (classification === ContentCompositionClassification.MixedMitigated) return ContentCompositionClassification.TextOnly
+  if (classification === ContentCompositionClassification.BlockSegmented) return ContentCompositionClassification.TextOnly
   return classification
 }
 
@@ -637,14 +631,14 @@ export function resolveCompositionCoverage(
   let analyzableCount = 0
   for (let i = 0; i < allFingerprints.length; i++) {
     const fp = allFingerprints[i]
-    if (fp && fp.classification !== "unknown") {
+    if (fp && fp.classification !== ContentCompositionClassification.Unknown) {
       analyzableCount++
     }
   }
 
   const analyzableShare = analyzableCount / allFingerprints.length
 
-  if (subjectFingerprint.classification === "unknown") {
+  if (subjectFingerprint.classification === ContentCompositionClassification.Unknown) {
     return analyzableShare * 0.3
   }
 
@@ -658,17 +652,19 @@ export function resolveCompositionCoverage(
 /**
  * Formats a human-readable description of a content composition classification.
  */
+const COMPOSITION_LABELS: Record<ContentCompositionClassification, string> = {
+  [ContentCompositionClassification.TextOnly]: "text-only",
+  [ContentCompositionClassification.ReplacedOnly]: "inline-replaced-only",
+  [ContentCompositionClassification.MixedUnmitigated]: "mixed text + inline-replaced",
+  [ContentCompositionClassification.MixedMitigated]: "mixed (alignment mitigated)",
+  [ContentCompositionClassification.BlockSegmented]: "block-segmented",
+  [ContentCompositionClassification.Unknown]: "unknown",
+}
+
 export function formatCompositionClassification(
   classification: ContentCompositionClassification,
 ): string {
-  switch (classification) {
-    case "text-only": return "text-only"
-    case "replaced-only": return "inline-replaced-only"
-    case "mixed-unmitigated": return "mixed text + inline-replaced"
-    case "mixed-mitigated": return "mixed (alignment mitigated)"
-    case "block-segmented": return "block-segmented"
-    case "unknown": return "unknown"
-  }
+  return COMPOSITION_LABELS[classification]
 }
 
 /**
@@ -677,7 +673,7 @@ export function formatCompositionClassification(
 export function formatCompositionFixSuggestion(
   subjectFingerprint: ContentCompositionFingerprint,
 ): string {
-  if (subjectFingerprint.classification === "mixed-unmitigated") {
+  if (subjectFingerprint.classification === ContentCompositionClassification.MixedUnmitigated) {
     if (subjectFingerprint.hasVerticalAlignMitigation) {
       return "verify vertical-align resolves the baseline shift"
     }

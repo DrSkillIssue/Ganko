@@ -1,18 +1,22 @@
-import type {
-  AlignmentCase,
-  AlignmentFactorId,
-  CohortIdentifiability,
-  EvidenceAtom,
-  EvidenceProvenance,
+import {
+  AlignmentTextContrast,
+  ContentCompositionClassification,
   EvidenceValueKind,
-  LogOddsInterval,
-  NumericEvidenceValue,
+  SignalConflictValue,
+  type AlignmentCase,
+  type AlignmentFactorId,
+  type CohortIdentifiability,
+  type EvidenceAtom,
+  type EvidenceProvenance,
+  type LogOddsInterval,
+  type NumericEvidenceValue,
 } from "./signal-model"
 import {
   alignmentStrengthCalibration,
   evidenceContributionCalibration,
   resolveAlignmentFactorContract,
 } from "./calibration"
+import { ContextCertainty } from "./context-model"
 import { resolveCompositionDivergenceStrength } from "./content-composition"
 import { clamp, mergeEvidenceKind } from "./util"
 
@@ -146,7 +150,7 @@ function resolveOffsetScaleReference(
 
 function resolveBaselineStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
   const verticalAlign = input.cohortSignals.verticalAlign
-  const hasConflict = verticalAlign.value === "conflict"
+  const hasConflict = verticalAlign.value === SignalConflictValue.Conflict
   const conflict = hasConflict
     ? alignmentStrengthCalibration.baselineConflictBoost
     : 0
@@ -164,7 +168,7 @@ function resolveBaselineEvidenceKind(
   hasConflict: boolean,
 ): EvidenceValueKind {
   if (!hasConflict) return mergeEvidenceKind(lineHeightKind, verticalAlignKind)
-  if (lineHeightKind === "unknown") return verticalAlignKind
+  if (lineHeightKind === EvidenceValueKind.Unknown) return verticalAlignKind
   return mergeEvidenceKind(lineHeightKind, verticalAlignKind)
 }
 
@@ -196,7 +200,7 @@ function resolveContextConflictEvidence(input: AlignmentCase): StrengthEvidence 
   const alignSelf = input.cohortSignals.alignSelf
   const placeSelf = input.cohortSignals.placeSelf
   const kind = mergeEvidenceKind(alignSelf.kind, placeSelf.kind)
-  const hasConflict = alignSelf.value === "conflict" || placeSelf.value === "conflict"
+  const hasConflict = alignSelf.value === SignalConflictValue.Conflict || placeSelf.value === SignalConflictValue.Conflict
   if (!hasConflict) {
     return {
       strength: 0,
@@ -223,17 +227,17 @@ function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: Streng
     }
   }
 
-  if (input.cohortSignals.textContrastWithPeers === "different") {
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Different) {
     return {
       strength: alignmentStrengthCalibration.replacedDifferentTextBoost,
-      kind: "exact",
+      kind: EvidenceValueKind.Exact,
     }
   }
 
-  if (input.cohortSignals.textContrastWithPeers === "unknown") {
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Unknown) {
     return {
       strength: alignmentStrengthCalibration.replacedUnknownTextBoost,
-      kind: "conditional",
+      kind: EvidenceValueKind.Conditional,
     }
   }
 
@@ -253,12 +257,12 @@ function resolveContentCompositionStrength(input: AlignmentCase): StrengthEviden
   if (divergenceStrength <= 0) {
     return {
       strength: 0,
-      kind: "exact",
+      kind: EvidenceValueKind.Exact,
     }
   }
 
   const subjectClassification = input.subjectContentComposition.classification
-  const kind: EvidenceValueKind = subjectClassification === "unknown" ? "conditional" : "exact"
+  const kind: EvidenceValueKind = subjectClassification === ContentCompositionClassification.Unknown ? EvidenceValueKind.Conditional : EvidenceValueKind.Exact
 
   return {
     strength: clamp(divergenceStrength, 0, 1),
@@ -350,9 +354,9 @@ function buildEvidenceAtoms(
 }
 
 function mapContextCertaintyToEvidenceKind(certainty: AlignmentCase["context"]["certainty"]): EvidenceValueKind {
-  if (certainty === "resolved") return "exact"
-  if (certainty === "conditional") return "conditional"
-  return "unknown"
+  if (certainty === ContextCertainty.Resolved) return EvidenceValueKind.Exact
+  if (certainty === ContextCertainty.Conditional) return EvidenceValueKind.Conditional
+  return EvidenceValueKind.Unknown
 }
 
 function pushSupportAtom(
@@ -409,19 +413,19 @@ function pushAtom(
 
 function toPositiveContribution(strength: number, maxWeight: number, valueKind: EvidenceValueKind): LogOddsInterval {
   const contribution = clamp(strength, 0, 2) * maxWeight
-  if (valueKind === "exact") {
+  if (valueKind === EvidenceValueKind.Exact) {
     return {
       min: contribution,
       max: contribution,
     }
   }
-  if (valueKind === "interval") {
+  if (valueKind === EvidenceValueKind.Interval) {
     return {
       min: contribution * evidenceContributionCalibration.supportIntervalLowerScale,
       max: contribution,
     }
   }
-  if (valueKind === "conditional") {
+  if (valueKind === EvidenceValueKind.Conditional) {
     return {
       min: 0,
       max: contribution * evidenceContributionCalibration.supportConditionalUpperScale,
@@ -437,19 +441,19 @@ function toPositiveContribution(strength: number, maxWeight: number, valueKind: 
 function toNegativeContribution(strength: number, maxPenalty: number, valueKind: EvidenceValueKind): LogOddsInterval {
   const penalty = clamp(strength, 0, 1) * maxPenalty
 
-  if (valueKind === "exact") {
+  if (valueKind === EvidenceValueKind.Exact) {
     return {
       min: -penalty,
       max: -penalty,
     }
   }
-  if (valueKind === "interval") {
+  if (valueKind === EvidenceValueKind.Interval) {
     return {
       min: -penalty,
       max: -penalty * evidenceContributionCalibration.penaltyIntervalUpperScale,
     }
   }
-  if (valueKind === "conditional") {
+  if (valueKind === EvidenceValueKind.Conditional) {
     return {
       min: -penalty,
       max: 0,
@@ -462,5 +466,5 @@ function toNegativeContribution(strength: number, maxPenalty: number, valueKind:
   }
 }
 
-const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: "exact" }
+const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: EvidenceValueKind.Exact }
 

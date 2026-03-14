@@ -2,7 +2,7 @@ import type { CrossRuleContext } from "../rule"
 import type { LayoutCascadedDeclaration } from "./graph"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import type { LayoutSignalName, LayoutSignalSnapshot, LayoutSignalValue } from "./signal-model"
+import { LayoutSignalGuard, type LayoutSignalName, type LayoutSignalSnapshot, type LayoutSignalValue } from "./signal-model"
 import { normalizeSignalMapWithCounts } from "./signal-normalization"
 
 const INHERITED_SIGNAL_NAMES: readonly LayoutSignalName[] = [
@@ -121,7 +121,7 @@ function inheritSignalsFromParent(
     if (out === null) out = new Map(local)
     out.set(signal, inheritedValue)
 
-    if (inheritedValue.guard === "conditional") {
+    if (inheritedValue.guard === LayoutSignalGuard.Conditional) {
       conditionalDelta++
       continue
     }

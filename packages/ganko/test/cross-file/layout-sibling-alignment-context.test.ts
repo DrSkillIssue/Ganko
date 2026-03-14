@@ -1,7 +1,7 @@
 import { noopLogger } from "@drskillissue/ganko-shared";
 import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
-import { analyzeCrossFileInput, buildLayoutGraph, collectAlignmentCases, evaluateAlignmentCase } from "../../src/cross-file";
+import { analyzeCrossFileInput, buildLayoutGraph, collectAlignmentCases, evaluateAlignmentCase, ContextCertainty } from "../../src/cross-file";
 import { buildSolidGraph } from "../../src/solid/plugin";
 import { buildCSSGraph } from "../../src/css/plugin";
 import { parseCode } from "../solid/test-utils";
@@ -384,7 +384,7 @@ describe("layout alignment context handling", () => {
 
     for (const entry of cases) {
       expect(entry.context.kind).toBe("flex-cross-axis");
-      expect(entry.context.certainty).toBe("conditional");
+      expect(entry.context.certainty).toBe(ContextCertainty.Conditional);
       const decision = evaluateAlignmentCase(entry);
       expect(decision.kind).toBe("reject");
       if (decision.kind !== "reject") throw new Error("expected reject decision");
@@ -440,7 +440,7 @@ describe("layout alignment context handling", () => {
     expect(cases.length).toBeGreaterThan(0);
 
     for (const entry of cases) {
-      expect(entry.context.axisCertainty).toBe("conditional");
+      expect(entry.context.axisCertainty).toBe(ContextCertainty.Conditional);
       const decision = evaluateAlignmentCase(entry);
       expect(decision.kind).toBe("reject");
     }

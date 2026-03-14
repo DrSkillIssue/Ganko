@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest"
 import { isLayoutHidden } from "../../src/cross-file/layout/signal-access"
 import type { LayoutElementNode } from "../../src/cross-file/layout/graph"
-import type { LayoutSignalSnapshot, LayoutKnownSignalValue, LayoutSignalName } from "../../src/cross-file/layout/signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, LayoutSignalUnit, LayoutTextualContentState, type LayoutSignalSnapshot, type LayoutKnownSignalValue, type LayoutSignalName } from "../../src/cross-file/layout/signal-model"
 
 function makeNode(overrides: Partial<{
   attributes: ReadonlyMap<string, string | null>
@@ -36,7 +36,7 @@ function makeNode(overrides: Partial<{
     selectorDispatchKeys: [],
     attributes: overrides.attributes ?? new Map(),
     inlineStyleValues: new Map(),
-    textualContent: "no",
+    textualContent: LayoutTextualContentState.No,
     isControl: false,
     isReplaced: false,
   }
@@ -48,10 +48,10 @@ function makeSignal(name: LayoutSignalName, normalized: string): LayoutKnownSign
     name,
     raw: normalized,
     normalized,
-    source: "selector",
-    guard: "unconditional",
-    guardProvenance: { kind: "unconditional", conditions: [], key: "always" },
-    unit: "keyword",
+    source: LayoutSignalSource.Selector,
+    guard: LayoutSignalGuard.Unconditional,
+    guardProvenance: { kind: LayoutSignalGuard.Unconditional, conditions: [], key: "always" },
+    unit: LayoutSignalUnit.Keyword,
     px: null,
     quality: "exact",
   }
@@ -67,7 +67,7 @@ function makeSnapshot(signals: LayoutKnownSignalValue[]): LayoutSignalSnapshot {
     elementId: 0,
     elementKey: "test::0",
     tag: "div",
-    textualContent: "no",
+    textualContent: LayoutTextualContentState.No,
     isControl: false,
     isReplaced: false,
     signals: signalMap,

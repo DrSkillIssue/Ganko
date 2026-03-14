@@ -2,7 +2,6 @@
 
 **Goal:** Extract shared context structs to reduce parameter counts; convert `*ByElementKey` string-keyed Maps to object-identity-keyed Maps for faster lookups.
 
-**Validation after each step:** `bun run tsc && bun run test && bun run lint`
 
 ---
 
