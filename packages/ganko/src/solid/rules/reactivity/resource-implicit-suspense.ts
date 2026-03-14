@@ -3,17 +3,21 @@
  *
  * createResource interacts with Suspense through two independent propagation paths:
  *
- * 1. Loading path: Without initialValue, the resource starts unresolved. SolidJS treats
- *    this as a thrown Promise that propagates to the nearest Suspense boundary, which
- *    swaps its entire children subtree with its fallback.
+ * 1. Loading path: Without initialValue, the resource starts in "unresolved" state and
+ *    the accessor returns undefined. When read() is called inside a tracked context,
+ *    it increments the nearest SuspenseContext's counter, which triggers the Suspense
+ *    boundary to swap its entire children subtree with its fallback. With initialValue,
+ *    the accessor returns a real value but loading is still true and the Suspense
+ *    increment path can still fire — initialValue only prevents the accessor from
+ *    returning undefined, it does NOT fully prevent Suspense activation.
  *
- * 2. Error path: When the fetcher throws (regardless of initialValue), SolidJS propagates
- *    the error to the nearest Suspense or ErrorBoundary. If only Suspense exists (no
- *    ErrorBoundary), the boundary absorbs the error and stays in its fallback state
- *    permanently. The original children are unmounted and never restored.
- *
- * initialValue only fixes path 1. Path 2 requires an ErrorBoundary wrapping the resource
- * consumer, or never throwing from the fetcher.
+ * 2. Error path: When the fetcher's Promise rejects, completeLoad sets the error signal
+ *    and decrements Suspense. Suspense then tries to re-render children, which calls
+ *    read() again. read() throws the error (if err !== undefined && !pr). The error
+ *    propagates via handleError through the ownership chain looking for an ERROR handler
+ *    (installed by catchError/ErrorBoundary). Suspense has NO error handling mechanism.
+ *    Without an ErrorBoundary, the error is unhandled — either crashing the app or
+ *    leaving the Suspense boundary permanently broken.
  *
  * WARN: createResource without initialValue AND the component reads resource.loading
  * ERROR (loading): createResource without initialValue AND rendered inside conditional
