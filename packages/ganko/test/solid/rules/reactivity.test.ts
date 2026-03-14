@@ -1795,6 +1795,30 @@ describe("resource-implicit-suspense", () => {
       `)
       expect(diagnostics).toHaveLength(0)
     })
+
+    it("errors even with initialValue — Suspense increment still fires", () => {
+      const { diagnostics } = check(`
+        import { createResource } from "solid-js";
+        function CountryForm() {
+          const [countries] = createResource(fetchCountries, { initialValue: [] });
+          return <ul>{countries()}</ul>;
+        }
+        function Page() {
+          return (
+            <Suspense fallback={<div />}>
+              <div>
+                <Show when={showForm()}>
+                  <CountryForm />
+                </Show>
+              </div>
+            </Suspense>
+          );
+        }
+      `)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("conditionalSuspense")
+      expect(at(diagnostics, 0).severity).toBe("error")
+    })
   })
 
   describe("ERROR: missing ErrorBoundary (error path)", () => {

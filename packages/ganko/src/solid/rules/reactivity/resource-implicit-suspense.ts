@@ -20,8 +20,8 @@
  *    leaving the Suspense boundary permanently broken.
  *
  * WARN: createResource without initialValue AND the component reads resource.loading
- * ERROR (loading): createResource without initialValue AND rendered inside conditional
- *   mount point AND nearest Suspense boundary is more than 1 component level up
+ * ERROR (suspense): createResource (with OR without initialValue) AND rendered inside
+ *   conditional mount point AND nearest Suspense boundary is more than 1 component up
  * ERROR (error): createResource (with OR without initialValue) AND fetcher can throw
  *   AND no ErrorBoundary between the component and the nearest Suspense boundary
  */
@@ -51,9 +51,9 @@ const messages = {
     "Without initialValue, Suspense intercepts before your loading UI renders. " +
     "Add initialValue to the options: createResource(fetcher, { initialValue: ... })",
   conditionalSuspense:
-    "createResource '{{name}}' has no initialValue and is rendered inside a conditional mount point ({{mountTag}}). " +
-    "This will trigger a distant Suspense boundary and unmount the entire subtree. " +
-    "Add initialValue to the options: createResource(fetcher, { initialValue: ... })",
+    "createResource '{{name}}' is rendered inside a conditional mount point ({{mountTag}}) with a distant Suspense boundary. " +
+    "When the fetcher's Promise is pending, the SuspenseContext increment fires and unmounts the entire subtree. " +
+    "initialValue does NOT prevent this — it only prevents the accessor from returning undefined.",
   missingErrorBoundary:
     "createResource '{{name}}' has no <ErrorBoundary> between its component and the nearest <Suspense>. " +
     "When the fetcher throws (network error, 401/403/503, timeout), the error propagates to Suspense " +
@@ -388,8 +388,12 @@ export const resourceImplicitSuspense = defineSolidRule({
         boundaryCache.set(componentName, analysis);
       }
 
-      // Loading path: ERROR on conditional mount with distant Suspense
-      if (!hasInitial && analysis.conditionalMountTag) {
+      // Suspense path: ERROR on conditional mount with distant Suspense.
+      // Applies regardless of initialValue — the SuspenseContext increment path
+      // fires whenever the fetcher's Promise is pending (pr is set), even with
+      // initialValue. initialValue only prevents the accessor from returning
+      // undefined; it does NOT prevent Suspense activation.
+      if (analysis.conditionalMountTag) {
         emit(
           createDiagnostic(
             graph.file,
