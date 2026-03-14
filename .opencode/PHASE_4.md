@@ -215,6 +215,8 @@ function parseSingleAxisScroll(value: string | null): boolean | null {
 }
 ```
 
+Remove the `splitWhitespaceTokens` import from `build.ts:7` if it becomes unused after inlining. Also check `cascade-builder.ts:5` — remove if unused.
+
 **Impact:** Eliminates array allocation per overflow value check. CPU + memory.
 
 ---

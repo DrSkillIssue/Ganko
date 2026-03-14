@@ -38,7 +38,7 @@ contextByParentNode.set(parent, {
 ```typescript
 export function deriveAlignmentContext(
   base: AlignmentContext,
-  overrides: Partial<Pick<AlignmentContext, "baselineRelevance" | "crossAxisIsBlockAxis" | "crossAxisIsBlockAxisCertainty">>,
+  overrides: { readonly baselineRelevance: BaselineRelevance },
 ): AlignmentContext {
   return { ...base, ...overrides }
 }
@@ -58,51 +58,7 @@ contextByParentNode.set(parent, deriveAlignmentContext(context, { baselineReleva
 
 ---
 
-## Step 6.2: Inline hot signal creation without intermediate spreads (C4)
-
-**Problem:** `computeHotNumeric` and `computeHotNormalized` in `build.ts:497-515` each create a temporary `{ ...readXxx() }` spread, then add `present: boolean`. Each call does a Map lookup + object spread + new object.
-
-**This is already addressed by Phase 4, Step 4.2** (single-pass `computeHotSignals`). If Phase 4 is complete, these functions are deleted and this step is a no-op.
-
-**If Phase 4 is NOT yet complete**, the standalone fix is:
-
-In `signal-access.ts`, add direct hot signal constructors:
-```typescript
-export function readHotNumericSignalEvidence(
-  snapshot: LayoutSignalSnapshot,
-  name: LayoutSignalName,
-): HotNumericSignalEvidence {
-  const value = snapshot.signals.get(name)
-  if (!value) return { present: false, value: null, kind: EvidenceValueKind.Unknown }
-  if (value.kind !== "known") {
-    return {
-      present: true,
-      value: null,
-      kind: value.guard === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
-    }
-  }
-  return {
-    present: true,
-    value: value.px,
-    kind: value.guard === LayoutSignalGuard.Conditional
-      ? EvidenceValueKind.Conditional
-      : value.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
-  }
-}
-```
-
-Then `computeHotNumeric` becomes a direct call without spread:
-```typescript
-function computeHotNumeric(snapshot: LayoutSignalSnapshot, name: LayoutSignalName): HotNumericSignalEvidence {
-  return readHotNumericSignalEvidence(snapshot, name)
-}
-```
-
-**Impact:** 21 fewer spread allocations per element. CPU + memory.
-
----
-
-## Step 6.3: Merge `resolveCompositionDivergenceStrength` and `resolveMajorityClassification` (C5)
+## Step 6.2: Merge `resolveCompositionDivergenceStrength` and `resolveMajorityClassification` (C5)
 
 **Problem:** Both functions build the same `countByClassification` Map and find the majority. The scoring path (`scoring.ts`) calls `resolveCompositionDivergenceStrength` (which computes majority internally at `content-composition.ts:490-497`) and then separately calls `resolveMajorityClassification` (which repeats the same computation at `content-composition.ts:590-609`).
 
@@ -131,6 +87,7 @@ export function resolveCompositionDivergence(
 3. Update `scoring.ts` (where `resolveMajorityClassification` is called for diagnostic messages) to use the majority from the combined result instead of calling a separate function.
 
 4. Delete `resolveMajorityClassification` or make it a thin wrapper that calls `resolveCompositionDivergence` and extracts `.majorityClassification`.
+5. Update `index.ts:97-98` — re-export names for `resolveCompositionDivergenceStrength` (renamed) and `resolveMajorityClassification` (deleted or renamed).
 
 **Challenge:** `resolveCompositionDivergenceStrength` is called from `consistency-evidence.ts` which doesn't need the majority. `resolveMajorityClassification` is called from `scoring.ts` which doesn't need the strength. The merge only helps if both are called for the same case.
 

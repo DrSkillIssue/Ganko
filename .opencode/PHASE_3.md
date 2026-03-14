@@ -84,7 +84,9 @@ appendMatchingEdgesFromSelectorIds(
 **Files:**
 - `graph.ts:164` — change type: `ReadonlyMap<string, LayoutSnapshotHotSignals>` → `ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>`
 - `build.ts:374,424` — change Map key from `node.key` to `node`
-- All consumers reading `snapshotHotSignalsByElementKey` — search `snapshotHotSignalsByElementKey` across codebase, update `.get(node.key)` → `.get(node)` or `.get(someNode)`
+- `content-composition.ts:89,109,138,167,185,223,228,247,311,315,322,332,357` — parameter types and `.get(xxx.key)` → `.get(xxx)` (14 sites)
+- `cohort-index.ts:102,127,165,237,277` — interface field, assignment, pass-through, `.get(measurementNode.key)` → `.get(measurementNode)`
+- `test/cross-file/layout-precomputed-indexes.test.ts:18` — `layout.snapshotHotSignalsByElementKey.has(element.key)` → `layout.snapshotHotSignalsByNode.has(element)`
 - Rename field to `snapshotHotSignalsByNode` everywhere
 
 ### 3.2b: `reservedSpaceFactsByElementKey` → `reservedSpaceFactsByNode`
@@ -140,7 +142,9 @@ appendMatchingEdgesFromSelectorIds(
 **Files:**
 - `graph.ts:159` — change type: `ReadonlyMap<string, readonly LayoutMatchEdge[]>` → `ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>`
 - `build.ts:265,274` — change Map key from `node.key` to `node`
-- `cascade-builder.ts:433` — `buildConditionalDeltaIndex` parameter type
+- `cascade-builder.ts:433,444` — `buildConditionalDeltaIndex` parameter type and `.get(node.key)` → `.get(node)`
+- `test/cross-file/layout-selector-dispatch-parity.test.ts:55` — `layout.appliesByElementKey.get(element.key)` → `layout.appliesByNode.get(element)`
+- `test/integration/both-graphs.test.ts:125,273` — `layout.appliesByElementKey.get(checkbox.key)` → `layout.appliesByNode.get(checkbox)`
 - All rule consumers
 
 ### 3.2i: `selectorCandidatesByElementKey` → `selectorCandidatesByNode`
@@ -149,6 +153,7 @@ appendMatchingEdgesFromSelectorIds(
 - `graph.ts:160` — change type
 - `build.ts:238,243` — change Map key
 - `selector-dispatch.ts` — return type of `buildSelectorCandidatesByElementKey`
+- `test/cross-file/layout-precomputed-indexes.test.ts:23` — `layout.selectorCandidatesByElementKey.get(element.key)` → `layout.selectorCandidatesByNode.get(element)`
 
 ---
 

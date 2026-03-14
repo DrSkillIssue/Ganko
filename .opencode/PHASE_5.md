@@ -66,12 +66,16 @@ export interface LayoutSignalSnapshot {
 
 **Consumers to update (replace `snapshot.solidFile` → `snapshot.node.solidFile`, etc.):**
 - `signal-collection.ts:77-88` — snapshot construction (remove duplicated fields, add `node` ref)
-- `cohort-index.ts` — multiple places accessing `snapshot.elementKey`, `snapshot.solidFile`, `snapshot.tag`, `snapshot.textualContent`, `snapshot.isControl`, `snapshot.isReplaced`
+- `cohort-index.ts:703,707-709,733,812,893,897,901,1015-1016` — `snapshot.elementKey`, `snapshot.solidFile`, `snapshot.tag`, `snapshot.textualContent`, `snapshot.isControl`, `snapshot.isReplaced`
 - `content-composition.ts` — `snapshot.isControl`, `snapshot.isReplaced`, `snapshot.tag`
 - `case-builder.ts` — `snapshot.textualContent`
-- `consistency-evidence.ts:209-213` — `snapshot.isControl`, `snapshot.isReplaced`
+- `consistency-evidence.ts:214-217` — `subject.isControl`, `subject.isReplaced` (where `subject = input.subject.snapshot`)
 - `diagnostics.ts` — `snapshot.elementKey`, `snapshot.solidFile`
 - `measurement-node.ts` — snapshot access
+- `css-layout-content-visibility-no-intrinsic-size.ts:25` — `snapshot.textualContent`
+- `css-layout-conditional-display-collapse.ts:41` — `snapshot.textualContent`
+- `css-layout-conditional-white-space-wrap-shift.ts:46` — `snapshot.textualContent`
+- `test/cross-file/layout-is-hidden.test.ts:65-77` — constructs `LayoutSignalSnapshot` with old fields (must use `node` ref instead)
 
 **Impact:** 7 fewer fields per snapshot (~48 bytes per element). Memory.
 
@@ -93,7 +97,8 @@ readonly normalized: string
 1. Remove `readonly raw: string` from `LayoutKnownSignalValue`
 2. In `signal-normalization.ts:429-440` (`createKnown`), remove the `raw` parameter and field
 3. Update all callers of `createKnown` to not pass `raw`
-4. In `consistency-domain.ts:143`, use `normalized` instead of `raw`
+
+The `raw` field is written in `createKnown` but never read externally — no consumer access sites to update.
 
 **Impact:** 1 fewer string per known signal. ~40KB for 5000 signals. Memory.
 
@@ -114,16 +119,8 @@ readonly raw: string | null
 1. Remove `readonly raw: string | null` from `LayoutUnknownSignalValue`
 2. In `signal-normalization.ts:443-459` (`createUnknown`), remove the `raw` parameter and field
 3. Update all callers of `createUnknown`
-4. In `build.ts:577`, `hasPositiveOrDeclaredDimension` accesses `signal.raw` on unknown signals — replace with checking `signal.reason` or removing that code path (unknown signals with non-null raw that aren't "auto"/"none" are treated as reserving space; this heuristic should be revisited — if the value is unknown, the conservative behavior is to assume no reserved space)
-
-**CAUTION:** `build.ts:576-579` has:
-```typescript
-if (signal.kind === "unknown") {
-  if (signal.raw === null) return false
-  normalized = signal.raw.trim().toLowerCase()
-}
-```
-This uses `raw` on unknown signals to check if dimension keywords are non-reserving. After removing `raw`, this must return `false` for unknown signals (conservative: unknown = no reserved space). This matches the semantic meaning — if we can't parse the value, we don't know if it reserves space.
+4. `build.ts:576-579` (`hasPositiveOrDeclaredDimension`) — change the `signal.kind === "unknown"` branch to `return false`
+5. `build.ts:598-600` (`hasUsableAspectRatio`) — change the `signal.kind === "unknown"` branch to `return false`
 
 **Impact:** 1 fewer string per unknown signal. Memory.
 
@@ -139,18 +136,6 @@ This uses `raw` on unknown signals to check if dimension keywords are non-reserv
 1. Compute `cohortContentCompositions` once per parent (already done at line 41)
 2. The array is already shared by reference across all children of the same parent — verify this is the case
 3. If `AlignmentCase.cohortContentCompositions` copies or re-collects per child, fix to reuse the same array reference
-
-**Verify:** Read `case-builder.ts:41` — `collectCohortContentCompositions` is called once per parent loop iteration, then reused for all children. This is already correct. **No change needed if the reference is shared.**
-
----
-
-## Step 5.6: Share cohort snapshots by reference (M7)
-
-**File:** `signal-model.ts:240` — `AlignmentCase.cohortSnapshots`
-
-**Current:** `cohortStats.snapshots` is passed to `buildAlignmentCase` and stored per-case. If all cases in the same cohort share the same snapshots array reference, this is already optimal.
-
-**Verify:** In `case-builder.ts:94`, `cohortStats.snapshots` is passed directly. Since `cohortStats` is retrieved once per parent, all children share the same reference. **No change needed.**
 
 ---
 
@@ -183,9 +168,10 @@ export interface LayoutMatchEdge {
 ```
 
 **Consumers to update:**
-- `cascade-builder.ts` — edge construction in `appendMatchingEdgesFromSelectorIds`
-- `build.ts` — edge construction
-- All consumers accessing `edge.solidFile`, `edge.elementId`, `edge.elementKey` — replace with `edge.node.solidFile`, etc.
+- `cascade-builder.ts:154-157` — edge construction in `appendMatchingEdgesFromSelectorIds`
+- `graph.ts:53-56` — interface definition
+
+`edge.solidFile`, `edge.elementId`, `edge.elementKey` are write-only — no read sites exist in the codebase.
 
 **Impact:** 3 fewer fields per edge (~24 bytes per edge). For projects with many CSS rules × elements = thousands of edges. Memory.
 
@@ -269,6 +255,10 @@ function computeP95(sampler: ReservoirSampler): number {
   return selectKth([...sampler.buffer], Math.ceil(sampler.buffer.length * 0.95) - 1)
 }
 ```
+
+**Update push site:**
+- `rule-kit.ts:126` — `context.layout.perf.posteriorWidths.push(width)` → `reservoirPush(context.layout.perf.posteriorWidths, width)` (add import for `reservoirPush`)
+- `perf.ts:154` — `computeP95(stats.posteriorWidths)` signature already updated above
 
 **Impact:** Bounded memory regardless of project size. Memory.
 

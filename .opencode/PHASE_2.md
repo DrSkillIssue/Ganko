@@ -18,27 +18,6 @@ This function is NEVER called. Containing block facts are built inline in `build
 
 ---
 
-## Step 2.2: Deduplicate `TextualContentState` (C3)
-
-**File:** `element-record.ts:44`
-```typescript
-export type TextualContentState = "yes" | "no" | "unknown" | "dynamic-text"
-```
-
-**File:** `signal-model.ts:95`
-```typescript
-export type LayoutTextualContentState = "yes" | "no" | "unknown" | "dynamic-text"
-```
-
-These are identical types.
-
-**Action:**
-1. Delete `TextualContentState` from `element-record.ts:44`
-2. In `element-record.ts`, add import: `import type { LayoutTextualContentState } from "./signal-model"`
-3. Replace all occurrences of `TextualContentState` in `element-record.ts` with `LayoutTextualContentState` (lines 35, 96-101, and any function signatures)
-
-**NOTE:** After Phase 1 completes, both will already be numeric. This step is about eliminating the duplicate type definition regardless.
-
 ---
 
 ## Step 2.3: Consolidate tag sets (C6)
@@ -80,12 +59,15 @@ Add import:
 ```typescript
 import { CONTROL_ELEMENT_TAGS, INTRINSIC_REPLACED_TAGS } from "./util"
 ```
-Replace `REPLACED_TAGS.has(tag)` in `isReplacedTag` with:
+Replace `REPLACED_TAGS.has(tag)` usage in `isReplacedTag`. The current `REPLACED_TAGS` does NOT include `"object"` or `"embed"` but `INTRINSIC_REPLACED_TAGS` does — preserve the original set membership by constructing the replacement explicitly:
 ```typescript
+const REPLACED_ELEMENT_TAGS: ReadonlySet<string> = new Set([
+  ...CONTROL_ELEMENT_TAGS, "img", "video", "canvas", "svg", "iframe",
+])
+
 export function isReplacedTag(tag: string | null): boolean {
   if (tag === null) return false
-  const lower = tag.toLowerCase()
-  return CONTROL_ELEMENT_TAGS.has(lower) || INTRINSIC_REPLACED_TAGS.has(lower)
+  return REPLACED_ELEMENT_TAGS.has(tag.toLowerCase())
 }
 ```
 
@@ -126,9 +108,8 @@ export const WHITESPACE_RE = /\s+/
    - Replace `DISPLAY_TOKEN_SPLIT_RE` usage with `WHITESPACE_RE`
 
 3. In `guard-model.ts`:
-   - Delete line 29 (`const WHITESPACE_RE = /\s+/g`)
-   - Import `WHITESPACE_RE` from `./util`
-   - **CAUTION:** `guard-model.ts` uses `/\s+/g` (global flag). Check if the `g` flag is needed. If `split()` is the only consumer, the `g` flag is unnecessary for `String.prototype.split()`. Verify usage before changing.
+   - `guard-model.ts:100` uses `.replace(WHITESPACE_RE, " ")` which REQUIRES the `g` flag to replace all whitespace runs. `String.prototype.replace()` with a non-global regex only replaces the first match.
+   - Keep a local `const WHITESPACE_RE_GLOBAL = /\s+/g` in `guard-model.ts` for the `.replace()` call. Import `WHITESPACE_RE` from `./util` only for `.split()` consumers in `context-classification.ts`.
 
 ---
 
