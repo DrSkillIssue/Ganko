@@ -26,6 +26,7 @@ const MONITORED_SHORTHAND_SET = new Set<string>([
   "margin-block",
   "padding-block",
   "inset-block",
+  "flex-flow",
 ])
 
 const LENGTH_SIGNAL_SET = new Set<LayoutSignalName>([
@@ -69,6 +70,8 @@ const KEYWORD_SIGNAL_SET = new Set<LayoutSignalName>([
   "justify-items",
   "place-items",
   "place-self",
+  "flex-direction",
+  "grid-auto-flow",
   "appearance",
   "box-sizing",
   "position",

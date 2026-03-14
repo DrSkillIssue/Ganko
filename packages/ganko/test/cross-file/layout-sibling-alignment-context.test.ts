@@ -449,3 +449,135 @@ describe("layout alignment context handling", () => {
     expect(diagnostics).toHaveLength(0);
   });
 });
+
+describe("crossAxisIsBlockAxis suppression", () => {
+  function collectCases(tsx: string, css: string) {
+    const solidInput = parseCode(tsx, "/project/App.tsx");
+    const solidGraph = buildSolidGraph(solidInput);
+    const cssGraph = buildCSSGraph({
+      files: [{ path: "/project/layout.css", content: css }],
+    });
+    const context = {
+      solids: [solidGraph],
+      css: cssGraph,
+      layout: buildLayoutGraph([solidGraph], cssGraph),
+      logger: noopLogger,
+    };
+    return collectAlignmentCases(context);
+  }
+
+  const baseJsx = `
+    import "./layout.css";
+    export function List() {
+      return (
+        <div class="container">
+          <span class="item-a">Alpha</span>
+          <span class="item-b">Beta</span>
+        </div>
+      );
+    }
+  `;
+
+  it("suppresses diagnostics for flex-direction: column", () => {
+    const css = `
+      .container { display: flex; flex-direction: column; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(c.context.crossAxisIsBlockAxis).toBe(false);
+      const decision = evaluateAlignmentCase(c);
+      expect(decision.kind).toBe("reject");
+    }
+    const diagnostics = runRule(baseJsx, [{ path: "/project/layout.css", content: css }]);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves diagnostics for flex-direction: row (explicit)", () => {
+    const css = `
+      .container { display: flex; flex-direction: row; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(c.context.crossAxisIsBlockAxis).toBe(true);
+    }
+  });
+
+  it("preserves diagnostics for default flex (no flex-direction = row)", () => {
+    const css = `
+      .container { display: flex; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(c.context.crossAxisIsBlockAxis).toBe(true);
+    }
+  });
+
+  it("suppresses diagnostics for grid-auto-flow: column", () => {
+    const css = `
+      .container { display: grid; grid-auto-flow: column; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(c.context.crossAxisIsBlockAxis).toBe(false);
+      const decision = evaluateAlignmentCase(c);
+      expect(decision.kind).toBe("reject");
+    }
+    const diagnostics = runRule(baseJsx, [{ path: "/project/layout.css", content: css }]);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves diagnostics for flex-direction: column in vertical writing mode", () => {
+    const css = `
+      .container { display: flex; flex-direction: column; writing-mode: vertical-rl; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      // flex-direction: column → main = block axis, cross = inline axis.
+      // This is writing-mode-independent (row/column are logical axis terms).
+      expect(c.context.crossAxisIsBlockAxis).toBe(false);
+    }
+  });
+
+  it("preserves diagnostics for flex-direction: row in vertical writing mode", () => {
+    const css = `
+      .container { display: flex; flex-direction: row; writing-mode: vertical-rl; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      // flex-direction: row → main = inline axis, cross = block axis.
+      // Writing-mode-independent.
+      expect(c.context.crossAxisIsBlockAxis).toBe(true);
+    }
+  });
+
+  it("resolves flex-direction from flex-flow shorthand", () => {
+    const css = `
+      .container { display: flex; flex-flow: column nowrap; }
+      .item-a { line-height: 12px; transform: translateY(-2px); }
+      .item-b { line-height: 20px; }
+    `;
+    const cases = collectCases(baseJsx, css);
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(c.context.crossAxisIsBlockAxis).toBe(false);
+    }
+  });
+});

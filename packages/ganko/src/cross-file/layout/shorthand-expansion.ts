@@ -1,4 +1,4 @@
-import { parseBlockShorthand, parseQuadShorthand } from "../../css/parser/value-tokenizer"
+import { parseBlockShorthand, parseQuadShorthand, splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 import type { LayoutSignalName } from "./signal-model"
 
 export interface ShorthandExpansionResult {
@@ -53,7 +53,43 @@ export function expandShorthand(
     ]
   }
 
+  if (property === "flex-flow") {
+    return expandFlexFlow(value)
+  }
+
   return undefined
+}
+
+const FLEX_DIRECTION_VALUES = new Set(["row", "row-reverse", "column", "column-reverse"])
+
+function expandFlexFlow(value: string): readonly ShorthandExpansionResult[] | null {
+  const tokens = splitWhitespaceTokens(value.trim().toLowerCase())
+  if (tokens.length === 0) return null
+  if (tokens.length > 2) return null
+
+  let direction: string | null = null
+  let wrap: string | null = null
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (!token) continue
+    if (FLEX_DIRECTION_VALUES.has(token)) {
+      if (direction !== null) return null
+      direction = token
+    } else {
+      if (wrap !== null) return null
+      wrap = token
+    }
+  }
+
+  const out: ShorthandExpansionResult[] = []
+  if (direction !== null) {
+    out.push({ name: "flex-direction", value: direction })
+  }
+  if (wrap !== null) {
+    out.push({ name: "flex-wrap", value: wrap })
+  }
+  return out.length > 0 ? out : null
 }
 
 export function getShorthandLonghandNames(property: string): readonly string[] | null {
@@ -61,9 +97,10 @@ export function getShorthandLonghandNames(property: string): readonly string[] |
   if (quad !== undefined) return [...quad]
   const block = BLOCK_EXPANSIONS.get(property)
   if (block !== undefined) return [...block]
+  if (property === "flex-flow") return ["flex-direction", "flex-wrap"]
   return null
 }
 
 export function isShorthandProperty(property: string): boolean {
-  return QUAD_EXPANSIONS.has(property) || BLOCK_EXPANSIONS.has(property)
+  return QUAD_EXPANSIONS.has(property) || BLOCK_EXPANSIONS.has(property) || property === "flex-flow"
 }

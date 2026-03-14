@@ -37,6 +37,7 @@ export type MonitoredSignalKey =
   | "margin-block"
   | "padding-block"
   | "inset-block"
+  | "flex-flow"
 
 export interface LayoutCascadeCandidate {
   readonly declaration: LayoutCascadedDeclaration
@@ -96,6 +97,7 @@ function toMonitoredSignalKey(property: string): MonitoredSignalKey | null {
     case "margin-block":
     case "padding-block":
     case "inset-block":
+    case "flex-flow":
       return property
     default:
       return null

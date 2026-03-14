@@ -57,6 +57,18 @@ export interface AlignmentContext {
   readonly parentAlignItems: string | null
   readonly parentPlaceItems: string | null
   readonly hasPositionedOffset: boolean
+  /**
+   * Whether the layout container's cross axis aligns with the document's
+   * block axis. When `true`, vertical sibling offset differences represent
+   * genuine alignment issues. When `false`, the block axis is the container's
+   * main axis — vertical positioning is controlled by the layout algorithm
+   * (gap, justify-content), and offset evidence should be suppressed.
+   *
+   * For non-flex/grid contexts (block flow, inline formatting, table-cell),
+   * this is always `true`.
+   */
+  readonly crossAxisIsBlockAxis: boolean
+  readonly crossAxisIsBlockAxisCertainty: ContextCertainty
   readonly baselineRelevance: BaselineRelevance
   readonly evidence: LayoutContextEvidence
 }

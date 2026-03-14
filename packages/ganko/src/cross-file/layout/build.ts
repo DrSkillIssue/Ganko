@@ -475,6 +475,8 @@ function computeHotSignals(snapshot: LayoutSignalSnapshot): LayoutSnapshotHotSig
     verticalAlign: computeHotNormalized(snapshot, "vertical-align"),
     alignSelf: computeHotNormalized(snapshot, "align-self"),
     placeSelf: computeHotNormalized(snapshot, "place-self"),
+    flexDirection: computeHotNormalized(snapshot, "flex-direction"),
+    gridAutoFlow: computeHotNormalized(snapshot, "grid-auto-flow"),
     writingMode: computeHotNormalized(snapshot, "writing-mode"),
     direction: computeHotNormalized(snapshot, "direction"),
     display: computeHotNormalized(snapshot, "display"),

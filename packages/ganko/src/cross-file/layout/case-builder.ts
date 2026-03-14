@@ -343,6 +343,8 @@ function resolveEffectiveAlignmentContext(
     parentAlignItems: parentContext.parentAlignItems,
     parentPlaceItems: parentContext.parentPlaceItems,
     hasPositionedOffset: parentContext.hasPositionedOffset,
+    crossAxisIsBlockAxis: parentContext.crossAxisIsBlockAxis,
+    crossAxisIsBlockAxisCertainty: parentContext.crossAxisIsBlockAxisCertainty,
     baselineRelevance: "irrelevant",
     evidence: parentContext.evidence,
   }

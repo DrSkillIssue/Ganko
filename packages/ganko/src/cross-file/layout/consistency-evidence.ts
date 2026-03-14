@@ -44,12 +44,12 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
     input.cohortProfile.medianDeclaredOffsetPx,
   )
 
-  const offset = normalizeDeviation(
+  const offsetRaw = normalizeDeviation(
     input.subjectEffectiveOffsetDeviation,
     input.cohortProfile.effectiveOffsetDispersionPx,
     effectiveOffsetScaleReference,
   )
-  const declaredOffset = normalizeDeviation(
+  const declaredOffsetRaw = normalizeDeviation(
     input.subjectDeclaredOffsetDeviation,
     input.cohortProfile.declaredOffsetDispersionPx,
     declaredOffsetScaleReference,
@@ -65,13 +65,18 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
   // never consulted. All baseline-dependent evidence factors are suppressed.
   // See `context-model.ts::BaselineRelevance` for CSS spec references.
   const baselinesIrrelevant = input.context.baselineRelevance === "irrelevant"
+  // When the block axis is the container's main axis (e.g. flex-direction: column),
+  // vertical offset differences are the layout algorithm's normal behavior.
+  // Suppress ALL evidence — offset, baseline, context, replaced, composition.
+  const blockAxisIsMainAxis = !input.context.crossAxisIsBlockAxis
+  const suppressAll = blockAxisIsMainAxis
+  const offset = suppressAll ? ZERO_STRENGTH : offsetRaw
+  const declaredOffset = suppressAll ? ZERO_STRENGTH : declaredOffsetRaw
 
-
-
-  const baselineStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
-  const contextStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
-  const replacedStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
-  const compositionStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContentCompositionStrength(input)
+  const baselineStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
+  const contextStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
+  const replacedStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
+  const compositionStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContentCompositionStrength(input)
   const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
   const provenance = input.cohortProvenance
   const atoms = buildEvidenceAtoms(

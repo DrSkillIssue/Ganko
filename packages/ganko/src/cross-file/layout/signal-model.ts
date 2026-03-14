@@ -28,6 +28,8 @@ export const layoutSignalNames = [
   "justify-items",
   "place-items",
   "place-self",
+  "flex-direction",
+  "grid-auto-flow",
   "appearance",
   "box-sizing",
   "padding-top",
@@ -187,6 +189,8 @@ export interface LayoutSnapshotHotSignals {
   readonly verticalAlign: HotNormalizedSignalEvidence
   readonly alignSelf: HotNormalizedSignalEvidence
   readonly placeSelf: HotNormalizedSignalEvidence
+  readonly flexDirection: HotNormalizedSignalEvidence
+  readonly gridAutoFlow: HotNormalizedSignalEvidence
   readonly writingMode: HotNormalizedSignalEvidence
   readonly direction: HotNormalizedSignalEvidence
   readonly display: HotNormalizedSignalEvidence

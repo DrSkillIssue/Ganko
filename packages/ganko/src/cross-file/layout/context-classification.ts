@@ -70,8 +70,7 @@ export function createAlignmentContextForParent(
   const certainty = combineCertainty(contextCertainty, inlineDirection.certainty)
 
   const baselineRelevance = computeBaselineRelevance(classified.kind, parentAlignItems, parentPlaceItems)
-
-
+  const crossAxisInfo = resolveCrossAxisIsBlockAxis(classified.kind, snapshot, axis.value)
 
   const out: AlignmentContext = {
     kind: classified.kind,
@@ -88,6 +87,8 @@ export function createAlignmentContextForParent(
     parentAlignItems,
     parentPlaceItems,
     hasPositionedOffset: positionedOffset.hasPositionedOffset,
+    crossAxisIsBlockAxis: crossAxisInfo.value,
+    crossAxisIsBlockAxisCertainty: crossAxisInfo.certainty,
     baselineRelevance,
     evidence,
   }
@@ -352,6 +353,45 @@ function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
   }
 }
 
+const FLEX_ROW_VALUES = new Set(["row", "row-reverse"])
+
+/**
+ * Determines whether the container's cross axis aligns with the document's
+ * block axis. `flex-direction` and `grid-auto-flow` values are already
+ * writing-mode-relative (`row` = inline axis, `column` = block axis), so
+ * no additional writing-mode branching is needed.
+ *
+ * - `flex-direction: row|row-reverse` → main = inline, cross = block → `true`
+ * - `flex-direction: column|column-reverse` → main = block, cross = inline → `false`
+ * - `grid-auto-flow: row` → row-major, block-axis alignment relevant → `true`
+ * - `grid-auto-flow: column` → column-major, block-axis is stacking direction → `false`
+ */
+function resolveCrossAxisIsBlockAxis(
+  kind: AlignmentContextKind,
+  snapshot: LayoutSignalSnapshot,
+  _axis: LayoutAxisModel,
+): { readonly value: boolean; readonly certainty: ContextCertainty } {
+  if (kind !== "flex-cross-axis" && kind !== "grid-cross-axis") {
+    return { value: true, certainty: "resolved" }
+  }
+
+  if (kind === "flex-cross-axis") {
+    const signal = readKnownSignalWithGuard(snapshot, "flex-direction")
+    if (!signal) {
+      return { value: true, certainty: "resolved" }
+    }
+    const certainty = resolveSignalCertainty(signal)
+    return { value: FLEX_ROW_VALUES.has(signal.normalized), certainty }
+  }
+
+  const signal = readKnownSignalWithGuard(snapshot, "grid-auto-flow")
+  if (!signal) {
+    return { value: true, certainty: "resolved" }
+  }
+  const certainty = resolveSignalCertainty(signal)
+  return { value: !signal.normalized.startsWith("column"), certainty }
+}
+
 function resolveSignalCertainty(
   value: ReturnType<typeof readKnownSignalWithGuard>,
 ): ContextCertainty {
@@ -478,6 +518,8 @@ export function finalizeTableCellBaselineRelevance(
       parentAlignItems: context.parentAlignItems,
       parentPlaceItems: context.parentPlaceItems,
       hasPositionedOffset: context.hasPositionedOffset,
+      crossAxisIsBlockAxis: context.crossAxisIsBlockAxis,
+      crossAxisIsBlockAxisCertainty: context.crossAxisIsBlockAxisCertainty,
       baselineRelevance: "irrelevant",
       evidence: context.evidence,
     })
