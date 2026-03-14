@@ -43,7 +43,7 @@ import { buildMeasurementNodeIndex } from "./measurement-node"
 import {
   type SelectorBuildMetadata,
   buildScopedSelectorIndexBySolidFile,
-  buildSelectorCandidatesByElementKey,
+  buildSelectorCandidatesByNode,
 } from "./selector-dispatch"
 import { buildStatefulRuleIndexes } from "./stateful-rule-index"
 import { layoutOffsetSignals } from "./offset-baseline"
@@ -52,6 +52,7 @@ import {
   collectMonitoredDeclarations,
   resolveRuleLayerOrder,
   appendMatchingEdgesFromSelectorIds,
+  type SelectorMatchContext,
   buildCascadeMapForElement,
   compareLayoutEdge,
   buildConditionalDeltaIndex,
@@ -238,23 +239,27 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     }
   }
 
-  const selectorCandidatesByElementKey = buildSelectorCandidatesByElementKey(elements, scopedSelectorsBySolidFile, perf)
+  const selectorCandidatesByNode = buildSelectorCandidatesByNode(elements, scopedSelectorsBySolidFile, perf)
+
+  const selectorMatchCtx: SelectorMatchContext = {
+    selectorMetadataById,
+    selectorsById,
+    rootElementsByFile,
+    perf,
+    logger,
+  }
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
-    const selectorIds = selectorCandidatesByElementKey.get(node.key) ?? EMPTY_NUMBER_LIST
+    const selectorIds = selectorCandidatesByNode.get(node) ?? EMPTY_NUMBER_LIST
     if (selectorIds.length === 0) continue
     appendMatchingEdgesFromSelectorIds(
+      selectorMatchCtx,
       selectorIds,
       node,
-      selectorMetadataById,
-      selectorsById,
       applies,
       appliesByElementNodeMutable,
-      perf,
-      rootElementsByFile,
-      logger,
     )
   }
 
@@ -265,7 +270,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     edges.sort(compareLayoutEdge)
   }
 
-  const appliesByElementKey = new Map<string, readonly LayoutMatchEdge[]>()
+  const appliesByNode = new Map<LayoutElementNode, readonly LayoutMatchEdge[]>()
 
   const tailwind = css.tailwind
   for (let i = 0; i < elements.length; i++) {
@@ -274,7 +279,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     const edges = appliesByElementNodeMutable.get(node) ?? []
     const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
     cascadeByElementNode.set(node, cascade)
-    appliesByElementKey.set(node.key, edges)
+    appliesByNode.set(node, edges)
   }
   perf.cascadeBuildMs = performance.now() - cascadeStartedAt
   const snapshotByElementNode = buildSignalSnapshotIndex(elements, cascadeByElementNode, perf)
@@ -283,7 +288,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const factIndex = buildElementFactIndex(elements, snapshotByElementNode)
   const conditionalDeltaIndex = buildConditionalDeltaIndex(
     elements,
-    appliesByElementKey,
+    appliesByNode,
     monitoredDeclarationsBySelectorId,
   )
   const elementsWithConditionalOverflowDelta = buildConditionalDeltaSignalGroupElements(
@@ -301,7 +306,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     contextByParentNode,
     measurementNodeByRootKey,
     snapshotByElementNode,
-    snapshotHotSignalsByElementKey: factIndex.snapshotHotSignalsByElementKey,
+    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
   })
 
   // Finalize table-cell baselineRelevance now that cohort vertical-align
@@ -325,11 +330,11 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     childrenByParentNode: childrenByParentNodeMutable,
     elementBySolidFileAndId: elementBySolidFileAndIdMutable,
     elementRefsBySolidFileAndId: elementRefsBySolidFileAndIdMutable,
-    appliesByElementKey,
-    selectorCandidatesByElementKey,
+    appliesByNode,
+    selectorCandidatesByNode,
     selectorsById,
     measurementNodeByRootKey,
-    snapshotHotSignalsByElementKey: factIndex.snapshotHotSignalsByElementKey,
+    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
     elementsByTagName: factIndex.elementsByTagName,
     elementsWithConditionalDeltaBySignal: conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     elementsWithConditionalOverflowDelta,
@@ -337,12 +342,12 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elementsByKnownSignalValue: factIndex.elementsByKnownSignalValue,
     dynamicSlotCandidateElements: factIndex.dynamicSlotCandidateElements,
     scrollContainerElements: factIndex.scrollContainerElements,
-    reservedSpaceFactsByElementKey: factIndex.reservedSpaceFactsByElementKey,
-    scrollContainerFactsByElementKey: factIndex.scrollContainerFactsByElementKey,
-    flowParticipationFactsByElementKey: factIndex.flowParticipationFactsByElementKey,
-    containingBlockFactsByElementKey: factIndex.containingBlockFactsByElementKey,
-    conditionalSignalDeltaFactsByElementKey: conditionalDeltaIndex.conditionalSignalDeltaFactsByElementKey,
-    baselineOffsetFactsByElementKey: conditionalDeltaIndex.baselineOffsetFactsByElementKey,
+    reservedSpaceFactsByNode: factIndex.reservedSpaceFactsByNode,
+    scrollContainerFactsByNode: factIndex.scrollContainerFactsByNode,
+    flowParticipationFactsByNode: factIndex.flowParticipationFactsByNode,
+    containingBlockFactsByNode: factIndex.containingBlockFactsByNode,
+    conditionalSignalDeltaFactsByNode: conditionalDeltaIndex.conditionalSignalDeltaFactsByNode,
+    baselineOffsetFactsByNode: conditionalDeltaIndex.baselineOffsetFactsByNode,
     statefulSelectorEntriesByRuleId: statefulRuleIndexes.selectorEntriesByRuleId,
     statefulNormalizedDeclarationsByRuleId: statefulRuleIndexes.normalizedDeclarationsByRuleId,
     statefulBaseValueIndex: statefulRuleIndexes.baseValueIndex,
@@ -355,12 +360,12 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 }
 
 interface ElementFactIndex {
-  readonly reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>
-  readonly scrollContainerFactsByElementKey: ReadonlyMap<string, LayoutScrollContainerFact>
+  readonly reservedSpaceFactsByNode: ReadonlyMap<LayoutElementNode, LayoutReservedSpaceFact>
+  readonly scrollContainerFactsByNode: ReadonlyMap<LayoutElementNode, LayoutScrollContainerFact>
   readonly scrollContainerElements: readonly LayoutElementNode[]
-  readonly flowParticipationFactsByElementKey: ReadonlyMap<string, LayoutFlowParticipationFact>
-  readonly containingBlockFactsByElementKey: ReadonlyMap<string, LayoutContainingBlockFact>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly flowParticipationFactsByNode: ReadonlyMap<LayoutElementNode, LayoutFlowParticipationFact>
+  readonly containingBlockFactsByNode: ReadonlyMap<LayoutElementNode, LayoutContainingBlockFact>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
   readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
   readonly elementsByKnownSignalValue: ReadonlyMap<LayoutSignalName, ReadonlyMap<string, readonly LayoutElementNode[]>>
   readonly dynamicSlotCandidateElements: readonly LayoutElementNode[]
@@ -370,11 +375,11 @@ function buildElementFactIndex(
   elements: readonly LayoutElementNode[],
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
 ): ElementFactIndex {
-  const reservedSpaceFactsByElementKey = new Map<string, LayoutReservedSpaceFact>()
-  const scrollContainerFactsByElementKey = new Map<string, LayoutScrollContainerFact>()
-  const flowParticipationFactsByElementKey = new Map<string, LayoutFlowParticipationFact>()
-  const containingBlockFactsByElementKey = new Map<string, LayoutContainingBlockFact>()
-  const snapshotHotSignalsByElementKey = new Map<string, LayoutSnapshotHotSignals>()
+  const reservedSpaceFactsByNode = new Map<LayoutElementNode, LayoutReservedSpaceFact>()
+  const scrollContainerFactsByNode = new Map<LayoutElementNode, LayoutScrollContainerFact>()
+  const flowParticipationFactsByNode = new Map<LayoutElementNode, LayoutFlowParticipationFact>()
+  const containingBlockFactsByNode = new Map<LayoutElementNode, LayoutContainingBlockFact>()
+  const snapshotHotSignalsByNode = new Map<LayoutElementNode, LayoutSnapshotHotSignals>()
   const elementsByTagName = new Map<string, LayoutElementNode[]>()
   const elementsByKnownSignalValue = new Map<LayoutSignalName, Map<string, LayoutElementNode[]>>()
   const dynamicSlotCandidateElements: LayoutElementNode[] = []
@@ -411,7 +416,7 @@ function buildElementFactIndex(
       }
     }
 
-    containingBlockFactsByElementKey.set(node.key, {
+    containingBlockFactsByNode.set(node, {
       nearestPositionedAncestorKey,
       nearestPositionedAncestorHasReservedSpace,
     })
@@ -419,12 +424,12 @@ function buildElementFactIndex(
     if (!snapshot) continue
 
     const reservedSpaceFact = computeReservedSpaceFact(snapshot)
-    reservedSpaceFactsByElementKey.set(node.key, reservedSpaceFact)
+    reservedSpaceFactsByNode.set(node, reservedSpaceFact)
     const scrollFact = computeScrollContainerFact(snapshot)
-    scrollContainerFactsByElementKey.set(node.key, scrollFact)
+    scrollContainerFactsByNode.set(node, scrollFact)
     if (scrollFact.isScrollContainer) scrollContainerElements.push(node)
-    flowParticipationFactsByElementKey.set(node.key, computeFlowParticipationFact(snapshot))
-    snapshotHotSignalsByElementKey.set(node.key, computeHotSignals(snapshot))
+    flowParticipationFactsByNode.set(node, computeFlowParticipationFact(snapshot))
+    snapshotHotSignalsByNode.set(node, computeHotSignals(snapshot))
 
     const positionSignal = snapshot.signals.get("position")
     const isPositioned = positionSignal !== undefined
@@ -460,12 +465,12 @@ function buildElementFactIndex(
   }
 
   return {
-    reservedSpaceFactsByElementKey,
-    scrollContainerFactsByElementKey,
+    reservedSpaceFactsByNode,
+    scrollContainerFactsByNode,
     scrollContainerElements,
-    flowParticipationFactsByElementKey,
-    containingBlockFactsByElementKey,
-    snapshotHotSignalsByElementKey,
+    flowParticipationFactsByNode,
+    containingBlockFactsByNode,
+    snapshotHotSignalsByNode,
     elementsByTagName,
     elementsByKnownSignalValue,
     dynamicSlotCandidateElements,

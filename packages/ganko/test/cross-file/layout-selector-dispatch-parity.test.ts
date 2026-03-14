@@ -52,7 +52,7 @@ function collectActualSelectorIdsByElement(layout: LayoutGraph, solidFile: strin
   for (const element of layout.elements) {
     if (element.solidFile !== solidFile) continue;
 
-    const edges = layout.appliesByElementKey.get(element.key) ?? [];
+    const edges = layout.appliesByNode.get(element) ?? [];
     const ids: number[] = [];
     for (const edge of edges) {
       ids.push(edge.selectorId);

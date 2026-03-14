@@ -15,12 +15,12 @@ function assertSorted(values: readonly number[]): void {
 
 function assertPrecomputedIndexes(layout: ReturnType<typeof buildLayoutGraph>): void {
   for (const element of layout.elements) {
-    expect(layout.snapshotHotSignalsByElementKey.has(element.key)).toBe(true);
+    expect(layout.snapshotHotSignalsByNode.has(element)).toBe(true);
 
     const scope = layout.cssScopeBySolidFile.get(element.solidFile) ?? [];
     if (scope.length === 0 || element.tagName === null) continue;
 
-    const candidates = layout.selectorCandidatesByElementKey.get(element.key);
+    const candidates = layout.selectorCandidatesByNode.get(element);
     expect(candidates).toBeDefined();
     if (!candidates) continue;
     assertSorted(candidates);

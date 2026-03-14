@@ -215,28 +215,28 @@ export function readReservedSpaceFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutReservedSpaceFact {
-  return graph.reservedSpaceFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
+  return graph.reservedSpaceFactsByNode.get(node) ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
 }
 
 export function readScrollContainerFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutScrollContainerFact {
-  return graph.scrollContainerFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
+  return graph.scrollContainerFactsByNode.get(node) ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
 }
 
 export function readFlowParticipationFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutFlowParticipationFact {
-  return graph.flowParticipationFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
+  return graph.flowParticipationFactsByNode.get(node) ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
 }
 
 export function readContainingBlockFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutContainingBlockFact {
-  return graph.containingBlockFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
+  return graph.containingBlockFactsByNode.get(node) ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
 }
 
 export function readConditionalSignalDeltaFact(
@@ -244,7 +244,7 @@ export function readConditionalSignalDeltaFact(
   node: LayoutElementNode,
   name: LayoutSignalName,
 ): LayoutConditionalSignalDeltaFact {
-  const byProperty = graph.conditionalSignalDeltaFactsByElementKey.get(node.key)
+  const byProperty = graph.conditionalSignalDeltaFactsByNode.get(node)
   if (!byProperty) return EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
   return byProperty.get(name) ?? EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
 }
@@ -290,7 +290,7 @@ export function readBaselineOffsetFacts(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): ReadonlyMap<LayoutSignalName, readonly number[]> {
-  return graph.baselineOffsetFactsByElementKey.get(node.key) ?? EMPTY_BASELINE_FACTS
+  return graph.baselineOffsetFactsByNode.get(node) ?? EMPTY_BASELINE_FACTS
 }
 
 export function readElementRef(graph: LayoutGraph, node: LayoutElementNode): LayoutElementRef | null {

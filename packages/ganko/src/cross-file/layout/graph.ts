@@ -158,21 +158,21 @@ export interface LayoutGraphCascade {
   readonly styleRules: readonly LayoutStyleRuleNode[]
   readonly applies: readonly LayoutMatchEdge[]
   readonly cssScopeBySolidFile: ReadonlyMap<string, readonly string[]>
-  readonly appliesByElementKey: ReadonlyMap<string, readonly LayoutMatchEdge[]>
-  readonly selectorCandidatesByElementKey: ReadonlyMap<string, readonly number[]>
+  readonly appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>
+  readonly selectorCandidatesByNode: ReadonlyMap<LayoutElementNode, readonly number[]>
   readonly selectorsById: ReadonlyMap<number, SelectorEntity>
   readonly cascadeByElementNode: WeakMap<LayoutElementNode, ReadonlyMap<string, LayoutCascadedDeclaration>>
   readonly snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
 }
 
 export interface LayoutGraphFacts {
-  readonly reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>
-  readonly scrollContainerFactsByElementKey: ReadonlyMap<string, LayoutScrollContainerFact>
-  readonly flowParticipationFactsByElementKey: ReadonlyMap<string, LayoutFlowParticipationFact>
-  readonly containingBlockFactsByElementKey: ReadonlyMap<string, LayoutContainingBlockFact>
-  readonly conditionalSignalDeltaFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
-  readonly baselineOffsetFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, readonly number[]>>
+  readonly reservedSpaceFactsByNode: ReadonlyMap<LayoutElementNode, LayoutReservedSpaceFact>
+  readonly scrollContainerFactsByNode: ReadonlyMap<LayoutElementNode, LayoutScrollContainerFact>
+  readonly flowParticipationFactsByNode: ReadonlyMap<LayoutElementNode, LayoutFlowParticipationFact>
+  readonly containingBlockFactsByNode: ReadonlyMap<LayoutElementNode, LayoutContainingBlockFact>
+  readonly conditionalSignalDeltaFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
+  readonly baselineOffsetFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>
 }
 
 export interface LayoutGraphCohorts {

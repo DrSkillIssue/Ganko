@@ -136,12 +136,12 @@ export function buildScopedSelectorIndexBySolidFile(
   return out
 }
 
-export function buildSelectorCandidatesByElementKey(
+export function buildSelectorCandidatesByNode(
   elements: readonly LayoutElementNode[],
   scopedSelectorsBySolidFile: ReadonlyMap<string, ScopedSelectorIndex>,
   perf: LayoutPerfStatsMutable,
-): ReadonlyMap<string, readonly number[]> {
-  const out = new Map<string, readonly number[]>()
+): ReadonlyMap<LayoutElementNode, readonly number[]> {
+  const out = new Map<LayoutElementNode, readonly number[]>()
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
@@ -156,7 +156,7 @@ export function buildSelectorCandidatesByElementKey(
     const withoutTag = collectSelectorCandidates(scoped.withoutSubjectTag, node.selectorDispatchKeys)
     const merged = mergeSelectorCandidateIds(byTag, withoutTag)
 
-    out.set(node.key, merged)
+    out.set(node, merged)
     perf.elementsScanned++
     perf.selectorCandidatesChecked += merged.length
   }

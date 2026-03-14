@@ -79,7 +79,7 @@ export function computeContentCompositionFingerprint(
   elementNode: LayoutElementNode,
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>,
+  snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>,
 ): ContentCompositionFingerprint {
   const state: FingerprintWalkState = {
     hasTextContent: false,
@@ -99,7 +99,7 @@ export function computeContentCompositionFingerprint(
     state.hasTextContent = true
   }
 
-  const elementHotSignals = snapshotHotSignalsByElementKey.get(elementNode.key)
+  const elementHotSignals = snapshotHotSignalsByNode.get(elementNode)
   const elementDisplay = elementHotSignals?.display.value ?? null
 
   // When the element itself establishes its own formatting context — whether
@@ -128,7 +128,7 @@ export function computeContentCompositionFingerprint(
     elementNode,
     childrenByParentNode,
     snapshotByElementNode,
-    snapshotHotSignalsByElementKey,
+    snapshotHotSignalsByNode,
     state,
     0,
   )
@@ -157,7 +157,7 @@ function walkInlineDescendants(
   node: LayoutElementNode,
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>,
+  snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>,
   state: FingerprintWalkState,
   depth: number,
 ): void {
@@ -175,7 +175,7 @@ function walkInlineDescendants(
     if (depth === 0) state.analyzableChildCount++
 
     const childTag = child.tagName?.toLowerCase() ?? null
-    const hotSignals = snapshotHotSignalsByElementKey.get(child.key)
+    const hotSignals = snapshotHotSignalsByNode.get(child)
     const childDisplay = hotSignals?.display.value ?? null
 
     if (childTag !== null && (isIntrinsicReplacedTag(childTag) || isControlReplacedTag(childTag))) {
@@ -213,12 +213,12 @@ function walkInlineDescendants(
       //    with `display: inline-flex; align-items: center` containing label text
       //    and an icon. A leaf element (e.g., a badge containing only text) does
       //    NOT mitigate, because it IS the inline-replaced element causing the shift.
-      const parentHotSignals = snapshotHotSignalsByElementKey.get(node.key)
+      const parentHotSignals = snapshotHotSignalsByNode.get(node)
       const parentDisplay = parentHotSignals?.display.value ?? null
       if (parentDisplay !== null && isAlignmentContextWithNonBaselineAlignment(parentDisplay, parentHotSignals)) {
         state.wrappingContextMitigates = true
       } else if (isAlignmentContextWithNonBaselineAlignment(childDisplay, hotSignals)
-        && containsMixedContent(child, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByElementKey)) {
+        && containsMixedContent(child, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByNode)) {
         state.wrappingContextMitigates = true
       }
 
@@ -237,7 +237,7 @@ function walkInlineDescendants(
         child,
         childrenByParentNode,
         snapshotByElementNode,
-        snapshotHotSignalsByElementKey,
+        snapshotHotSignalsByNode,
         state,
         depth + 1,
       )
@@ -301,18 +301,18 @@ function containsMixedContent(
   node: LayoutElementNode,
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>,
+  snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>,
 ): boolean {
   const hasText = node.textualContent === LayoutTextualContentState.Yes || node.textualContent === LayoutTextualContentState.DynamicText
   const hasReplaced = false
-  return scanMixedContent(node, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByElementKey, { hasText, hasReplaced })
+  return scanMixedContent(node, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByNode, { hasText, hasReplaced })
 }
 
 function scanMixedContent(
   node: LayoutElementNode,
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>,
+  snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>,
   found: { hasText: boolean; hasReplaced: boolean },
 ): boolean {
   const children = childrenByParentNode.get(node)
@@ -322,7 +322,7 @@ function scanMixedContent(
     const child = children[i]
     if (!child) continue
     const childTag = child.tagName?.toLowerCase() ?? null
-    const hotSignals = snapshotHotSignalsByElementKey.get(child.key)
+    const hotSignals = snapshotHotSignalsByNode.get(child)
     const childDisplay = hotSignals?.display.value ?? null
 
     if (childTag !== null && (isIntrinsicReplacedTag(childTag) || isControlReplacedTag(childTag))) {
@@ -347,7 +347,7 @@ function scanMixedContent(
     }
 
     if (childDisplay === null || isInlineContinuationDisplay(childDisplay)) {
-      if (scanMixedContent(child, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByElementKey, found)) {
+      if (scanMixedContent(child, childrenByParentNode, snapshotByElementNode, snapshotHotSignalsByNode, found)) {
         return true
       }
     }

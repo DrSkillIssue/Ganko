@@ -123,31 +123,35 @@ export function expandMonitoredDeclarationForDelta(
   return [{ name: signalName, value }]
 }
 
+export interface SelectorMatchContext {
+  readonly selectorMetadataById: ReadonlyMap<number, SelectorBuildMetadata>
+  readonly selectorsById: ReadonlyMap<number, SelectorEntity>
+  readonly rootElementsByFile: ReadonlyMap<string, readonly LayoutElementNode[]>
+  readonly perf: LayoutPerfStatsMutable
+  readonly logger: Logger
+}
+
 export function appendMatchingEdgesFromSelectorIds(
+  ctx: SelectorMatchContext,
   selectorIds: readonly number[],
   node: LayoutElementNode,
-  selectorMetadataById: ReadonlyMap<number, SelectorBuildMetadata>,
-  selectorsById: ReadonlyMap<number, SelectorEntity>,
   applies: LayoutMatchEdge[],
   appliesByElementNodeMutable: Map<LayoutElementNode, LayoutMatchEdge[]>,
-  perf: LayoutPerfStatsMutable,
-  rootElementsByFile: ReadonlyMap<string, readonly LayoutElementNode[]>,
-  logger: Logger,
 ): void {
-  const fileRoots = rootElementsByFile.get(node.solidFile) ?? null
+  const fileRoots = ctx.rootElementsByFile.get(node.solidFile) ?? null
   for (let i = 0; i < selectorIds.length; i++) {
     const selectorId = selectorIds[i]
     if (selectorId === undefined) continue
-    const metadata = selectorMetadataById.get(selectorId)
+    const metadata = ctx.selectorMetadataById.get(selectorId)
     if (!metadata || !metadata.matcher) {
       throw new Error(`missing compiled selector matcher for selector ${selectorId}`)
     }
-    const selector = selectorsById.get(selectorId)
+    const selector = ctx.selectorsById.get(selectorId)
     if (!selector) {
       throw new Error(`missing selector ${selectorId}`)
     }
 
-    if (!selectorMatchesLayoutElement(metadata.matcher, node, perf, fileRoots, logger)) continue
+    if (!selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)) continue
 
     const edge: LayoutMatchEdge = {
       solidFile: node.solidFile,
@@ -158,7 +162,7 @@ export function appendMatchingEdgesFromSelectorIds(
       sourceOrder: selector.rule.sourceOrder,
     }
     applies.push(edge)
-    perf.matchEdgesCreated++
+    ctx.perf.matchEdgesCreated++
 
     const existing = appliesByElementNodeMutable.get(node)
     if (existing) {
@@ -380,25 +384,25 @@ export function resolveRuleLayerOrder(rule: RuleEntity, css: CSSGraph): number {
 }
 
 export interface ConditionalDeltaIndex {
-  readonly conditionalSignalDeltaFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
+  readonly conditionalSignalDeltaFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
   readonly elementsWithConditionalDeltaBySignal: ReadonlyMap<LayoutSignalName, readonly LayoutElementNode[]>
-  readonly baselineOffsetFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, readonly number[]>>
+  readonly baselineOffsetFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>
 }
 
 export function buildConditionalDeltaIndex(
   elements: readonly LayoutElementNode[],
-  appliesByElementKey: ReadonlyMap<string, readonly LayoutMatchEdge[]>,
+  appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>,
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
 ): ConditionalDeltaIndex {
-  const conditionalSignalDeltaFactsByElementKey = new Map<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>()
+  const conditionalSignalDeltaFactsByNode = new Map<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>()
   const elementsWithConditionalDeltaBySignal = new Map<LayoutSignalName, LayoutElementNode[]>()
-  const baselineOffsetFactsByElementKey = new Map<string, ReadonlyMap<LayoutSignalName, readonly number[]>>()
+  const baselineOffsetFactsByNode = new Map<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>()
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
 
-    const edges = appliesByElementKey.get(node.key)
+    const edges = appliesByNode.get(node)
     let factByProperty: ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact> | null = null
 
     if (edges !== undefined && edges.length > 0) {
@@ -472,7 +476,7 @@ export function buildConditionalDeltaIndex(
 
         if (facts.size > 0) {
           factByProperty = facts
-          conditionalSignalDeltaFactsByElementKey.set(node.key, facts)
+          conditionalSignalDeltaFactsByNode.set(node, facts)
 
           for (const [signal, fact] of facts) {
             if (!fact.hasConditional) continue
@@ -515,14 +519,14 @@ export function buildConditionalDeltaIndex(
     }
 
     if (baselineBySignal.size > 0) {
-      baselineOffsetFactsByElementKey.set(node.key, baselineBySignal)
+      baselineOffsetFactsByNode.set(node, baselineBySignal)
     }
   }
 
   return {
-    conditionalSignalDeltaFactsByElementKey,
+    conditionalSignalDeltaFactsByNode,
     elementsWithConditionalDeltaBySignal,
-    baselineOffsetFactsByElementKey,
+    baselineOffsetFactsByNode,
   }
 }
 

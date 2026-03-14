@@ -102,7 +102,7 @@ export function buildCohortIndex(input: {
   readonly contextByParentNode: ReadonlyMap<LayoutElementNode, AlignmentContext>
   readonly measurementNodeByRootKey: ReadonlyMap<string, LayoutElementNode>
   readonly snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
 }): CohortIndex {
   const statsByParentNode = new Map<LayoutElementNode, LayoutCohortStats>()
   const verticalAlignConsensusByParent = new Map<LayoutElementNode, string | null>()
@@ -127,7 +127,7 @@ export function buildCohortIndex(input: {
       axisCertainty: context.axisCertainty,
       measurementNodeByRootKey: input.measurementNodeByRootKey,
       snapshotByElementNode: input.snapshotByElementNode,
-      snapshotHotSignalsByElementKey: input.snapshotHotSignalsByElementKey,
+      snapshotHotSignalsByNode: input.snapshotHotSignalsByNode,
     })
     measurementIndexHits += cohortMetricsResult.measurementHits
 
@@ -165,7 +165,7 @@ export function buildCohortIndex(input: {
         subjectMetrics.rootNode,
         input.childrenByParentNode,
         input.snapshotByElementNode,
-        input.snapshotHotSignalsByElementKey,
+        input.snapshotHotSignalsByNode,
       )
 
       subjectsByElementKey.set(subjectMetrics.key, {
@@ -237,7 +237,7 @@ function collectCohortMetrics(input: {
   readonly axisCertainty: ContextCertainty
   readonly measurementNodeByRootKey: ReadonlyMap<string, LayoutElementNode>
   readonly snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
 }): {
   readonly metrics: readonly CohortMetrics[]
   readonly excludedElementKeys: ReadonlySet<string>
@@ -277,7 +277,7 @@ function collectCohortMetrics(input: {
       throw new Error(`missing snapshot for measurement node ${measurementNode.key}`)
     }
 
-    const hotSignals = input.snapshotHotSignalsByElementKey.get(measurementNode.key)
+    const hotSignals = input.snapshotHotSignalsByNode.get(measurementNode)
     if (!hotSignals) {
       throw new Error(`missing hot signals for measurement node ${measurementNode.key}`)
     }
