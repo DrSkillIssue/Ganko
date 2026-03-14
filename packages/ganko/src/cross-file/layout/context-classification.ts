@@ -11,8 +11,9 @@ import {
 import type { LayoutElementNode, LayoutElementRef } from "./graph"
 import { EvidenceValueKind, LayoutSignalGuard, type LayoutSignalSnapshot } from "./signal-model"
 import { readKnownSignalWithGuard, readNormalizedSignalEvidence } from "./signal-access"
+import { WHITESPACE_RE } from "./util"
 
-const WHITESPACE_RE = /\s+/
+
 const TABLE_SEMANTIC_TAGS = new Set(["table", "thead", "tbody", "tfoot", "tr", "td", "th"])
 const TABLE_DISPLAY_VALUES = new Set([
   "table",
@@ -29,7 +30,7 @@ const TABLE_DISPLAY_VALUES = new Set([
 const FLEX_DISPLAY_VALUES = new Set(["flex", "inline-flex"])
 const GRID_DISPLAY_VALUES = new Set(["grid", "inline-grid"])
 const INLINE_DISPLAY_VALUES = new Set(["inline", "inline-block", "inline-list-item"])
-const DISPLAY_TOKEN_SPLIT_RE = /\s+/
+
 
 export function classifyAlignmentContext(
   context: CrossRuleContext,
@@ -216,7 +217,7 @@ function resolveContainerKind(
     }
   }
 
-  const tokens = display.split(DISPLAY_TOKEN_SPLIT_RE)
+  const tokens = display.split(WHITESPACE_RE)
   if (tokens.length === 2) {
     const outside = tokens[0]
     const inside = tokens[1]

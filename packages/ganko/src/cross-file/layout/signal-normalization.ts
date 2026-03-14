@@ -79,7 +79,9 @@ const KEYWORD_SIGNAL_SET = new Set<LayoutSignalName>([
   "direction",
 ])
 
-const REPLACED_TAGS = new Set(["input", "select", "textarea", "button", "img", "video", "canvas", "svg", "iframe"])
+const REPLACED_ELEMENT_TAGS: ReadonlySet<string> = new Set([
+  ...CONTROL_ELEMENT_TAGS, "img", "video", "canvas", "svg", "iframe",
+])
 
 export interface NormalizedSignalMap {
   readonly signals: ReadonlyMap<LayoutSignalName, LayoutSignalValue>
@@ -104,7 +106,7 @@ export function isControlTag(tag: string | null): boolean {
 
 export function isReplacedTag(tag: string | null): boolean {
   if (tag === null) return false
-  return REPLACED_TAGS.has(tag.toLowerCase())
+  return REPLACED_ELEMENT_TAGS.has(tag.toLowerCase())
 }
 
 export function normalizeSignalMap(

@@ -9,13 +9,11 @@ import type { Logger } from "@drskillissue/ganko-shared"
 import type {
   LayoutCascadedDeclaration,
   LayoutConditionalSignalDeltaFact,
-  LayoutContainingBlockFact,
   LayoutElementNode,
   LayoutMatchEdge,
-  LayoutReservedSpaceFact,
 } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import { LayoutSignalGuard, LayoutSignalSource, type LayoutGuardProvenance, type LayoutSignalName, type LayoutSignalSnapshot } from "./signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, type LayoutGuardProvenance, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
 import type { LayoutRuleGuard } from "./guard-model"
@@ -379,47 +377,6 @@ export function resolveRuleLayerOrder(rule: RuleEntity, css: CSSGraph): number {
   const name = layer.parsedParams.layerName
   if (!name) return 0
   return css.layerOrder.get(name) ?? 0
-}
-
-export function buildContainingBlockFactsByElementKey(
-  elements: readonly LayoutElementNode[],
-  snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>,
-): ReadonlyMap<string, LayoutContainingBlockFact> {
-  const out = new Map<string, LayoutContainingBlockFact>()
-
-  for (let i = 0; i < elements.length; i++) {
-    const node = elements[i]
-    if (!node) continue
-    let current = node.parentElementNode
-    let positionedAncestorKey: string | null = null
-    let positionedAncestorHasReservedSpace = false
-
-    while (current) {
-      const snapshot = snapshotByElementNode.get(current)
-      if (!snapshot) {
-        current = current.parentElementNode
-        continue
-      }
-
-      const position = snapshot.signals.get("position")
-      if (position && position.kind === "known" && position.normalized !== "static") {
-        positionedAncestorKey = current.key
-        const reserved = reservedSpaceFactsByElementKey.get(current.key)
-        positionedAncestorHasReservedSpace = reserved?.hasReservedSpace ?? false
-        break
-      }
-
-      current = current.parentElementNode
-    }
-
-    out.set(node.key, {
-      nearestPositionedAncestorKey: positionedAncestorKey,
-      nearestPositionedAncestorHasReservedSpace: positionedAncestorHasReservedSpace,
-    })
-  }
-
-  return out
 }
 
 export interface ConditionalDeltaIndex {

@@ -8,6 +8,12 @@ export const CONTROL_ELEMENT_TAGS: ReadonlySet<string> = new Set([
   "input", "select", "textarea", "button",
 ])
 
+export const INTRINSIC_REPLACED_TAGS: ReadonlySet<string> = new Set([
+  "img", "svg", "video", "canvas", "iframe", "object", "embed",
+])
+
+export const WHITESPACE_RE = /\s+/
+
 export function clamp(value: number, min: number, max: number): number {
   if (value < min) return min
   if (value > max) return max

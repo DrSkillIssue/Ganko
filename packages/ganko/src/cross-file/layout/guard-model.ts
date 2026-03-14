@@ -26,7 +26,7 @@ const UNCONDITIONAL_GUARD: LayoutRuleGuard = {
   key: "always",
 }
 
-const WHITESPACE_RE = /\s+/g
+const WHITESPACE_RE_GLOBAL = /\s+/g
 
 export function resolveRuleGuard(rule: RuleEntity): LayoutRuleGuard {
   const conditions = collectRuleConditions(rule)
@@ -97,7 +97,7 @@ function buildCondition(kind: LayoutGuardConditionKind, query: string | null): L
 
 function normalizeQuery(query: string | null): string | null {
   if (query === null) return null
-  const normalized = query.trim().toLowerCase().replace(WHITESPACE_RE, " ")
+  const normalized = query.trim().toLowerCase().replace(WHITESPACE_RE_GLOBAL, " ")
   if (normalized.length === 0) return null
   return normalized
 }

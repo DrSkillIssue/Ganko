@@ -1,6 +1,6 @@
 import type { AlignmentContext } from "./context-model"
 import type { LayoutElementNode } from "./graph"
-import { CONTROL_ELEMENT_TAGS } from "./util"
+import { CONTROL_ELEMENT_TAGS, INTRINSIC_REPLACED_TAGS } from "./util"
 import {
   ContentCompositionClassification,
   LayoutTextualContentState,
@@ -11,14 +11,6 @@ import {
   type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { alignmentStrengthCalibration } from "./calibration"
-
-/**
- * Tags that are intrinsically-replaced elements in the CSS rendering model.
- * Their baseline is their bottom margin edge (not a text baseline).
- */
-const INTRINSIC_REPLACED_TAGS: ReadonlySet<string> = new Set([
-  "img", "svg", "video", "canvas", "iframe", "object", "embed",
-])
 
 /**
  * Display values that establish a block formatting context boundary.
