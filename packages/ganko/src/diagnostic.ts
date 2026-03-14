@@ -97,6 +97,7 @@ export function createDiagnosticFromLoc(
   message: string,
   severity: DiagnosticSeverity,
   fix?: Fix,
+  suggest?: readonly Suggestion[],
 ): Diagnostic {
   const result: { -readonly [K in keyof Diagnostic]: Diagnostic[K] } = {
     file,
@@ -107,6 +108,7 @@ export function createDiagnosticFromLoc(
     loc: firstLine(loc),
   }
   if (fix !== undefined) result.fix = fix
+  if (suggest !== undefined && suggest.length > 0) result.suggest = suggest
   return result
 }
 
@@ -121,8 +123,9 @@ export function createDiagnosticFromComment(
   message: string,
   severity: DiagnosticSeverity,
   fix?: Fix,
+  suggest?: readonly Suggestion[],
 ): Diagnostic {
-  return createDiagnosticFromLoc(file, comment.loc, rule, messageId, message, severity, fix)
+  return createDiagnosticFromLoc(file, comment.loc, rule, messageId, message, severity, fix, suggest)
 }
 
 /**
@@ -136,6 +139,7 @@ export function createDiagnostic(
   message: string,
   severity: DiagnosticSeverity,
   fix?: Fix,
+  suggest?: readonly Suggestion[],
 ): Diagnostic {
-  return createDiagnosticFromLoc(file, node.loc, rule, messageId, message, severity, fix)
+  return createDiagnosticFromLoc(file, node.loc, rule, messageId, message, severity, fix, suggest)
 }

@@ -2006,4 +2006,82 @@ describe("resource-implicit-suspense", () => {
       expect(messageIds).toContain("missingErrorBoundary")
     })
   })
+
+  describe("FIX: ErrorBoundary wrapping (missingErrorBoundary)", () => {
+    it("auto-fixes by wrapping component usage in ErrorBoundary", () => {
+      const code = `import { createResource } from "solid-js";
+function CountryForm() {
+  const [countries] = createResource(async () => {
+    const res = await fetch("/api/countries");
+    return res.json();
+  }, { initialValue: [] });
+  return <ul>{countries()}</ul>;
+}
+function Page() {
+  return (
+    <Suspense fallback={<div />}>
+      <CountryForm />
+    </Suspense>
+  );
+}`
+      const { diagnostics } = check(code)
+      expect(diagnostics).toHaveLength(1)
+      expect(at(diagnostics, 0).messageId).toBe("missingErrorBoundary")
+      expect(at(diagnostics, 0).fix).toBeDefined()
+
+      const fixed = applyAllFixes(code, diagnostics)
+      expect(fixed).toContain("<ErrorBoundary fallback={<div>Error</div>}>")
+      expect(fixed).toContain("</ErrorBoundary>")
+      expect(fixed).toContain("<ErrorBoundary fallback={<div>Error</div>}><CountryForm /></ErrorBoundary>")
+    })
+
+    it("adds ErrorBoundary import when not present", () => {
+      const code = `import { createResource } from "solid-js";
+function CountryForm() {
+  const [countries] = createResource(async () => {
+    const res = await fetch("/api/countries");
+    return res.json();
+  }, { initialValue: [] });
+  return <ul>{countries()}</ul>;
+}
+function Page() {
+  return (
+    <Suspense fallback={<div />}>
+      <CountryForm />
+    </Suspense>
+  );
+}`
+      const { diagnostics } = check(code)
+      const fixed = applyAllFixes(code, diagnostics)
+      expect(fixed).toContain("ErrorBoundary")
+      // Verify it imported ErrorBoundary into solid-js imports
+      expect(fixed).toContain(", ErrorBoundary")
+    })
+  })
+
+  describe("FIX: missingErrorBoundary has auto-fix only", () => {
+    it("missingErrorBoundary has fix but no suggestion", () => {
+      const code = `import { createResource } from "solid-js";
+function CountryForm() {
+  const [countries] = createResource(async () => {
+    const res = await fetch("/api/countries");
+    return res.json();
+  }, { initialValue: [] });
+  return <ul>{countries()}</ul>;
+}
+function Page() {
+  return (
+    <Suspense fallback={<div />}>
+      <CountryForm />
+    </Suspense>
+  );
+}`
+      const { diagnostics } = check(code)
+      expect(diagnostics).toHaveLength(1)
+      const diag = at(diagnostics, 0)
+      expect(diag.messageId).toBe("missingErrorBoundary")
+      expect(diag.fix).toBeDefined()
+      expect(diag.suggest).toBeUndefined()
+    })
+  })
 })

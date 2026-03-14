@@ -73,3 +73,18 @@ export function applyAllFixes(code: string, diagnostics: readonly Diagnostic[]):
   }
   return result
 }
+
+/**
+ * Apply the fix from a specific suggestion on a diagnostic.
+ */
+export function applySuggestion(code: string, diagnostic: Diagnostic, suggestionIndex: number): string {
+  if (!diagnostic.suggest) throw new Error("Diagnostic has no suggestions")
+  const suggestion = diagnostic.suggest[suggestionIndex]
+  if (!suggestion) throw new Error(`No suggestion at index ${suggestionIndex}`)
+  const ops = suggestion.fix.toSorted((a, b) => b.range[0] - a.range[0])
+  let result = code
+  for (const op of ops) {
+    result = result.slice(0, op.range[0]) + op.text + result.slice(op.range[1])
+  }
+  return result
+}

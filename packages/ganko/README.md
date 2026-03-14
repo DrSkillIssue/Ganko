@@ -301,7 +301,7 @@ Totals:
 
 - 164 rules total
 - 101 Solid rules, 33 CSS rules, 30 cross-file rules
-- 23 fixable rules
+- 24 fixable rules
 
 Category breakdown:
 
