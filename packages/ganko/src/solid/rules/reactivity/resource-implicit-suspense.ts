@@ -219,59 +219,38 @@ function fetcherCanThrow(
 }
 
 /**
- * Check if a component lacks an ErrorBoundary between it and the nearest Suspense.
+ * Result of analyzing a component's JSX ancestry for boundary hazards.
  *
- * Walks the JSX parent chain from each usage of the component. Returns true if
- * ANY usage site has a Suspense ancestor without an intervening ErrorBoundary,
- * or has no Suspense/ErrorBoundary at all (error propagates to route/layout level).
+ * Collects all relevant information in a single parent chain walk per usage site:
+ * conditional mount context, Suspense distance, and ErrorBoundary presence.
  */
-function lacksErrorBoundaryBeforeSuspense(
-  graph: SolidGraph,
-  componentName: string,
-): boolean {
-  const usages = graph.jsxByTag.get(componentName) ?? [];
-  if (usages.length === 0) return false;
-
-  for (let i = 0, len = usages.length; i < len; i++) {
-    const usage = usages[i];
-    if (!usage) continue;
-
-    let current: JSXElementEntity | null = usage.parent;
-    let foundErrorBoundary = false;
-
-    while (current) {
-      const tag = current.tag;
-      if (tag && !current.isDomElement) {
-        if (tag === "ErrorBoundary") {
-          foundErrorBoundary = true;
-          break;
-        }
-        if (tag === "Suspense") {
-          if (!foundErrorBoundary) return true;
-          break;
-        }
-      }
-      current = current.parent;
-    }
-
-    // No Suspense or ErrorBoundary found at all — error propagates uncaught
-    if (!foundErrorBoundary) return true;
-  }
-
-  return false;
+interface ComponentBoundaryAnalysis {
+  /** First conditional mount tag found before Suspense, or null if none. */
+  conditionalMountTag: string | null;
+  /** Number of component levels between usage and nearest Suspense. */
+  suspenseDistance: number;
+  /** True if any usage site has Suspense without an intervening ErrorBoundary. */
+  lacksErrorBoundary: boolean;
 }
 
 /**
- * Find the nearest conditional mount point ancestor for a component.
+ * Analyze a component's JSX ancestry for Suspense/ErrorBoundary/conditional mount hazards.
  *
- * Walks up the JSX parent chain from the component's usage site to find
- * tags matching CONDITIONAL_MOUNT_TAGS.
+ * Single pass over the JSX parent chain per usage site, collecting all boundary
+ * information needed by both the loading path and error path checks.
  */
-function findConditionalMountAncestor(
+function analyzeComponentBoundaries(
   graph: SolidGraph,
   componentName: string,
-): { tag: string; suspenseDistance: number } | null {
+): ComponentBoundaryAnalysis {
+  const result: ComponentBoundaryAnalysis = {
+    conditionalMountTag: null,
+    suspenseDistance: 0,
+    lacksErrorBoundary: false,
+  };
+
   const usages = graph.jsxByTag.get(componentName) ?? [];
+  if (usages.length === 0) return result;
 
   for (let i = 0, len = usages.length; i < len; i++) {
     const usage = usages[i];
@@ -280,32 +259,44 @@ function findConditionalMountAncestor(
     let current: JSXElementEntity | null = usage.parent;
     let conditionalTag: string | null = null;
     let componentLevels = 0;
+    let foundErrorBoundary = false;
+    let foundSuspense = false;
 
     while (current) {
       const tag = current.tag;
       if (tag && !current.isDomElement) {
         componentLevels++;
 
-        if (tag === "Suspense") {
-          if (conditionalTag !== null && componentLevels > 1) {
-            return { tag: conditionalTag, suspenseDistance: componentLevels };
+        if (tag === "ErrorBoundary") {
+          foundErrorBoundary = true;
+        } else if (tag === "Suspense") {
+          foundSuspense = true;
+          if (!foundErrorBoundary) {
+            result.lacksErrorBoundary = true;
           }
-          return null;
-        }
-
-        if (conditionalTag === null && CONDITIONAL_MOUNT_TAGS.has(tag)) {
+          if (conditionalTag !== null && componentLevels > 1) {
+            result.conditionalMountTag = conditionalTag;
+            result.suspenseDistance = componentLevels;
+          }
+          break;
+        } else if (conditionalTag === null && CONDITIONAL_MOUNT_TAGS.has(tag)) {
           conditionalTag = tag;
         }
       }
       current = current.parent;
     }
 
-    if (conditionalTag !== null) {
-      return { tag: conditionalTag, suspenseDistance: componentLevels };
+    // No Suspense or ErrorBoundary found — error propagates to route/layout level
+    if (!foundSuspense && !foundErrorBoundary) {
+      result.lacksErrorBoundary = true;
+      if (conditionalTag !== null) {
+        result.conditionalMountTag = conditionalTag;
+        result.suspenseDistance = componentLevels;
+      }
     }
   }
 
-  return null;
+  return result;
 }
 
 /**
@@ -349,6 +340,13 @@ export const resourceImplicitSuspense = defineSolidRule({
     const resourceCalls = getCallsByPrimitive(graph, "createResource");
     if (resourceCalls.length === 0) return;
 
+    // Shared visited set for transitive throw detection across all calls
+    const throwVisited = new Set<number>();
+
+    // Cache boundary analysis per component name (multiple createResource
+    // calls in the same component share the same JSX ancestry)
+    const boundaryCache = new Map<string, ComponentBoundaryAnalysis>();
+
     for (let i = 0, len = resourceCalls.length; i < len; i++) {
       const call = resourceCalls[i];
       if (!call) continue;
@@ -359,11 +357,10 @@ export const resourceImplicitSuspense = defineSolidRule({
       const hasInitial = hasInitialValue(call);
       const componentName = getContainingComponentName(graph, call);
 
-      // Loading path checks (only when no initialValue)
+      // Loading path: WARN on manual loading mismatch (no initialValue + .loading reads)
       if (!hasInitial) {
         const resourceVariable = findResourceVariable(graph, resourceName);
 
-        // WARN: manual loading handling alongside bare createResource
         if (resourceVariable && hasLoadingRead(resourceVariable)) {
           emit(
             createDiagnostic(
@@ -376,44 +373,48 @@ export const resourceImplicitSuspense = defineSolidRule({
             ),
           );
         }
-
-        // ERROR (loading path): conditional mount point with distant Suspense
-        if (componentName) {
-          const conditional = findConditionalMountAncestor(graph, componentName);
-          if (conditional) {
-            emit(
-              createDiagnostic(
-                graph.file,
-                call.node,
-                "resource-implicit-suspense",
-                "conditionalSuspense",
-                resolveMessage(messages.conditionalSuspense, {
-                  name: resourceName,
-                  mountTag: conditional.tag,
-                }),
-                "error",
-              ),
-            );
-          }
-        }
       }
 
-      // Error path check (applies regardless of initialValue)
-      if (componentName) {
+      if (!componentName) continue;
+
+      // Single JSX parent chain walk for both loading-path and error-path checks
+      let analysis = boundaryCache.get(componentName);
+      if (!analysis) {
+        analysis = analyzeComponentBoundaries(graph, componentName);
+        boundaryCache.set(componentName, analysis);
+      }
+
+      // Loading path: ERROR on conditional mount with distant Suspense
+      if (!hasInitial && analysis.conditionalMountTag) {
+        emit(
+          createDiagnostic(
+            graph.file,
+            call.node,
+            "resource-implicit-suspense",
+            "conditionalSuspense",
+            resolveMessage(messages.conditionalSuspense, {
+              name: resourceName,
+              mountTag: analysis.conditionalMountTag,
+            }),
+            "error",
+          ),
+        );
+      }
+
+      // Error path: ERROR on missing ErrorBoundary with throwing fetcher
+      if (analysis.lacksErrorBoundary) {
         const fetcherFn = resolveFetcherFunction(graph, call);
-        if (fetcherFn && fetcherCanThrow(graph, fetcherFn, new Set())) {
-          if (lacksErrorBoundaryBeforeSuspense(graph, componentName)) {
-            emit(
-              createDiagnostic(
-                graph.file,
-                call.node,
-                "resource-implicit-suspense",
-                "missingErrorBoundary",
-                resolveMessage(messages.missingErrorBoundary, { name: resourceName }),
-                "error",
-              ),
-            );
-          }
+        if (fetcherFn && fetcherCanThrow(graph, fetcherFn, throwVisited)) {
+          emit(
+            createDiagnostic(
+              graph.file,
+              call.node,
+              "resource-implicit-suspense",
+              "missingErrorBoundary",
+              resolveMessage(messages.missingErrorBoundary, { name: resourceName }),
+              "error",
+            ),
+          );
         }
       }
     }
