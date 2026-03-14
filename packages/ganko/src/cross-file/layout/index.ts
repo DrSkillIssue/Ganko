@@ -62,7 +62,6 @@ export type {
   NumericEvidenceValue,
   PosteriorInterval,
   AlignmentSignalFinding,
-  LayoutGuardProvenance,
   LayoutKnownSignalValue,
   LayoutSignalName,
   LayoutSignalSnapshot,

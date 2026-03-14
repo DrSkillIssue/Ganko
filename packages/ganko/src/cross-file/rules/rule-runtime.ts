@@ -22,7 +22,7 @@ export function readNodeRefById(layout: LayoutGraph, solidFile: string, elementI
 
 export function isFlowRelevantBySiblingsOrText(
   node: LayoutElementNode,
-  textualContent: LayoutSignalSnapshot["textualContent"],
+  textualContent: LayoutTextualContentState,
 ): boolean {
   if (node.siblingCount >= 2) return true
   return textualContent === LayoutTextualContentState.Yes || textualContent === LayoutTextualContentState.Unknown || textualContent === LayoutTextualContentState.DynamicText
@@ -30,7 +30,7 @@ export function isFlowRelevantBySiblingsOrText(
 
 export function isDeferredContainerLike(
   node: LayoutElementNode,
-  textualContent: LayoutSignalSnapshot["textualContent"],
+  textualContent: LayoutTextualContentState,
 ): boolean {
   if (node.siblingCount >= 2) return true
   if (textualContent === LayoutTextualContentState.Unknown) return true

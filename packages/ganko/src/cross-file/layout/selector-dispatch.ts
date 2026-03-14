@@ -3,6 +3,7 @@ import type { CSSGraph } from "../../css/impl"
 import { canonicalPath } from "@drskillissue/ganko-shared"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutRuleGuard } from "./guard-model"
+import { LayoutSignalGuard } from "./signal-model"
 import type { CompiledSelectorMatcher, SelectorFeatureRequirements } from "./selector-match"
 import type { LayoutPerfStatsMutable } from "./perf"
 
@@ -85,7 +86,7 @@ export function buildScopedSelectorIndexBySolidFile(
         const metadata = selectorMetadataById.get(selector.id)
         if (!metadata) continue
 
-        if (metadata.guard.kind === "conditional") {
+        if (metadata.guard.kind === LayoutSignalGuard.Conditional) {
           if (!conditionalSelectorIds.has(selector.id)) {
             conditionalSelectorIds.add(selector.id)
             perf.selectorsGuardedConditional++

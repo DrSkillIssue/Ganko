@@ -217,8 +217,8 @@ function resolveContextConflictEvidence(input: AlignmentCase): StrengthEvidence 
 function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
   const subject = input.subject.snapshot
   const hasReplacedPair =
-    subject.isControl
-    || subject.isReplaced
+    subject.node.isControl
+    || subject.node.isReplaced
     || input.cohortSignals.hasControlOrReplacedPeer
   if (!hasReplacedPair) {
     return {

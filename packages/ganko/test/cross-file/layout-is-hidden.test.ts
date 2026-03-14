@@ -25,8 +25,6 @@ function makeNode(overrides: Partial<{
     classTokens: [],
     classTokenSet: overrides.classTokenSet ?? new Set(),
     inlineStyleKeys: [],
-    parentElementId: null,
-    parentElementKey: null,
     parentElementNode: null,
     previousSiblingNode: null,
     siblingIndex: 0,
@@ -46,11 +44,9 @@ function makeSignal(name: LayoutSignalName, normalized: string): LayoutKnownSign
   return {
     kind: "known",
     name,
-    raw: normalized,
     normalized,
     source: LayoutSignalSource.Selector,
-    guard: LayoutSignalGuard.Unconditional,
-    guardProvenance: { kind: LayoutSignalGuard.Unconditional, conditions: [], key: "always" },
+    guard: { kind: LayoutSignalGuard.Unconditional, conditions: [], key: "always" as const },
     unit: LayoutSignalUnit.Keyword,
     px: null,
     quality: "exact",
@@ -63,13 +59,7 @@ function makeSnapshot(signals: LayoutKnownSignalValue[]): LayoutSignalSnapshot {
     signalMap.set(s.name, s)
   }
   return {
-    solidFile: "/test.tsx",
-    elementId: 0,
-    elementKey: "test::0",
-    tag: "div",
-    textualContent: LayoutTextualContentState.No,
-    isControl: false,
-    isReplaced: false,
+    node: makeNode({}),
     signals: signalMap,
     knownSignalCount: signalMap.size,
     unknownSignalCount: 0,

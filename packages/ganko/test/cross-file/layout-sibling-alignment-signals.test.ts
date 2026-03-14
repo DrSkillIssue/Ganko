@@ -8,11 +8,10 @@ function makeMap(entries: readonly [string, string][]) {
     out.set(entry[0], {
       value: entry[1],
       source: LayoutSignalSource.Selector,
-      guard: LayoutSignalGuard.Unconditional,
       guardProvenance: {
         kind: LayoutSignalGuard.Unconditional,
         conditions: [],
-        key: "always",
+        key: "always" as const,
       },
     });
   }

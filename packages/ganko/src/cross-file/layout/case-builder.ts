@@ -99,7 +99,7 @@ export function collectAlignmentCases(context: CrossRuleContext): readonly Align
           subjectDeclaredOffsetDeviation,
           subjectEffectiveOffsetDeviation,
           subjectLineHeightDeviation,
-          subjectStats.element.snapshot.textualContent,
+          subjectStats.element.snapshot.node.textualContent,
           subjectStats.element,
           subjectStats.contentComposition,
           cohortContentCompositions,
@@ -128,7 +128,7 @@ function buildAlignmentCase(
   subjectDeclaredOffsetDeviation: NumericEvidenceValue,
   subjectEffectiveOffsetDeviation: NumericEvidenceValue,
   subjectLineHeightDeviation: NumericEvidenceValue,
-  subjectTextualContent: AlignmentCase["subject"]["snapshot"]["textualContent"],
+  subjectTextualContent: LayoutTextualContentState,
   subject: AlignmentCase["subject"],
   subjectContentComposition: ContentCompositionFingerprint,
   cohortContentCompositions: readonly ContentCompositionFingerprint[],
@@ -172,7 +172,7 @@ function resolveFactorCoverage(
   subjectDeclaredOffsetDeviation: NumericEvidenceValue,
   subjectEffectiveOffsetDeviation: NumericEvidenceValue,
   subjectLineHeightDeviation: NumericEvidenceValue,
-  subjectTextualContent: AlignmentCase["subject"]["snapshot"]["textualContent"],
+  subjectTextualContent: LayoutTextualContentState,
   subjectContentComposition: ContentCompositionFingerprint,
   cohortContentCompositions: readonly ContentCompositionFingerprint[],
 ): AlignmentFactorCoverage {
@@ -238,7 +238,7 @@ function coverageFromTextContrast(value: AlignmentTextContrast): number {
 }
 
 function coverageFromSubjectText(
-  subjectTextualContent: AlignmentCase["subject"]["snapshot"]["textualContent"],
+  subjectTextualContent: LayoutTextualContentState,
 ): number {
   if (subjectTextualContent === LayoutTextualContentState.Unknown) return 0.35
   return 1

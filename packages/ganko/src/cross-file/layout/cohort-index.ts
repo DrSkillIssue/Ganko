@@ -67,7 +67,7 @@ interface CohortSignalsByElement {
   readonly verticalAlign: LayoutSnapshotHotSignals["verticalAlign"]
   readonly alignSelf: LayoutSnapshotHotSignals["alignSelf"]
   readonly placeSelf: LayoutSnapshotHotSignals["placeSelf"]
-  readonly textualContent: LayoutSignalSnapshot["textualContent"]
+  readonly textualContent: LayoutTextualContentState
   readonly isControlOrReplaced: boolean
 }
 
@@ -703,13 +703,13 @@ function buildCohortSignalIndex(metrics: readonly CohortMetrics[]): CohortSignal
     const snapshot = metric.element.snapshot
     const alignSelf = metric.hotSignals.alignSelf
     const placeSelf = metric.hotSignals.placeSelf
-    const isControlOrReplaced = snapshot.isControl || snapshot.isReplaced
+    const isControlOrReplaced = snapshot.node.isControl || snapshot.node.isReplaced
     const verticalAlign = resolveComparableVerticalAlign(metric.hotSignals.verticalAlign, isControlOrReplaced)
 
     if (isControlOrReplaced) controlOrReplacedCount++
-    if (snapshot.textualContent === LayoutTextualContentState.Yes || snapshot.textualContent === LayoutTextualContentState.DynamicText) textYesCount++
-    if (snapshot.textualContent === LayoutTextualContentState.No) textNoCount++
-    if (snapshot.textualContent === LayoutTextualContentState.Unknown) textUnknownCount++
+    if (snapshot.node.textualContent === LayoutTextualContentState.Yes || snapshot.node.textualContent === LayoutTextualContentState.DynamicText) textYesCount++
+    if (snapshot.node.textualContent === LayoutTextualContentState.No) textNoCount++
+    if (snapshot.node.textualContent === LayoutTextualContentState.Unknown) textUnknownCount++
 
     if (verticalAlign.value !== null) {
       verticalAlignMergedKind = mergeEvidenceKind(verticalAlignMergedKind, verticalAlign.kind)
@@ -733,7 +733,7 @@ function buildCohortSignalIndex(metrics: readonly CohortMetrics[]): CohortSignal
       verticalAlign,
       alignSelf,
       placeSelf,
-      textualContent: snapshot.textualContent,
+      textualContent: snapshot.node.textualContent,
       isControlOrReplaced,
     })
   }
@@ -893,7 +893,7 @@ function finalizeConflictEvidence(
 
 function resolveIndexedTextContrastWithPeers(
   index: CohortSignalIndex,
-  subjectTextualContent: LayoutSignalSnapshot["textualContent"],
+  subjectTextualContent: LayoutTextualContentState,
   subjectIsControlOrReplaced: boolean,
   tableCellControlFallback: boolean,
 ): AlignmentTextContrast {
@@ -1015,8 +1015,8 @@ function resolveControlRoleIdentifiability(
   cohortSize: number,
 ): CohortIdentifiability | null {
   const subjectIsControlOrReplaced =
-    subjectMetrics.element.snapshot.isControl
-    || subjectMetrics.element.snapshot.isReplaced
+    subjectMetrics.element.snapshot.node.isControl
+    || subjectMetrics.element.snapshot.node.isReplaced
 
   const controlCount = signalIndex.controlOrReplacedCount
   const nonControlCount = cohortSize - controlCount
@@ -1121,8 +1121,8 @@ function collectCohortProvenanceFromSnapshots(snapshots: readonly LayoutSignalSn
     if (!snapshot) continue
 
     for (const signal of snapshot.signals.values()) {
-      for (let j = 0; j < signal.guardProvenance.conditions.length; j++) {
-        const guard = signal.guardProvenance.conditions[j]
+      for (let j = 0; j < signal.guard.conditions.length; j++) {
+        const guard = signal.guard.conditions[j]
         if (!guard) continue
         if (!byKey.has(guard.key)) byKey.set(guard.key, guard)
       }

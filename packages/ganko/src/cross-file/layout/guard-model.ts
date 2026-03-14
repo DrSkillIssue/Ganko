@@ -1,4 +1,5 @@
 import type { AtRuleEntity, RuleEntity } from "../../css/entities"
+import { LayoutSignalGuard } from "./signal-model"
 
 export type LayoutGuardConditionKind = "media" | "supports" | "container"
 
@@ -10,18 +11,18 @@ export interface LayoutGuardConditionProvenance {
 
 export type LayoutRuleGuard =
   | {
-    readonly kind: "unconditional"
+    readonly kind: LayoutSignalGuard.Unconditional
     readonly conditions: readonly LayoutGuardConditionProvenance[]
     readonly key: "always"
   }
   | {
-    readonly kind: "conditional"
+    readonly kind: LayoutSignalGuard.Conditional
     readonly conditions: readonly LayoutGuardConditionProvenance[]
     readonly key: string
   }
 
 const UNCONDITIONAL_GUARD: LayoutRuleGuard = {
-  kind: "unconditional",
+  kind: LayoutSignalGuard.Unconditional,
   conditions: [],
   key: "always",
 }
@@ -33,7 +34,7 @@ export function resolveRuleGuard(rule: RuleEntity): LayoutRuleGuard {
   if (conditions.length === 0) return UNCONDITIONAL_GUARD
 
   return {
-    kind: "conditional",
+    kind: LayoutSignalGuard.Conditional,
     conditions,
     key: conditions.map((condition) => condition.key).join("&"),
   }

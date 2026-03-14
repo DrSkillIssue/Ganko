@@ -36,10 +36,10 @@ export const cssLayoutConditionalDisplayCollapse = defineCrossRule({
       if (!display || !COLLAPSING_DISPLAYS.has(display)) continue
 
       const displaySignal = snapshot.signals.get("display")
-      if (!displaySignal || displaySignal.guard !== LayoutSignalGuard.Conditional) continue
+      if (!displaySignal || displaySignal.guard.kind !== LayoutSignalGuard.Conditional) continue
       const flow = readFlowParticipationFact(context.layout, node)
       if (!flow.inFlow) continue
-      if (!isFlowRelevantBySiblingsOrText(node, snapshot.textualContent)) continue
+      if (!isFlowRelevantBySiblingsOrText(node, snapshot.node.textualContent)) continue
       const reservedSpace = readReservedSpaceFact(context.layout, node)
       if (reservedSpace.hasReservedSpace) continue
 

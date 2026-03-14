@@ -3,11 +3,10 @@ import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { SolidGraph } from "../../solid/impl"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { AlignmentContext } from "./context-model"
+import type { LayoutRuleGuard } from "./guard-model"
 import {
   type LayoutCohortStats,
-  type LayoutGuardProvenance,
   type LayoutSignalName,
-  LayoutSignalGuard,
   LayoutSignalSource,
   type LayoutSnapshotHotSignals,
   type LayoutSignalSnapshot,
@@ -17,8 +16,7 @@ import {
 export interface LayoutCascadedDeclaration {
   readonly value: string
   readonly source: LayoutSignalSource
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guardProvenance: LayoutRuleGuard
 }
 
 export interface LayoutElementNode {
@@ -30,8 +28,6 @@ export interface LayoutElementNode {
   readonly classTokens: readonly string[]
   readonly classTokenSet: ReadonlySet<string>
   readonly inlineStyleKeys: readonly string[]
-  readonly parentElementId: number | null
-  readonly parentElementKey: string | null
   readonly parentElementNode: LayoutElementNode | null
   readonly previousSiblingNode: LayoutElementNode | null
   readonly siblingIndex: number
@@ -53,9 +49,6 @@ export interface LayoutStyleRuleNode {
 }
 
 export interface LayoutMatchEdge {
-  readonly solidFile: string
-  readonly elementId: number
-  readonly elementKey: string
   readonly selectorId: number
   readonly specificityScore: number
   readonly sourceOrder: number

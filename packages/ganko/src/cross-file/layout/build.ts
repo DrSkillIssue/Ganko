@@ -18,7 +18,6 @@ import {
   type LayoutScrollContainerFact,
   type LayoutStyleRuleNode,
 } from "./graph"
-import { toLayoutElementKey } from "./graph"
 import { collectCSSScopeBySolidFile } from "./scope"
 import { createLayoutPerfStats, type LayoutPerfStatsMutable } from "./perf"
 import { createLayoutModuleResolver } from "./module-resolver"
@@ -194,8 +193,6 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
         classTokens: record.classTokens,
         classTokenSet: record.classTokenSet,
         inlineStyleKeys: record.inlineStyleKeys,
-        parentElementId,
-        parentElementKey: parentNode ? parentNode.key : (parentElementId === null ? null : toLayoutElementKey(solid.file, parentElementId)),
         parentElementNode: parentNode,
         previousSiblingNode,
         siblingIndex,
@@ -491,13 +488,13 @@ function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
     return {
       present: true,
       value: null,
-      kind: signal.guard === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+      kind: signal.guard.kind === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
     }
   }
   return {
     present: true,
     value: signal.px,
-    kind: signal.guard === LayoutSignalGuard.Conditional
+    kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
       : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
@@ -508,13 +505,13 @@ function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence
     return {
       present: true,
       value: null,
-      kind: signal.guard === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+      kind: signal.guard.kind === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
     }
   }
   return {
     present: true,
     value: signal.normalized,
-    kind: signal.guard === LayoutSignalGuard.Conditional
+    kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
       : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
@@ -630,7 +627,7 @@ function hasPositiveOrDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.guard !== LayoutSignalGuard.Unconditional) return false
+  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
 
   let normalized = ""
   if (signal.kind === "known") {
@@ -639,8 +636,7 @@ function hasPositiveOrDeclaredDimension(
   }
 
   if (signal.kind === "unknown") {
-    if (signal.raw === null) return false
-    normalized = signal.raw.trim().toLowerCase()
+    return signal.source !== null
   }
 
   if (normalized.length === 0) return false
@@ -651,16 +647,15 @@ function hasPositiveOrDeclaredDimension(
 function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
   const signal = snapshot.signals.get("aspect-ratio")
   if (!signal) return false
-  if (signal.guard !== LayoutSignalGuard.Unconditional) return false
+  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
+
+  if (signal.kind === "unknown") {
+    return false
+  }
 
   let normalized = ""
   if (signal.kind === "known") {
     normalized = signal.normalized.trim().toLowerCase()
-  }
-
-  if (signal.kind === "unknown") {
-    if (signal.raw === null) return false
-    normalized = signal.raw.trim().toLowerCase()
   }
 
   if (normalized.length === 0) return false
@@ -690,10 +685,10 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   const xScroll = shorthandAxis.x
   const yScroll = yFromLonghand === null ? shorthandAxis.y : yFromLonghand
 
-  const hasConditionalScroll = (overflowSignal?.guard === LayoutSignalGuard.Conditional && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === LayoutSignalGuard.Conditional && yFromLonghand === true)
-  const hasUnconditionalScroll = (overflowSignal?.guard === LayoutSignalGuard.Unconditional && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === LayoutSignalGuard.Unconditional && yFromLonghand === true)
+  const hasConditionalScroll = (overflowSignal?.guard.kind === LayoutSignalGuard.Conditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard.kind === LayoutSignalGuard.Conditional && yFromLonghand === true)
+  const hasUnconditionalScroll = (overflowSignal?.guard.kind === LayoutSignalGuard.Unconditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard.kind === LayoutSignalGuard.Unconditional && yFromLonghand === true)
 
   return {
     isScrollContainer: xScroll || yScroll,
@@ -756,8 +751,8 @@ function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlo
   return {
     inFlow: !outOfFlow,
     position,
-    hasConditionalOutOfFlow: signal.guard === LayoutSignalGuard.Conditional && outOfFlow,
-    hasUnconditionalOutOfFlow: signal.guard === LayoutSignalGuard.Unconditional && outOfFlow,
+    hasConditionalOutOfFlow: signal.guard.kind === LayoutSignalGuard.Conditional && outOfFlow,
+    hasUnconditionalOutOfFlow: signal.guard.kind === LayoutSignalGuard.Unconditional && outOfFlow,
   }
 }
 

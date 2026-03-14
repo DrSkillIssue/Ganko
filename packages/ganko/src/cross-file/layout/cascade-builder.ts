@@ -13,7 +13,7 @@ import type {
   LayoutMatchEdge,
 } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import { LayoutSignalGuard, LayoutSignalSource, type LayoutGuardProvenance, type LayoutSignalName } from "./signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
 import type { LayoutRuleGuard } from "./guard-model"
@@ -24,8 +24,7 @@ export interface MonitoredDeclaration {
   readonly property: MonitoredSignalKey
   readonly value: string
   readonly position: CascadePosition
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guardProvenance: LayoutRuleGuard
 }
 
 export type MonitoredSignalKey =
@@ -52,13 +51,6 @@ export function collectMonitoredDeclarations(
 ): readonly MonitoredDeclaration[] {
   const out: MonitoredDeclaration[] = []
   const declarations = selector.rule.declarations
-  const signalGuard: LayoutSignalGuard = guard.kind === "conditional" ? LayoutSignalGuard.Conditional : LayoutSignalGuard.Unconditional
-  const guardProvenance: LayoutGuardProvenance = {
-    kind: signalGuard,
-    conditions: guard.conditions,
-    key: guard.key,
-  }
-
   for (let i = 0; i < declarations.length; i++) {
     const declaration = declarations[i]
     if (!declaration) continue
@@ -69,8 +61,7 @@ export function collectMonitoredDeclarations(
     out.push({
       property: monitored,
       value: declaration.value,
-      guard: signalGuard,
-      guardProvenance,
+      guardProvenance: guard,
       position: {
         layer: declaration.cascadePosition.layer,
         layerOrder,
@@ -154,9 +145,6 @@ export function appendMatchingEdgesFromSelectorIds(
     if (!selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)) continue
 
     const edge: LayoutMatchEdge = {
-      solidFile: node.solidFile,
-      elementId: node.elementId,
-      elementKey: node.key,
       selectorId: selector.id,
       specificityScore: selector.specificityScore,
       sourceOrder: selector.rule.sourceOrder,
@@ -222,7 +210,7 @@ function augmentCascadeWithTailwind(
   const classTokens = node.classTokens
   if (classTokens.length === 0) return
 
-  const guardProvenance: LayoutGuardProvenance = {
+  const guardProvenance: LayoutRuleGuard = {
     kind: LayoutSignalGuard.Unconditional,
     conditions: [],
     key: "always",
@@ -245,7 +233,6 @@ function augmentCascadeWithTailwind(
       cascade.set(property, {
         value,
         source: LayoutSignalSource.Selector,
-        guard: LayoutSignalGuard.Unconditional,
         guardProvenance,
       })
     }
@@ -274,7 +261,6 @@ export function buildCascadeMapForElement(
       const newDeclaration: LayoutCascadedDeclaration = {
         value: declaration.value,
         source: LayoutSignalSource.Selector,
-        guard: declaration.guard,
         guardProvenance: declaration.guardProvenance,
       }
 
@@ -301,7 +287,6 @@ export function buildCascadeMapForElement(
     const newDeclaration: LayoutCascadedDeclaration = {
       value,
       source: LayoutSignalSource.InlineStyle,
-      guard: LayoutSignalGuard.Unconditional,
       guardProvenance: INLINE_GUARD_PROVENANCE,
     }
 
@@ -367,7 +352,7 @@ const INLINE_CASCADE_POSITION: CascadePosition = Object.freeze({
   isImportant: false,
 })
 
-const INLINE_GUARD_PROVENANCE: LayoutGuardProvenance = Object.freeze({
+const INLINE_GUARD_PROVENANCE: LayoutRuleGuard = Object.freeze({
   kind: LayoutSignalGuard.Unconditional,
   conditions: [],
   key: "always",
@@ -430,7 +415,7 @@ export function buildConditionalDeltaIndex(
               byProperty.set(property, bucket)
             }
 
-            if (declaration.guard === LayoutSignalGuard.Conditional) {
+            if (declaration.guardProvenance.kind === LayoutSignalGuard.Conditional) {
               bucket.conditional.add(expandedEntry.value)
               continue
             }

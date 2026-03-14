@@ -119,7 +119,7 @@ function accumulateSnapshotFacts(
   },
 ): void {
   for (const value of snapshot.signals.values()) {
-    if (value.guard === LayoutSignalGuard.Conditional) {
+    if (value.guard.kind === LayoutSignalGuard.Conditional) {
       sink.addConditional()
       continue
     }
@@ -139,9 +139,9 @@ function accumulateSnapshotFacts(
 }
 
 function toFact(value: LayoutSignalValue): LayoutSignalFact {
-  if (value.guard === LayoutSignalGuard.Conditional) {
+  if (value.guard.kind === LayoutSignalGuard.Conditional) {
     if (value.kind === "known") return toConditionalFactFromKnown(value)
-    const reason = `${value.reason} [${value.guardProvenance.key}]`
+    const reason = `${value.reason} [${value.guard.key}]`
     return {
       kind: "conditional",
       signal: value.name,
@@ -178,7 +178,7 @@ function toFact(value: LayoutSignalValue): LayoutSignalFact {
 }
 
 function toConditionalFactFromKnown(value: LayoutKnownSignalValue): LayoutSignalFact {
-  const reason = value.guardProvenance.key
+  const reason = value.guard.key
   if (value.px === null) {
     return {
       kind: "conditional",

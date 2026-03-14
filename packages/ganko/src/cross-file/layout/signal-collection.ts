@@ -75,13 +75,7 @@ function buildSnapshotForNode(
   const conditionalSignalCount = normalized.conditionalSignalCount + inherited.conditionalDelta
 
   const snapshot: LayoutSignalSnapshot = {
-    solidFile: node.solidFile,
-    elementId: node.elementId,
-    elementKey: node.key,
-    tag: node.tag,
-    textualContent: node.textualContent,
-    isControl: node.isControl,
-    isReplaced: node.isReplaced,
+    node,
     signals: inherited.signals,
     knownSignalCount,
     unknownSignalCount,
@@ -121,7 +115,7 @@ function inheritSignalsFromParent(
     if (out === null) out = new Map(local)
     out.set(signal, inheritedValue)
 
-    if (inheritedValue.guard === LayoutSignalGuard.Conditional) {
+    if (inheritedValue.guard.kind === LayoutSignalGuard.Conditional) {
       conditionalDelta++
       continue
     }

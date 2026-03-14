@@ -1,5 +1,6 @@
 import type { AlignmentContext, AlignmentContextKind, ContextCertainty } from "./context-model"
-import type { LayoutGuardConditionProvenance } from "./guard-model"
+import type { LayoutElementNode } from "./graph"
+import type { LayoutGuardConditionProvenance, LayoutRuleGuard } from "./guard-model"
 
 export const layoutSignalNames = [
   "line-height",
@@ -59,22 +60,14 @@ export const enum LayoutSignalSource { Selector = 0, InlineStyle = 1 }
 
 export const enum LayoutSignalGuard { Unconditional = 0, Conditional = 1 }
 
-export interface LayoutGuardProvenance {
-  readonly kind: LayoutSignalGuard
-  readonly conditions: readonly LayoutGuardConditionProvenance[]
-  readonly key: string
-}
-
 export const enum LayoutSignalUnit { Px = 0, Unitless = 1, Keyword = 2, Unknown = 3 }
 
 export interface LayoutKnownSignalValue {
   readonly kind: "known"
   readonly name: LayoutSignalName
-  readonly raw: string
   readonly normalized: string
   readonly source: LayoutSignalSource
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guard: LayoutRuleGuard
   readonly unit: LayoutSignalUnit
   readonly px: number | null
   readonly quality: "exact" | "estimated"
@@ -83,10 +76,8 @@ export interface LayoutKnownSignalValue {
 export interface LayoutUnknownSignalValue {
   readonly kind: "unknown"
   readonly name: LayoutSignalName
-  readonly raw: string | null
   readonly source: LayoutSignalSource | null
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guard: LayoutRuleGuard
   readonly reason: string
 }
 
@@ -95,13 +86,7 @@ export type LayoutSignalValue = LayoutKnownSignalValue | LayoutUnknownSignalValu
 export const enum LayoutTextualContentState { Yes = 0, No = 1, Unknown = 2, DynamicText = 3 }
 
 export interface LayoutSignalSnapshot {
-  readonly solidFile: string
-  readonly elementId: number
-  readonly elementKey: string
-  readonly tag: string | null
-  readonly textualContent: LayoutTextualContentState
-  readonly isControl: boolean
-  readonly isReplaced: boolean
+  readonly node: LayoutElementNode
   readonly signals: ReadonlyMap<LayoutSignalName, LayoutSignalValue>
   readonly knownSignalCount: number
   readonly unknownSignalCount: number

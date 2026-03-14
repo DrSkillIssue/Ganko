@@ -1,6 +1,7 @@
 import type { AlignmentContextKind, ContextCertainty } from "./context-model"
 import type { AlignmentFactorId } from "./signal-model"
 import type { CrossRuleContext } from "../rule"
+import { reservoirPush } from "./perf"
 import { clamp } from "./util"
 
 export interface LayoutEvidence {
@@ -123,7 +124,7 @@ function recordPolicyMetrics(
   context.layout.perf.factorCoverageCount++
 
   const width = clamp(posteriorUpper - posteriorLower, 0, 1)
-  context.layout.perf.posteriorWidths.push(width)
+  reservoirPush(context.layout.perf.posteriorWidths, width)
   if (width > 0.001) context.layout.perf.uncertaintyEscalations++
 }
 

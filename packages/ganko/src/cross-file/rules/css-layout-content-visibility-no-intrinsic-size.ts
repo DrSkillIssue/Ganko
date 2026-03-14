@@ -22,7 +22,7 @@ export const cssLayoutContentVisibilityNoIntrinsicSize = defineCrossRule({
       const node = candidates[i]
       if (!node) continue
       const snapshot = collectSignalSnapshot(context, node)
-      if (!isDeferredContainerLike(node, snapshot.textualContent)) continue
+      if (!isDeferredContainerLike(node, snapshot.node.textualContent)) continue
       const reservedSpace = readReservedSpaceFact(context.layout, node)
       if (reservedSpace.hasReservedSpace) continue
 

@@ -80,11 +80,11 @@ function collectConditionalOffsets(
 
     const signal = snapshot.signals.get(name)
     if (!signal) continue
-    if (signal.guard !== LayoutSignalGuard.Conditional) continue
+    if (signal.guard.kind !== LayoutSignalGuard.Conditional) continue
     if (signal.kind !== "known") continue
     if (signal.px === null) continue
     if (Math.abs(signal.px) <= 0.25) continue
-    out.push({ property: name, value: signal.px, guardKey: signal.guardProvenance.key })
+    out.push({ property: name, value: signal.px, guardKey: signal.guard.key })
   }
 
   return out
@@ -117,8 +117,8 @@ function hasEffectivePositionForConditionalOffset(
   const position = snapshot.signals.get("position")
   if (!position) return false
   if (position.kind !== "known") return false
-  if (position.guard !== LayoutSignalGuard.Conditional) return false
-  if (position.guardProvenance.key !== guardKey) return false
+  if (position.guard.kind !== LayoutSignalGuard.Conditional) return false
+  if (position.guard.key !== guardKey) return false
   return position.normalized !== "static"
 }
 

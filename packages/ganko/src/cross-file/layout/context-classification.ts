@@ -397,7 +397,7 @@ function resolveSignalCertainty(
   value: ReturnType<typeof readKnownSignalWithGuard>,
 ): ContextCertainty {
   if (!value) return ContextCertainty.Unknown
-  if (value.guard === LayoutSignalGuard.Conditional) return ContextCertainty.Conditional
+  if (value.guard.kind === LayoutSignalGuard.Conditional) return ContextCertainty.Conditional
   return ContextCertainty.Resolved
 }
 
