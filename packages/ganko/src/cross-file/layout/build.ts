@@ -4,7 +4,6 @@ import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import { noopLogger } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 
 import {
   LayoutScrollAxis,
@@ -26,17 +25,20 @@ import { createLayoutModuleResolver } from "./module-resolver"
 import { createLayoutComponentHostResolver } from "./component-host"
 import type { AlignmentContext } from "./context-model"
 import {
+  EvidenceValueKind,
   LayoutSignalGuard,
   LayoutTextualContentState,
+  type HotNormalizedSignalEvidence,
+  type HotNumericSignalEvidence,
   type LayoutSignalName,
   type LayoutSignalSnapshot,
+  type LayoutSignalValue,
   type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { isControlTag, isReplacedTag } from "./signal-normalization"
 import { compileSelectorMatcher } from "./selector-match"
 import { resolveRuleGuard } from "./guard-model"
 import { buildSignalSnapshotIndex } from "./signal-collection"
-import { readNumericSignalEvidence, readNormalizedSignalEvidence } from "./signal-access"
 import { createAlignmentContextForParent, finalizeTableCellBaselineRelevance } from "./context-classification"
 import { buildCohortIndex } from "./cohort-index"
 import { buildMeasurementNodeIndex } from "./measurement-node"
@@ -477,48 +479,101 @@ function buildElementFactIndex(
   }
 }
 
+const ABSENT_NUMERIC: HotNumericSignalEvidence = Object.freeze({
+  present: false, value: null, kind: EvidenceValueKind.Unknown,
+})
+const ABSENT_NORMALIZED: HotNormalizedSignalEvidence = Object.freeze({
+  present: false, value: null, kind: EvidenceValueKind.Unknown,
+})
+
+function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
+  if (signal.kind !== "known") {
+    return {
+      present: true,
+      value: null,
+      kind: signal.guard === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+    }
+  }
+  return {
+    present: true,
+    value: signal.px,
+    kind: signal.guard === LayoutSignalGuard.Conditional
+      ? EvidenceValueKind.Conditional
+      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+  }
+}
+
+function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence {
+  if (signal.kind !== "known") {
+    return {
+      present: true,
+      value: null,
+      kind: signal.guard === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+    }
+  }
+  return {
+    present: true,
+    value: signal.normalized,
+    kind: signal.guard === LayoutSignalGuard.Conditional
+      ? EvidenceValueKind.Conditional
+      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+  }
+}
+
 function computeHotSignals(snapshot: LayoutSignalSnapshot): LayoutSnapshotHotSignals {
-  return {
-    lineHeight: computeHotNumeric(snapshot, "line-height"),
-    verticalAlign: computeHotNormalized(snapshot, "vertical-align"),
-    alignSelf: computeHotNormalized(snapshot, "align-self"),
-    placeSelf: computeHotNormalized(snapshot, "place-self"),
-    flexDirection: computeHotNormalized(snapshot, "flex-direction"),
-    gridAutoFlow: computeHotNormalized(snapshot, "grid-auto-flow"),
-    writingMode: computeHotNormalized(snapshot, "writing-mode"),
-    direction: computeHotNormalized(snapshot, "direction"),
-    display: computeHotNormalized(snapshot, "display"),
-    alignItems: computeHotNormalized(snapshot, "align-items"),
-    placeItems: computeHotNormalized(snapshot, "place-items"),
-    position: computeHotNormalized(snapshot, "position"),
-    insetBlockStart: computeHotNumeric(snapshot, "inset-block-start"),
-    insetBlockEnd: computeHotNumeric(snapshot, "inset-block-end"),
-    transform: computeHotNumeric(snapshot, "transform"),
-    translate: computeHotNumeric(snapshot, "translate"),
-    top: computeHotNumeric(snapshot, "top"),
-    bottom: computeHotNumeric(snapshot, "bottom"),
-    marginTop: computeHotNumeric(snapshot, "margin-top"),
-    marginBottom: computeHotNumeric(snapshot, "margin-bottom"),
-  }
-}
+  let lineHeight: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let verticalAlign: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let alignSelf: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let placeSelf: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let flexDirection: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let gridAutoFlow: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let writingMode: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let direction: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let display: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let alignItems: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let placeItems: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let position: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let insetBlockStart: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let insetBlockEnd: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let transform: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let translate: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let top: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let bottom: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let marginTop: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let marginBottom: HotNumericSignalEvidence = ABSENT_NUMERIC
 
-function computeHotNumeric(
-  snapshot: LayoutSignalSnapshot,
-  name: LayoutSignalName,
-): LayoutSnapshotHotSignals["lineHeight"] {
-  return {
-    present: snapshot.signals.has(name),
-    ...readNumericSignalEvidence(snapshot, name),
+  for (const [name, value] of snapshot.signals) {
+    switch (name) {
+      case "line-height": lineHeight = toHotNumeric(value); break
+      case "vertical-align": verticalAlign = toHotNormalized(value); break
+      case "align-self": alignSelf = toHotNormalized(value); break
+      case "place-self": placeSelf = toHotNormalized(value); break
+      case "flex-direction": flexDirection = toHotNormalized(value); break
+      case "grid-auto-flow": gridAutoFlow = toHotNormalized(value); break
+      case "writing-mode": writingMode = toHotNormalized(value); break
+      case "direction": direction = toHotNormalized(value); break
+      case "display": display = toHotNormalized(value); break
+      case "align-items": alignItems = toHotNormalized(value); break
+      case "place-items": placeItems = toHotNormalized(value); break
+      case "position": position = toHotNormalized(value); break
+      case "inset-block-start": insetBlockStart = toHotNumeric(value); break
+      case "inset-block-end": insetBlockEnd = toHotNumeric(value); break
+      case "transform": transform = toHotNumeric(value); break
+      case "translate": translate = toHotNumeric(value); break
+      case "top": top = toHotNumeric(value); break
+      case "bottom": bottom = toHotNumeric(value); break
+      case "margin-top": marginTop = toHotNumeric(value); break
+      case "margin-bottom": marginBottom = toHotNumeric(value); break
+      default: break
+    }
   }
-}
 
-function computeHotNormalized(
-  snapshot: LayoutSignalSnapshot,
-  name: LayoutSignalName,
-): LayoutSnapshotHotSignals["verticalAlign"] {
   return {
-    present: snapshot.signals.has(name),
-    ...readNormalizedSignalEvidence(snapshot, name),
+    lineHeight, verticalAlign, alignSelf, placeSelf,
+    flexDirection, gridAutoFlow, writingMode, direction,
+    display, alignItems, placeItems, position,
+    insetBlockStart, insetBlockEnd, transform, translate,
+    top, bottom, marginTop, marginBottom,
   }
 }
 
@@ -650,21 +705,19 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   }
 }
 
+const NO_SCROLL = Object.freeze({ x: false, y: false })
+const BOTH_SCROLL = Object.freeze({ x: true, y: true })
+
 function parseOverflowShorthandAxis(value: string | null): { x: boolean; y: boolean } {
-  if (value === null) return { x: false, y: false }
-
-  const tokens = splitWhitespaceTokens(value)
-  if (tokens.length === 0) return { x: false, y: false }
-  const first = tokens[0]
-  if (!first) return { x: false, y: false }
-  if (tokens.length === 1) {
-    const scroll = SCROLLABLE_VALUES.has(first)
-    return { x: scroll, y: scroll }
+  if (value === null) return NO_SCROLL
+  const trimmed = value.trim()
+  const spaceIdx = trimmed.indexOf(" ")
+  if (spaceIdx === -1) {
+    const scroll = SCROLLABLE_VALUES.has(trimmed)
+    return scroll ? BOTH_SCROLL : NO_SCROLL
   }
-
-  const second = tokens[1]
-  if (!second) return { x: SCROLLABLE_VALUES.has(first), y: false }
-
+  const first = trimmed.slice(0, spaceIdx)
+  const second = trimmed.slice(spaceIdx + 1).trimStart()
   return {
     x: SCROLLABLE_VALUES.has(first),
     y: SCROLLABLE_VALUES.has(second),
@@ -673,9 +726,9 @@ function parseOverflowShorthandAxis(value: string | null): { x: boolean; y: bool
 
 function parseSingleAxisScroll(value: string | null): boolean | null {
   if (value === null) return null
-  const tokens = splitWhitespaceTokens(value)
-  const first = tokens[0]
-  if (!first) return null
+  const trimmed = value.trim()
+  const spaceIdx = trimmed.indexOf(" ")
+  const first = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)
   return SCROLLABLE_VALUES.has(first)
 }
 

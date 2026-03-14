@@ -296,24 +296,19 @@ export function buildCascadeMapForElement(
     }
   }
 
-  const inlinePosition = createInlineCascadePosition()
-  const inlineGuardProvenance: LayoutGuardProvenance = {
-    kind: LayoutSignalGuard.Unconditional,
-    conditions: [],
-    key: "always",
-  }
+
   for (const [property, value] of node.inlineStyleValues) {
     const newDeclaration: LayoutCascadedDeclaration = {
       value,
       source: LayoutSignalSource.InlineStyle,
       guard: LayoutSignalGuard.Unconditional,
-      guardProvenance: inlineGuardProvenance,
+      guardProvenance: INLINE_GUARD_PROVENANCE,
     }
 
     const existingPosition = positions.get(property)
     if (existingPosition === undefined) {
       out.set(property, newDeclaration)
-      positions.set(property, inlinePosition)
+      positions.set(property, INLINE_CASCADE_POSITION)
       continue
     }
 
@@ -321,10 +316,10 @@ export function buildCascadeMapForElement(
     if (existingDeclaration === undefined) continue
     if (!doesCandidateOverride(
       { declaration: existingDeclaration, position: existingPosition },
-      { declaration: newDeclaration, position: inlinePosition },
+      { declaration: newDeclaration, position: INLINE_CASCADE_POSITION },
     )) continue
     out.set(property, newDeclaration)
-    positions.set(property, inlinePosition)
+    positions.set(property, INLINE_CASCADE_POSITION)
   }
 
   /* Augment with Tailwind-resolved properties. Runs last because Tailwind
@@ -363,16 +358,20 @@ function doesCandidateOverride(
   return compareCascadePositions(incoming.position, existing.position) > 0
 }
 
-function createInlineCascadePosition(): CascadePosition {
-  return {
-    layer: null,
-    layerOrder: Number.MAX_SAFE_INTEGER,
-    sourceOrder: Number.MAX_SAFE_INTEGER,
-    specificity: [1, 0, 0, 0],
-    specificityScore: Number.MAX_SAFE_INTEGER,
-    isImportant: false,
-  }
-}
+const INLINE_CASCADE_POSITION: CascadePosition = Object.freeze({
+  layer: null,
+  layerOrder: Number.MAX_SAFE_INTEGER,
+  sourceOrder: Number.MAX_SAFE_INTEGER,
+  specificity: [1, 0, 0, 0] as const,
+  specificityScore: Number.MAX_SAFE_INTEGER,
+  isImportant: false,
+})
+
+const INLINE_GUARD_PROVENANCE: LayoutGuardProvenance = Object.freeze({
+  kind: LayoutSignalGuard.Unconditional,
+  conditions: [],
+  key: "always",
+})
 
 export function resolveRuleLayerOrder(rule: RuleEntity, css: CSSGraph): number {
   const layer = rule.containingLayer

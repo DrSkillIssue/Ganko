@@ -1,4 +1,5 @@
 import type { Logger } from "@drskillissue/ganko-shared"
+import { selectKth } from "./util"
 
 export interface LayoutPerfStats {
   readonly elementsScanned: number
@@ -239,11 +240,8 @@ export function maybeLogLayoutPerf(stats: LayoutPerfStatsMutable, log?: Logger):
 
 function computeP95(values: readonly number[]): number {
   if (values.length === 0) return 0
-
-  const sorted = [...values]
-  sorted.sort((left, right) => left - right)
-  const index = Math.ceil(sorted.length * 0.95) - 1
-  if (index <= 0) return sorted[0] ?? 0
-  if (index >= sorted.length) return sorted[sorted.length - 1] ?? 0
-  return sorted[index] ?? 0
+  const scratch = [...values]
+  const index = Math.ceil(scratch.length * 0.95) - 1
+  const clamped = index <= 0 ? 0 : index >= scratch.length ? scratch.length - 1 : index
+  return selectKth(scratch, clamped)
 }

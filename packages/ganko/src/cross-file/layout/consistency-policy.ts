@@ -127,25 +127,43 @@ function resolveConfidence(posterior: PosteriorInterval, evidenceMass: number): 
   return clamp(confidence, 0, 1)
 }
 
-function selectTopFactors(evidence: ConsistencyEvidence): readonly AlignmentFactorId[] {
-  const sorted = [...evidence.atoms]
-  sorted.sort((left, right) => {
-    const leftMagnitude = Math.abs((left.contribution.min + left.contribution.max) / 2)
-    const rightMagnitude = Math.abs((right.contribution.min + right.contribution.max) / 2)
-    if (leftMagnitude !== rightMagnitude) return rightMagnitude - leftMagnitude
-    if (left.factorId < right.factorId) return -1
-    if (left.factorId > right.factorId) return 1
-    return 0
-  })
+const EMPTY_FACTOR_LIST: readonly AlignmentFactorId[] = Object.freeze([])
 
-  const out: AlignmentFactorId[] = []
-  for (let i = 0; i < sorted.length && i < 4; i++) {
-    const item = sorted[i]
-    if (!item) continue
-    out.push(item.factorId)
+function selectTopFactors(evidence: ConsistencyEvidence): readonly AlignmentFactorId[] {
+  const atoms = evidence.atoms
+  if (atoms.length === 0) return EMPTY_FACTOR_LIST
+
+  const top: { id: AlignmentFactorId; mag: number }[] = []
+  for (let i = 0; i < atoms.length; i++) {
+    const atom = atoms[i]
+    if (!atom) continue
+    const mag = Math.abs((atom.contribution.min + atom.contribution.max) / 2)
+    if (mag <= 0) continue
+
+    if (top.length < 4) {
+      top.push({ id: atom.factorId, mag })
+      continue
+    }
+
+    let minIdx = 0
+    for (let j = 1; j < top.length; j++) {
+      const curr = top[j]
+      const best = top[minIdx]
+      if (curr && best && curr.mag < best.mag) minIdx = j
+    }
+    const minEntry = top[minIdx]
+    if (minEntry && mag > minEntry.mag) {
+      top[minIdx] = { id: atom.factorId, mag }
+    }
   }
 
-  return out
+  top.sort((a, b) => {
+    if (a.mag !== b.mag) return b.mag - a.mag
+    if (a.id < b.id) return -1
+    if (a.id > b.id) return 1
+    return 0
+  })
+  return top.map(t => t.id)
 }
 
 function logistic(value: number): number {
