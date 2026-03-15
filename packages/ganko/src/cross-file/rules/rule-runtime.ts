@@ -1,4 +1,4 @@
-import { readElementRef, readElementRefById, readKnownPx } from "../layout"
+import { readElementRef, readElementRefById, readKnownPx, LayoutTextualContentState } from "../layout"
 import type { LayoutElementNode, LayoutGraph, LayoutSignalName, LayoutSignalSnapshot } from "../layout"
 import { createDiagnostic, resolveMessage, effectiveSeverity } from "../../diagnostic"
 import type { Emit } from "../../graph"
@@ -22,24 +22,24 @@ export function readNodeRefById(layout: LayoutGraph, solidFile: string, elementI
 
 export function isFlowRelevantBySiblingsOrText(
   node: LayoutElementNode,
-  textualContent: LayoutSignalSnapshot["textualContent"],
+  textualContent: LayoutTextualContentState,
 ): boolean {
   if (node.siblingCount >= 2) return true
-  return textualContent === "yes" || textualContent === "unknown" || textualContent === "dynamic-text"
+  return textualContent === LayoutTextualContentState.Yes || textualContent === LayoutTextualContentState.Unknown || textualContent === LayoutTextualContentState.DynamicText
 }
 
 export function isDeferredContainerLike(
   node: LayoutElementNode,
-  textualContent: LayoutSignalSnapshot["textualContent"],
+  textualContent: LayoutTextualContentState,
 ): boolean {
   if (node.siblingCount >= 2) return true
-  if (textualContent === "unknown") return true
+  if (textualContent === LayoutTextualContentState.Unknown) return true
   if (node.tagName !== null && SECTIONING_CONTAINER_TAGS.has(node.tagName)) return true
   return false
 }
 
 export function isDynamicContainerLike(node: LayoutElementNode): boolean {
-  return node.textualContent === "unknown" && node.siblingCount >= 2
+  return node.textualContent === LayoutTextualContentState.Unknown && node.siblingCount >= 2
 }
 
 export function isLikelyViewportAffectingContainer(node: LayoutElementNode): boolean {

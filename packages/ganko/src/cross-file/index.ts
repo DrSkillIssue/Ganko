@@ -8,16 +8,15 @@ export {
   evaluateAlignmentCase,
   getLatestLayoutPerfStatsForTest,
 } from "./layout"
+export { AlignmentTextContrast, ContextCertainty } from "./layout"
 export type {
   AlignmentCase,
   AlignmentContext,
   AlignmentContextKind,
-  ContextCertainty,
   AlignmentCohortSignals,
   AlignmentEvaluationDecision,
   AlignmentEvaluation,
   AlignmentElementEvidence,
-  AlignmentTextContrast,
   LayoutGraph,
   LayoutPerfStats,
   LayoutSignalSnapshot,

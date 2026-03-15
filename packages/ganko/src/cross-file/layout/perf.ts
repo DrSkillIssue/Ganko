@@ -1,4 +1,27 @@
 import type { Logger } from "@drskillissue/ganko-shared"
+import { selectKth } from "./util"
+
+export interface ReservoirSampler {
+  readonly buffer: number[]
+  count: number
+  readonly capacity: number
+}
+
+export function createReservoir(capacity: number): ReservoirSampler {
+  return { buffer: [], count: 0, capacity }
+}
+
+export function reservoirPush(r: ReservoirSampler, value: number): void {
+  r.count++
+  if (r.buffer.length < r.capacity) {
+    r.buffer.push(value)
+    return
+  }
+  const j = Math.floor(Math.random() * r.count)
+  if (j < r.capacity) {
+    r.buffer[j] = value
+  }
+}
 
 export interface LayoutPerfStats {
   readonly elementsScanned: number
@@ -55,7 +78,7 @@ export interface LayoutPerfStatsMutable {
   cohortUnimodalFalse: number
   factorCoverageSum: number
   factorCoverageCount: number
-  posteriorWidths: number[]
+  posteriorWidths: ReservoirSampler
   uncertaintyEscalations: number
   signalSnapshotsBuilt: number
   signalSnapshotCacheHits: number
@@ -128,7 +151,7 @@ export function createLayoutPerfStats(): LayoutPerfStatsMutable {
     cohortUnimodalFalse: 0,
     factorCoverageSum: 0,
     factorCoverageCount: 0,
-    posteriorWidths: [],
+    posteriorWidths: createReservoir(200),
     uncertaintyEscalations: 0,
     signalSnapshotsBuilt: 0,
     signalSnapshotCacheHits: 0,
@@ -237,13 +260,10 @@ export function maybeLogLayoutPerf(stats: LayoutPerfStatsMutable, log?: Logger):
   )
 }
 
-function computeP95(values: readonly number[]): number {
-  if (values.length === 0) return 0
-
-  const sorted = [...values]
-  sorted.sort((left, right) => left - right)
-  const index = Math.ceil(sorted.length * 0.95) - 1
-  if (index <= 0) return sorted[0] ?? 0
-  if (index >= sorted.length) return sorted[sorted.length - 1] ?? 0
-  return sorted[index] ?? 0
+function computeP95(sampler: ReservoirSampler): number {
+  if (sampler.buffer.length === 0) return 0
+  const scratch = [...sampler.buffer]
+  const index = Math.ceil(scratch.length * 0.95) - 1
+  const clamped = index <= 0 ? 0 : index >= scratch.length ? scratch.length - 1 : index
+  return selectKth(scratch, clamped)
 }

@@ -284,7 +284,11 @@ describe("content composition baseline detection", () => {
   });
 
   // Test 7: Sidebar nav — badge deeply nested through inline spans
-  it("detects mixed content through deeply nested inline elements", () => {
+  // The parent uses flex-direction: column, so the block axis is the main axis.
+  // Vertical offset differences are the flex algorithm's normal behavior, and
+  // line-height/composition divergence between column-flex siblings does not
+  // cause visual misalignment (each item occupies its own row).
+  it("does not flag deeply nested inline elements in flex-direction: column", () => {
     const decisions = collectDecisionsFromFixture(
       `
         import "./layout.css";
@@ -326,7 +330,7 @@ describe("content composition baseline detection", () => {
       `,
     );
 
-    expect(hasAcceptedDecision(decisions)).toBe(true);
+    expect(hasAcceptedDecision(decisions)).toBe(false);
   });
 
   // Test 8: Block-level children isolate baseline
@@ -367,7 +371,10 @@ describe("content composition baseline detection", () => {
   });
 
   // Test 10: Form field group — label with required asterisk as inline-flex
-  it("flags label with inline-flex asterisk among text-only labels", () => {
+  // The parent .field uses flex-direction: column. Vertical positioning is
+  // controlled by the flex main axis, not alignment. Composition differences
+  // between label and input are irrelevant for vertical alignment.
+  it("does not flag label with inline-flex asterisk in flex-direction: column", () => {
     const decisions = collectDecisionsFromFixture(
       `
         import "./layout.css";
@@ -410,7 +417,7 @@ describe("content composition baseline detection", () => {
       `,
     );
 
-    expect(hasAcceptedDecision(decisions)).toBe(true);
+    expect(hasAcceptedDecision(decisions)).toBe(false);
   });
 
   // Test 11: Breadcrumb — majority have mixed composition, text-only outlier is lower risk
@@ -452,7 +459,9 @@ describe("content composition baseline detection", () => {
   });
 
   // Test 12: Dropdown menu items — some with keyboard shortcut hints
-  it("flags menu items with inline-block kbd among text-only items", () => {
+  // The parent .menu uses flex-direction: column. Vertical differences are
+  // the flex algorithm stacking items, not alignment misalignment.
+  it("does not flag menu items with inline-block kbd in flex-direction: column", () => {
     const decisions = collectDecisionsFromFixture(
       `
         import "./layout.css";
@@ -490,7 +499,7 @@ describe("content composition baseline detection", () => {
       `,
     );
 
-    expect(hasAcceptedDecision(decisions)).toBe(true);
+    expect(hasAcceptedDecision(decisions)).toBe(false);
   });
 
   // Test 13: Tag list — one tag has a dismiss button, but each tag is inline-flex

@@ -1,5 +1,5 @@
 import type { LayoutElementNode } from "./graph"
-import type { LayoutSignalSnapshot } from "./signal-model"
+import { LayoutTextualContentState, type LayoutSignalSnapshot } from "./signal-model"
 import { isLayoutHidden } from "./signal-access"
 
 interface MeasurementCandidateSet {
@@ -134,7 +134,7 @@ function resolveMeasurementCandidates(
       firstControlOrReplacedDescendant = child
     }
 
-    if (firstTextualDescendant === null && child.textualContent === "yes") {
+    if (firstTextualDescendant === null && child.textualContent === LayoutTextualContentState.Yes) {
       firstTextualDescendant = child
     }
 
@@ -164,6 +164,6 @@ function resolveMeasurementNode(root: LayoutElementNode, candidates: Measurement
   if (candidates.firstControlOrReplacedDescendant !== null) return candidates.firstControlOrReplacedDescendant
   if (root.isControl || root.isReplaced) return root
   if (candidates.firstTextualDescendant !== null) return candidates.firstTextualDescendant
-  if (root.textualContent === "yes") return root
+  if (root.textualContent === LayoutTextualContentState.Yes) return root
   return root
 }

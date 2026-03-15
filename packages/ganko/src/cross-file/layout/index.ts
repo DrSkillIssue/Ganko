@@ -1,3 +1,4 @@
+export { LayoutScrollAxis } from "./graph"
 export type {
   LayoutElementNode,
   LayoutElementRef,
@@ -14,25 +15,34 @@ export type {
   LayoutNormalizedRuleDeclaration,
   LayoutReservedSpaceFact,
   LayoutReservedSpaceReason,
-  LayoutScrollAxis,
   LayoutScrollContainerFact,
   LayoutStatefulSelectorEntry,
   LayoutStyleRuleNode,
 } from "./graph"
 export { toLayoutElementKey } from "./graph"
+export { ContextCertainty } from "./context-model"
 export type {
   AlignmentContext,
   AlignmentContextKind,
   BaselineRelevance,
-  ContextCertainty,
   InlineDirectionModel,
   LayoutAxisModel,
 } from "./context-model"
+export {
+  AlignmentTextContrast,
+  ContentCompositionClassification,
+  CohortSubjectMembership,
+  EvidenceValueKind,
+  LayoutSignalGuard,
+  LayoutSignalSource,
+  LayoutSignalUnit,
+  LayoutTextualContentState,
+  SignalConflictValue,
+} from "./signal-model"
 export type {
   AlignmentCase,
   AlignmentCohort,
   AlignmentCohortFactSummary,
-  ContentCompositionClassification,
   ContentCompositionFingerprint,
   InlineReplacedKind,
   LayoutCohortStats,
@@ -45,27 +55,19 @@ export type {
   AlignmentFactorId,
   AlignmentFindingKind,
   CohortIdentifiability,
-  CohortSubjectMembership,
   EvidenceProvenance,
   EvidenceAtom,
-  EvidenceValueKind,
   EvidenceWitness,
   LogOddsInterval,
   NumericEvidenceValue,
   PosteriorInterval,
   AlignmentSignalFinding,
-  AlignmentTextContrast,
-  LayoutGuardProvenance,
   LayoutKnownSignalValue,
   LayoutSignalName,
   LayoutSignalSnapshot,
-  LayoutSignalSource,
   LayoutSnapshotHotSignals,
-  LayoutSignalGuard,
-  LayoutSignalUnit,
   SignalConflictEvidence,
   LayoutSignalValue,
-  LayoutTextualContentState,
   LayoutUnknownSignalValue,
 } from "./signal-model"
 export { layoutSignalNames } from "./signal-model"
@@ -94,8 +96,7 @@ export {
   formatCompositionClassification,
   formatCompositionFixSuggestion,
   resolveCompositionCoverage,
-  resolveCompositionDivergenceStrength,
-  resolveMajorityClassification,
+  resolveCompositionDivergence,
 } from "./content-composition"
 export { collectAlignmentCases } from "./case-builder"
 export type { AlignmentEvaluationDecision, AlignmentRejectionDetail, AlignmentRejectionReason } from "./scoring"

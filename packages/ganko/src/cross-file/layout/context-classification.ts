@@ -1,18 +1,20 @@
 import type { CrossRuleContext } from "../rule"
-import type {
-  AlignmentContext,
-  AlignmentContextKind,
-  BaselineRelevance,
+import {
   ContextCertainty,
-  InlineDirectionModel,
-  LayoutAxisModel,
-  LayoutContextEvidence,
+  deriveAlignmentContext,
+  type AlignmentContext,
+  type AlignmentContextKind,
+  type BaselineRelevance,
+  type InlineDirectionModel,
+  type LayoutAxisModel,
+  type LayoutContextEvidence,
 } from "./context-model"
 import type { LayoutElementNode, LayoutElementRef } from "./graph"
-import type { LayoutSignalSnapshot } from "./signal-model"
+import { EvidenceValueKind, LayoutSignalGuard, type LayoutSignalSnapshot } from "./signal-model"
 import { readKnownSignalWithGuard, readNormalizedSignalEvidence } from "./signal-access"
+import { WHITESPACE_RE } from "./util"
 
-const WHITESPACE_RE = /\s+/
+
 const TABLE_SEMANTIC_TAGS = new Set(["table", "thead", "tbody", "tfoot", "tr", "td", "th"])
 const TABLE_DISPLAY_VALUES = new Set([
   "table",
@@ -29,7 +31,7 @@ const TABLE_DISPLAY_VALUES = new Set([
 const FLEX_DISPLAY_VALUES = new Set(["flex", "inline-flex"])
 const GRID_DISPLAY_VALUES = new Set(["grid", "inline-grid"])
 const INLINE_DISPLAY_VALUES = new Set(["inline", "inline-block", "inline-list-item"])
-const DISPLAY_TOKEN_SPLIT_RE = /\s+/
+
 
 export function classifyAlignmentContext(
   context: CrossRuleContext,
@@ -70,8 +72,7 @@ export function createAlignmentContextForParent(
   const certainty = combineCertainty(contextCertainty, inlineDirection.certainty)
 
   const baselineRelevance = computeBaselineRelevance(classified.kind, parentAlignItems, parentPlaceItems)
-
-
+  const crossAxisInfo = resolveCrossAxisIsBlockAxis(classified.kind, snapshot, axis.value)
 
   const out: AlignmentContext = {
     kind: classified.kind,
@@ -88,6 +89,8 @@ export function createAlignmentContextForParent(
     parentAlignItems,
     parentPlaceItems,
     hasPositionedOffset: positionedOffset.hasPositionedOffset,
+    crossAxisIsBlockAxis: crossAxisInfo.value,
+    crossAxisIsBlockAxisCertainty: crossAxisInfo.certainty,
     baselineRelevance,
     evidence,
   }
@@ -104,7 +107,7 @@ function classifyKind(
   if (evidence.hasTableSemantics) {
     return {
       kind: "table-cell",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -215,7 +218,7 @@ function resolveContainerKind(
     }
   }
 
-  const tokens = display.split(DISPLAY_TOKEN_SPLIT_RE)
+  const tokens = display.split(WHITESPACE_RE)
   if (tokens.length === 2) {
     const outside = tokens[0]
     const inside = tokens[1]
@@ -271,7 +274,7 @@ function resolveAxis(snapshot: LayoutSignalSnapshot): {
   if (!snapshot.signals.has("writing-mode")) {
     return {
       value: "horizontal-tb",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -302,7 +305,7 @@ function resolveInlineDirection(snapshot: LayoutSignalSnapshot): {
   if (!snapshot.signals.has("direction")) {
     return {
       value: "ltr",
-      certainty: "resolved",
+      certainty: ContextCertainty.Resolved,
     }
   }
 
@@ -321,9 +324,9 @@ function resolveInlineDirection(snapshot: LayoutSignalSnapshot): {
 }
 
 function toContextCertainty(kind: ReturnType<typeof readNormalizedSignalEvidence>["kind"]): ContextCertainty {
-  if (kind === "exact") return "resolved"
-  if (kind === "interval" || kind === "conditional") return "conditional"
-  return "unknown"
+  if (kind === EvidenceValueKind.Exact) return ContextCertainty.Resolved
+  if (kind === EvidenceValueKind.Interval || kind === EvidenceValueKind.Conditional) return ContextCertainty.Conditional
+  return ContextCertainty.Unknown
 }
 
 function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
@@ -334,7 +337,7 @@ function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
   if (!position) {
     return {
       hasPositionedOffset: false,
-      certainty: "unknown",
+      certainty: ContextCertainty.Unknown,
     }
   }
 
@@ -352,18 +355,55 @@ function resolvePositionedOffset(snapshot: LayoutSignalSnapshot): {
   }
 }
 
+const FLEX_ROW_VALUES = new Set(["row", "row-reverse"])
+
+/**
+ * Determines whether the container's cross axis aligns with the document's
+ * block axis. `flex-direction` and `grid-auto-flow` values are already
+ * writing-mode-relative (`row` = inline axis, `column` = block axis), so
+ * no additional writing-mode branching is needed.
+ *
+ * - `flex-direction: row|row-reverse` → main = inline, cross = block → `true`
+ * - `flex-direction: column|column-reverse` → main = block, cross = inline → `false`
+ * - `grid-auto-flow: row` → row-major, block-axis alignment relevant → `true`
+ * - `grid-auto-flow: column` → column-major, block-axis is stacking direction → `false`
+ */
+function resolveCrossAxisIsBlockAxis(
+  kind: AlignmentContextKind,
+  snapshot: LayoutSignalSnapshot,
+  _axis: LayoutAxisModel,
+): { readonly value: boolean; readonly certainty: ContextCertainty } {
+  if (kind !== "flex-cross-axis" && kind !== "grid-cross-axis") {
+    return { value: true, certainty: ContextCertainty.Resolved }
+  }
+
+  if (kind === "flex-cross-axis") {
+    const signal = readKnownSignalWithGuard(snapshot, "flex-direction")
+    if (!signal) {
+      return { value: true, certainty: ContextCertainty.Resolved }
+    }
+    const certainty = resolveSignalCertainty(signal)
+    return { value: FLEX_ROW_VALUES.has(signal.normalized), certainty }
+  }
+
+  const signal = readKnownSignalWithGuard(snapshot, "grid-auto-flow")
+  if (!signal) {
+    return { value: true, certainty: ContextCertainty.Resolved }
+  }
+  const certainty = resolveSignalCertainty(signal)
+  return { value: !signal.normalized.startsWith("column"), certainty }
+}
+
 function resolveSignalCertainty(
   value: ReturnType<typeof readKnownSignalWithGuard>,
 ): ContextCertainty {
-  if (!value) return "unknown"
-  if (value.guard === "conditional") return "conditional"
-  return "resolved"
+  if (!value) return ContextCertainty.Unknown
+  if (value.guard.kind === LayoutSignalGuard.Conditional) return ContextCertainty.Conditional
+  return ContextCertainty.Resolved
 }
 
 function combineCertainty(left: ContextCertainty, right: ContextCertainty): ContextCertainty {
-  if (left === "unknown" || right === "unknown") return "unknown"
-  if (left === "conditional" || right === "conditional") return "conditional"
-  return "resolved"
+  return left > right ? left : right
 }
 
 export function getContextElementRef(
@@ -462,24 +502,6 @@ export function finalizeTableCellBaselineRelevance(
     if (consensusValue === null) continue
     if (!TABLE_CELL_GEOMETRIC_VERTICAL_ALIGN.has(consensusValue)) continue
 
-    // Replace with finalized context — all fields identical except baselineRelevance.
-    contextByParentNode.set(parent, {
-      kind: context.kind,
-      certainty: context.certainty,
-      parentSolidFile: context.parentSolidFile,
-      parentElementId: context.parentElementId,
-      parentElementKey: context.parentElementKey,
-      parentTag: context.parentTag,
-      axis: context.axis,
-      axisCertainty: context.axisCertainty,
-      inlineDirection: context.inlineDirection,
-      inlineDirectionCertainty: context.inlineDirectionCertainty,
-      parentDisplay: context.parentDisplay,
-      parentAlignItems: context.parentAlignItems,
-      parentPlaceItems: context.parentPlaceItems,
-      hasPositionedOffset: context.hasPositionedOffset,
-      baselineRelevance: "irrelevant",
-      evidence: context.evidence,
-    })
+    contextByParentNode.set(parent, deriveAlignmentContext(context, { baselineRelevance: "irrelevant" }))
   }
 }

@@ -14,6 +14,9 @@ import {
   applyConsistencyPolicy,
   buildConsistencyEvidence,
   formatAlignmentCauses,
+  CohortSubjectMembership,
+  ContentCompositionClassification,
+  EvidenceValueKind,
   type AlignmentSignalFinding,
   type CohortIdentifiability,
   type ConsistencyEvidence,
@@ -106,6 +109,7 @@ function createPolicyEvidence(
     contextStrength: 0.7,
     replacedStrength: 0.4,
     compositionStrength: 0,
+    majorityClassification: ContentCompositionClassification.Unknown,
     identifiability,
     factSummary: {
       exact: 12,
@@ -164,9 +168,9 @@ function createResolvedIdentifiability(): CohortIdentifiability {
   return {
     dominantShare: 0.75,
     subjectExcludedDominantShare: 0.67,
-    subjectMembership: "nondominant",
+    subjectMembership: CohortSubjectMembership.Nondominant,
     ambiguous: false,
-    kind: "exact",
+    kind: EvidenceValueKind.Exact,
   };
 }
 
@@ -174,9 +178,9 @@ function createAmbiguousIdentifiability(): CohortIdentifiability {
   return {
     dominantShare: 0.5,
     subjectExcludedDominantShare: 0.5,
-    subjectMembership: "ambiguous",
+    subjectMembership: CohortSubjectMembership.Ambiguous,
     ambiguous: true,
-    kind: "exact",
+    kind: EvidenceValueKind.Exact,
   };
 }
 
@@ -188,6 +192,7 @@ function createLowMassPolicyEvidence(): ConsistencyEvidence {
     contextStrength: 0,
     replacedStrength: 0,
     compositionStrength: 0,
+    majorityClassification: ContentCompositionClassification.Unknown,
     identifiability: createResolvedIdentifiability(),
     factSummary: {
       exact: 2,
@@ -203,7 +208,7 @@ function createLowMassPolicyEvidence(): ConsistencyEvidence {
     atoms: [
       createAtom({
         factorId: "offset-delta",
-        valueKind: "exact",
+        valueKind: EvidenceValueKind.Exact,
         min: 0.1,
         max: 0.1,
         reason: "very weak offset",
@@ -272,11 +277,11 @@ describe("layout alignment policy semantics", () => {
 
   it("keeps top factor ordering deterministic across atom permutations", () => {
     const atomsA: readonly EvidenceAtom[] = [
-      createAtom({ factorId: "context-conflict", valueKind: "exact", min: 0.5, max: 0.5, reason: "context" }),
-      createAtom({ factorId: "offset-delta", valueKind: "exact", min: 1.1, max: 1.1, reason: "offset" }),
-      createAtom({ factorId: "declared-offset-delta", valueKind: "exact", min: 0.5, max: 0.5, reason: "declared" }),
-      createAtom({ factorId: "baseline-conflict", valueKind: "exact", min: 0.5, max: 0.5, reason: "baseline" }),
-      createAtom({ factorId: "replaced-control-risk", valueKind: "exact", min: 0.2, max: 0.2, reason: "replaced" }),
+      createAtom({ factorId: "context-conflict", valueKind: EvidenceValueKind.Exact, min: 0.5, max: 0.5, reason: "context" }),
+      createAtom({ factorId: "offset-delta", valueKind: EvidenceValueKind.Exact, min: 1.1, max: 1.1, reason: "offset" }),
+      createAtom({ factorId: "declared-offset-delta", valueKind: EvidenceValueKind.Exact, min: 0.5, max: 0.5, reason: "declared" }),
+      createAtom({ factorId: "baseline-conflict", valueKind: EvidenceValueKind.Exact, min: 0.5, max: 0.5, reason: "baseline" }),
+      createAtom({ factorId: "replaced-control-risk", valueKind: EvidenceValueKind.Exact, min: 0.2, max: 0.2, reason: "replaced" }),
     ];
 
     const a0 = atomsA[0];
@@ -366,7 +371,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "context-certainty",
-          valueKind: "exact",
+          valueKind: EvidenceValueKind.Exact,
           min: -0.8,
           max: -0.8,
           reason: "unknown context",
@@ -382,7 +387,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "offset-delta",
-          valueKind: "conditional",
+          valueKind: EvidenceValueKind.Conditional,
           min: 0,
           max: 2.2,
           reason: "conditional offset interval",
@@ -398,7 +403,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "offset-delta",
-          valueKind: "exact",
+          valueKind: EvidenceValueKind.Exact,
           min: 1.8,
           max: 1.8,
           reason: "strong offset",
@@ -415,9 +420,9 @@ describe("layout alignment policy semantics", () => {
     const decision = applyConsistencyPolicy({
       evidence: createPolicyEvidence(
         [
-          createAtom({ factorId: "offset-delta", valueKind: "exact", min: 2.4, max: 2.4, reason: "offset" }),
-          createAtom({ factorId: "baseline-conflict", valueKind: "exact", min: 1.4, max: 1.4, reason: "baseline" }),
-          createAtom({ factorId: "context-conflict", valueKind: "exact", min: 0.7, max: 0.7, reason: "context" }),
+          createAtom({ factorId: "offset-delta", valueKind: EvidenceValueKind.Exact, min: 2.4, max: 2.4, reason: "offset" }),
+          createAtom({ factorId: "baseline-conflict", valueKind: EvidenceValueKind.Exact, min: 1.4, max: 1.4, reason: "baseline" }),
+          createAtom({ factorId: "context-conflict", valueKind: EvidenceValueKind.Exact, min: 0.7, max: 0.7, reason: "context" }),
         ],
         createAmbiguousIdentifiability(),
       ),
@@ -432,12 +437,12 @@ describe("layout alignment policy semantics", () => {
   it("replacing exact with conditional never increases posterior lower bound", () => {
     const exact = applyConsistencyPolicy({
       evidence: createPolicyEvidence([
-        createAtom({ factorId: "offset-delta", valueKind: "exact", min: 1.6, max: 1.6, reason: "exact" }),
+        createAtom({ factorId: "offset-delta", valueKind: EvidenceValueKind.Exact, min: 1.6, max: 1.6, reason: "exact" }),
       ]),
     });
     const conditional = applyConsistencyPolicy({
       evidence: createPolicyEvidence([
-        createAtom({ factorId: "offset-delta", valueKind: "conditional", min: 0, max: 1.6, reason: "conditional" }),
+        createAtom({ factorId: "offset-delta", valueKind: EvidenceValueKind.Conditional, min: 0, max: 1.6, reason: "conditional" }),
       ]),
     });
 
@@ -454,14 +459,14 @@ describe("layout alignment policy semantics", () => {
 
       const exact = applyConsistencyPolicy({
         evidence: createPolicyEvidence([
-          createAtom({ factorId: "offset-delta", valueKind: "exact", min: magnitude, max: magnitude, reason: "exact" }),
+          createAtom({ factorId: "offset-delta", valueKind: EvidenceValueKind.Exact, min: magnitude, max: magnitude, reason: "exact" }),
         ]),
       });
       const interval = applyConsistencyPolicy({
         evidence: createPolicyEvidence([
           createAtom({
             factorId: "offset-delta",
-            valueKind: "interval",
+            valueKind: EvidenceValueKind.Interval,
             min: magnitude * 0.6,
             max: magnitude,
             reason: "interval",
@@ -472,7 +477,7 @@ describe("layout alignment policy semantics", () => {
         evidence: createPolicyEvidence([
           createAtom({
             factorId: "offset-delta",
-            valueKind: "conditional",
+            valueKind: EvidenceValueKind.Conditional,
             min: 0,
             max: magnitude * 0.7,
             reason: "conditional",
@@ -483,7 +488,7 @@ describe("layout alignment policy semantics", () => {
         evidence: createPolicyEvidence([
           createAtom({
             factorId: "offset-delta",
-            valueKind: "unknown",
+            valueKind: EvidenceValueKind.Unknown,
             min: 0,
             max: 0,
             reason: "unknown",
@@ -508,7 +513,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "offset-delta",
-          valueKind: "exact",
+          valueKind: EvidenceValueKind.Exact,
           min: requiredLift - epsilon,
           max: requiredLift - epsilon,
           reason: "just below threshold",
@@ -519,7 +524,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "offset-delta",
-          valueKind: "exact",
+          valueKind: EvidenceValueKind.Exact,
           min: requiredLift,
           max: requiredLift,
           reason: "exactly at threshold",
@@ -530,7 +535,7 @@ describe("layout alignment policy semantics", () => {
       evidence: createPolicyEvidence([
         createAtom({
           factorId: "offset-delta",
-          valueKind: "exact",
+          valueKind: EvidenceValueKind.Exact,
           min: requiredLift + epsilon,
           max: requiredLift + epsilon,
           reason: "just above threshold",
@@ -687,8 +692,8 @@ describe("layout alignment policy semantics", () => {
       const offsetAtom = evidence.atoms.find((atom) => atom.factorId === "offset-delta");
       const contextCertaintyAtom = evidence.atoms.find((atom) => atom.factorId === "context-certainty");
       if (!offsetAtom || !contextCertaintyAtom) continue;
-      if (offsetAtom.valueKind !== "exact") continue;
-      if (contextCertaintyAtom.valueKind !== "conditional") continue;
+      if (offsetAtom.valueKind !== EvidenceValueKind.Exact) continue;
+      if (contextCertaintyAtom.valueKind !== EvidenceValueKind.Conditional) continue;
       foundMixedEvidence = true;
       break;
     }

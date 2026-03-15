@@ -1,5 +1,6 @@
 import type { AlignmentContext, AlignmentContextKind, ContextCertainty } from "./context-model"
-import type { LayoutGuardConditionProvenance } from "./guard-model"
+import type { LayoutElementNode } from "./graph"
+import type { LayoutGuardConditionProvenance, LayoutRuleGuard } from "./guard-model"
 
 export const layoutSignalNames = [
   "line-height",
@@ -28,6 +29,8 @@ export const layoutSignalNames = [
   "justify-items",
   "place-items",
   "place-self",
+  "flex-direction",
+  "grid-auto-flow",
   "appearance",
   "box-sizing",
   "padding-top",
@@ -53,26 +56,18 @@ export const layoutSignalNames = [
 
 export type LayoutSignalName = (typeof layoutSignalNames)[number]
 
-export type LayoutSignalSource = "selector" | "inline-style"
+export const enum LayoutSignalSource { Selector = 0, InlineStyle = 1 }
 
-export type LayoutSignalGuard = "unconditional" | "conditional"
+export const enum LayoutSignalGuard { Unconditional = 0, Conditional = 1 }
 
-export interface LayoutGuardProvenance {
-  readonly kind: LayoutSignalGuard
-  readonly conditions: readonly LayoutGuardConditionProvenance[]
-  readonly key: string
-}
-
-export type LayoutSignalUnit = "px" | "unitless" | "keyword" | "unknown"
+export const enum LayoutSignalUnit { Px = 0, Unitless = 1, Keyword = 2, Unknown = 3 }
 
 export interface LayoutKnownSignalValue {
   readonly kind: "known"
   readonly name: LayoutSignalName
-  readonly raw: string
   readonly normalized: string
   readonly source: LayoutSignalSource
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guard: LayoutRuleGuard
   readonly unit: LayoutSignalUnit
   readonly px: number | null
   readonly quality: "exact" | "estimated"
@@ -81,25 +76,17 @@ export interface LayoutKnownSignalValue {
 export interface LayoutUnknownSignalValue {
   readonly kind: "unknown"
   readonly name: LayoutSignalName
-  readonly raw: string | null
   readonly source: LayoutSignalSource | null
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guard: LayoutRuleGuard
   readonly reason: string
 }
 
 export type LayoutSignalValue = LayoutKnownSignalValue | LayoutUnknownSignalValue
 
-export type LayoutTextualContentState = "yes" | "no" | "unknown" | "dynamic-text"
+export const enum LayoutTextualContentState { Yes = 0, No = 1, Unknown = 2, DynamicText = 3 }
 
 export interface LayoutSignalSnapshot {
-  readonly solidFile: string
-  readonly elementId: number
-  readonly elementKey: string
-  readonly tag: string | null
-  readonly textualContent: LayoutTextualContentState
-  readonly isControl: boolean
-  readonly isReplaced: boolean
+  readonly node: LayoutElementNode
   readonly signals: ReadonlyMap<LayoutSignalName, LayoutSignalValue>
   readonly knownSignalCount: number
   readonly unknownSignalCount: number
@@ -121,9 +108,9 @@ export interface AlignmentCohort {
   readonly siblingCount: number
 }
 
-export type AlignmentTextContrast = "different" | "same" | "unknown"
+export const enum AlignmentTextContrast { Different = 0, Same = 1, Unknown = 2 }
 
-export type SignalConflictValue = "conflict" | "aligned" | "unknown"
+export const enum SignalConflictValue { Conflict = 0, Aligned = 1, Unknown = 2 }
 
 export interface SignalConflictEvidence {
   readonly value: SignalConflictValue
@@ -138,7 +125,7 @@ export interface AlignmentCohortSignals {
   readonly textContrastWithPeers: AlignmentTextContrast
 }
 
-export type CohortSubjectMembership = "dominant" | "nondominant" | "ambiguous" | "insufficient"
+export const enum CohortSubjectMembership { Dominant = 0, Nondominant = 1, Ambiguous = 2, Insufficient = 3 }
 
 export interface CohortIdentifiability {
   readonly dominantShare: number
@@ -187,6 +174,8 @@ export interface LayoutSnapshotHotSignals {
   readonly verticalAlign: HotNormalizedSignalEvidence
   readonly alignSelf: HotNormalizedSignalEvidence
   readonly placeSelf: HotNormalizedSignalEvidence
+  readonly flexDirection: HotNormalizedSignalEvidence
+  readonly gridAutoFlow: HotNormalizedSignalEvidence
   readonly writingMode: HotNormalizedSignalEvidence
   readonly direction: HotNormalizedSignalEvidence
   readonly display: HotNormalizedSignalEvidence
@@ -261,13 +250,10 @@ export type AlignmentFactorId =
   | "content-composition-conflict"
   | "context-certainty"
 
-export type ContentCompositionClassification =
-  | "text-only"
-  | "replaced-only"
-  | "mixed-unmitigated"
-  | "mixed-mitigated"
-  | "block-segmented"
-  | "unknown"
+export const enum ContentCompositionClassification {
+  TextOnly = 0, ReplacedOnly = 1, MixedUnmitigated = 2,
+  MixedMitigated = 3, BlockSegmented = 4, Unknown = 5,
+}
 
 /**
  * Distinguishes intrinsically-replaced elements (img, svg, video, canvas) from
@@ -290,7 +276,7 @@ export interface ContentCompositionFingerprint {
   readonly hasOnlyBlockChildren: boolean
 }
 
-export type EvidenceValueKind = "exact" | "interval" | "conditional" | "unknown"
+export const enum EvidenceValueKind { Exact = 0, Interval = 1, Conditional = 2, Unknown = 3 }
 
 export interface EvidenceWitness<T> {
   readonly value: T | null

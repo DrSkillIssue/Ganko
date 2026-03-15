@@ -9,13 +9,11 @@ import type { Logger } from "@drskillissue/ganko-shared"
 import type {
   LayoutCascadedDeclaration,
   LayoutConditionalSignalDeltaFact,
-  LayoutContainingBlockFact,
   LayoutElementNode,
   LayoutMatchEdge,
-  LayoutReservedSpaceFact,
 } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import type { LayoutGuardProvenance, LayoutSignalName, LayoutSignalGuard, LayoutSignalSnapshot } from "./signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
 import type { LayoutRuleGuard } from "./guard-model"
@@ -26,8 +24,7 @@ export interface MonitoredDeclaration {
   readonly property: MonitoredSignalKey
   readonly value: string
   readonly position: CascadePosition
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly guardProvenance: LayoutRuleGuard
 }
 
 export type MonitoredSignalKey =
@@ -37,6 +34,7 @@ export type MonitoredSignalKey =
   | "margin-block"
   | "padding-block"
   | "inset-block"
+  | "flex-flow"
 
 export interface LayoutCascadeCandidate {
   readonly declaration: LayoutCascadedDeclaration
@@ -53,13 +51,6 @@ export function collectMonitoredDeclarations(
 ): readonly MonitoredDeclaration[] {
   const out: MonitoredDeclaration[] = []
   const declarations = selector.rule.declarations
-  const signalGuard: LayoutSignalGuard = guard.kind === "conditional" ? "conditional" : "unconditional"
-  const guardProvenance: LayoutGuardProvenance = {
-    kind: signalGuard,
-    conditions: guard.conditions,
-    key: guard.key,
-  }
-
   for (let i = 0; i < declarations.length; i++) {
     const declaration = declarations[i]
     if (!declaration) continue
@@ -70,8 +61,7 @@ export function collectMonitoredDeclarations(
     out.push({
       property: monitored,
       value: declaration.value,
-      guard: signalGuard,
-      guardProvenance,
+      guardProvenance: guard,
       position: {
         layer: declaration.cascadePosition.layer,
         layerOrder,
@@ -96,6 +86,7 @@ function toMonitoredSignalKey(property: string): MonitoredSignalKey | null {
     case "margin-block":
     case "padding-block":
     case "inset-block":
+    case "flex-flow":
       return property
     default:
       return null
@@ -123,42 +114,43 @@ export function expandMonitoredDeclarationForDelta(
   return [{ name: signalName, value }]
 }
 
+export interface SelectorMatchContext {
+  readonly selectorMetadataById: ReadonlyMap<number, SelectorBuildMetadata>
+  readonly selectorsById: ReadonlyMap<number, SelectorEntity>
+  readonly rootElementsByFile: ReadonlyMap<string, readonly LayoutElementNode[]>
+  readonly perf: LayoutPerfStatsMutable
+  readonly logger: Logger
+}
+
 export function appendMatchingEdgesFromSelectorIds(
+  ctx: SelectorMatchContext,
   selectorIds: readonly number[],
   node: LayoutElementNode,
-  selectorMetadataById: ReadonlyMap<number, SelectorBuildMetadata>,
-  selectorsById: ReadonlyMap<number, SelectorEntity>,
   applies: LayoutMatchEdge[],
   appliesByElementNodeMutable: Map<LayoutElementNode, LayoutMatchEdge[]>,
-  perf: LayoutPerfStatsMutable,
-  rootElementsByFile: ReadonlyMap<string, readonly LayoutElementNode[]>,
-  logger: Logger,
 ): void {
-  const fileRoots = rootElementsByFile.get(node.solidFile) ?? null
+  const fileRoots = ctx.rootElementsByFile.get(node.solidFile) ?? null
   for (let i = 0; i < selectorIds.length; i++) {
     const selectorId = selectorIds[i]
     if (selectorId === undefined) continue
-    const metadata = selectorMetadataById.get(selectorId)
+    const metadata = ctx.selectorMetadataById.get(selectorId)
     if (!metadata || !metadata.matcher) {
       throw new Error(`missing compiled selector matcher for selector ${selectorId}`)
     }
-    const selector = selectorsById.get(selectorId)
+    const selector = ctx.selectorsById.get(selectorId)
     if (!selector) {
       throw new Error(`missing selector ${selectorId}`)
     }
 
-    if (!selectorMatchesLayoutElement(metadata.matcher, node, perf, fileRoots, logger)) continue
+    if (!selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)) continue
 
     const edge: LayoutMatchEdge = {
-      solidFile: node.solidFile,
-      elementId: node.elementId,
-      elementKey: node.key,
       selectorId: selector.id,
       specificityScore: selector.specificityScore,
       sourceOrder: selector.rule.sourceOrder,
     }
     applies.push(edge)
-    perf.matchEdgesCreated++
+    ctx.perf.matchEdgesCreated++
 
     const existing = appliesByElementNodeMutable.get(node)
     if (existing) {
@@ -218,8 +210,8 @@ function augmentCascadeWithTailwind(
   const classTokens = node.classTokens
   if (classTokens.length === 0) return
 
-  const guardProvenance: LayoutGuardProvenance = {
-    kind: "unconditional",
+  const guardProvenance: LayoutRuleGuard = {
+    kind: LayoutSignalGuard.Unconditional,
     conditions: [],
     key: "always",
   }
@@ -240,8 +232,7 @@ function augmentCascadeWithTailwind(
       if (cascade.has(property)) continue
       cascade.set(property, {
         value,
-        source: "selector",
-        guard: "unconditional",
+        source: LayoutSignalSource.Selector,
         guardProvenance,
       })
     }
@@ -269,8 +260,7 @@ export function buildCascadeMapForElement(
       const property = declaration.property
       const newDeclaration: LayoutCascadedDeclaration = {
         value: declaration.value,
-        source: "selector",
-        guard: declaration.guard,
+        source: LayoutSignalSource.Selector,
         guardProvenance: declaration.guardProvenance,
       }
 
@@ -292,24 +282,18 @@ export function buildCascadeMapForElement(
     }
   }
 
-  const inlinePosition = createInlineCascadePosition()
-  const inlineGuardProvenance: LayoutGuardProvenance = {
-    kind: "unconditional",
-    conditions: [],
-    key: "always",
-  }
+
   for (const [property, value] of node.inlineStyleValues) {
     const newDeclaration: LayoutCascadedDeclaration = {
       value,
-      source: "inline-style",
-      guard: "unconditional",
-      guardProvenance: inlineGuardProvenance,
+      source: LayoutSignalSource.InlineStyle,
+      guardProvenance: INLINE_GUARD_PROVENANCE,
     }
 
     const existingPosition = positions.get(property)
     if (existingPosition === undefined) {
       out.set(property, newDeclaration)
-      positions.set(property, inlinePosition)
+      positions.set(property, INLINE_CASCADE_POSITION)
       continue
     }
 
@@ -317,10 +301,10 @@ export function buildCascadeMapForElement(
     if (existingDeclaration === undefined) continue
     if (!doesCandidateOverride(
       { declaration: existingDeclaration, position: existingPosition },
-      { declaration: newDeclaration, position: inlinePosition },
+      { declaration: newDeclaration, position: INLINE_CASCADE_POSITION },
     )) continue
     out.set(property, newDeclaration)
-    positions.set(property, inlinePosition)
+    positions.set(property, INLINE_CASCADE_POSITION)
   }
 
   /* Augment with Tailwind-resolved properties. Runs last because Tailwind
@@ -348,7 +332,7 @@ function doesCandidateOverride(
   const incomingSource = incoming.declaration.source
 
   if (existingSource !== incomingSource) {
-    if (incomingSource === "inline-style") {
+    if (incomingSource === LayoutSignalSource.InlineStyle) {
       if (existing.position.isImportant && !incoming.position.isImportant) return false
       return true
     }
@@ -359,16 +343,20 @@ function doesCandidateOverride(
   return compareCascadePositions(incoming.position, existing.position) > 0
 }
 
-function createInlineCascadePosition(): CascadePosition {
-  return {
-    layer: null,
-    layerOrder: Number.MAX_SAFE_INTEGER,
-    sourceOrder: Number.MAX_SAFE_INTEGER,
-    specificity: [1, 0, 0, 0],
-    specificityScore: Number.MAX_SAFE_INTEGER,
-    isImportant: false,
-  }
-}
+const INLINE_CASCADE_POSITION: CascadePosition = Object.freeze({
+  layer: null,
+  layerOrder: Number.MAX_SAFE_INTEGER,
+  sourceOrder: Number.MAX_SAFE_INTEGER,
+  specificity: [1, 0, 0, 0] as const,
+  specificityScore: Number.MAX_SAFE_INTEGER,
+  isImportant: false,
+})
+
+const INLINE_GUARD_PROVENANCE: LayoutRuleGuard = Object.freeze({
+  kind: LayoutSignalGuard.Unconditional,
+  conditions: [],
+  key: "always",
+})
 
 export function resolveRuleLayerOrder(rule: RuleEntity, css: CSSGraph): number {
   const layer = rule.containingLayer
@@ -379,67 +367,26 @@ export function resolveRuleLayerOrder(rule: RuleEntity, css: CSSGraph): number {
   return css.layerOrder.get(name) ?? 0
 }
 
-export function buildContainingBlockFactsByElementKey(
-  elements: readonly LayoutElementNode[],
-  snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-  reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>,
-): ReadonlyMap<string, LayoutContainingBlockFact> {
-  const out = new Map<string, LayoutContainingBlockFact>()
-
-  for (let i = 0; i < elements.length; i++) {
-    const node = elements[i]
-    if (!node) continue
-    let current = node.parentElementNode
-    let positionedAncestorKey: string | null = null
-    let positionedAncestorHasReservedSpace = false
-
-    while (current) {
-      const snapshot = snapshotByElementNode.get(current)
-      if (!snapshot) {
-        current = current.parentElementNode
-        continue
-      }
-
-      const position = snapshot.signals.get("position")
-      if (position && position.kind === "known" && position.normalized !== "static") {
-        positionedAncestorKey = current.key
-        const reserved = reservedSpaceFactsByElementKey.get(current.key)
-        positionedAncestorHasReservedSpace = reserved?.hasReservedSpace ?? false
-        break
-      }
-
-      current = current.parentElementNode
-    }
-
-    out.set(node.key, {
-      nearestPositionedAncestorKey: positionedAncestorKey,
-      nearestPositionedAncestorHasReservedSpace: positionedAncestorHasReservedSpace,
-    })
-  }
-
-  return out
-}
-
 export interface ConditionalDeltaIndex {
-  readonly conditionalSignalDeltaFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
+  readonly conditionalSignalDeltaFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
   readonly elementsWithConditionalDeltaBySignal: ReadonlyMap<LayoutSignalName, readonly LayoutElementNode[]>
-  readonly baselineOffsetFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, readonly number[]>>
+  readonly baselineOffsetFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>
 }
 
 export function buildConditionalDeltaIndex(
   elements: readonly LayoutElementNode[],
-  appliesByElementKey: ReadonlyMap<string, readonly LayoutMatchEdge[]>,
+  appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>,
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
 ): ConditionalDeltaIndex {
-  const conditionalSignalDeltaFactsByElementKey = new Map<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>()
+  const conditionalSignalDeltaFactsByNode = new Map<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>()
   const elementsWithConditionalDeltaBySignal = new Map<LayoutSignalName, LayoutElementNode[]>()
-  const baselineOffsetFactsByElementKey = new Map<string, ReadonlyMap<LayoutSignalName, readonly number[]>>()
+  const baselineOffsetFactsByNode = new Map<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>()
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
 
-    const edges = appliesByElementKey.get(node.key)
+    const edges = appliesByNode.get(node)
     let factByProperty: ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact> | null = null
 
     if (edges !== undefined && edges.length > 0) {
@@ -468,7 +415,7 @@ export function buildConditionalDeltaIndex(
               byProperty.set(property, bucket)
             }
 
-            if (declaration.guard === "conditional") {
+            if (declaration.guardProvenance.kind === LayoutSignalGuard.Conditional) {
               bucket.conditional.add(expandedEntry.value)
               continue
             }
@@ -513,7 +460,7 @@ export function buildConditionalDeltaIndex(
 
         if (facts.size > 0) {
           factByProperty = facts
-          conditionalSignalDeltaFactsByElementKey.set(node.key, facts)
+          conditionalSignalDeltaFactsByNode.set(node, facts)
 
           for (const [signal, fact] of facts) {
             if (!fact.hasConditional) continue
@@ -556,14 +503,14 @@ export function buildConditionalDeltaIndex(
     }
 
     if (baselineBySignal.size > 0) {
-      baselineOffsetFactsByElementKey.set(node.key, baselineBySignal)
+      baselineOffsetFactsByNode.set(node, baselineBySignal)
     }
   }
 
   return {
-    conditionalSignalDeltaFactsByElementKey,
+    conditionalSignalDeltaFactsByNode,
     elementsWithConditionalDeltaBySignal,
-    baselineOffsetFactsByElementKey,
+    baselineOffsetFactsByNode,
   }
 }
 

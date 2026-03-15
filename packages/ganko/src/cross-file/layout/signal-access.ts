@@ -1,10 +1,12 @@
-import type {
+import {
   EvidenceValueKind,
-  EvidenceWitness,
-  LayoutKnownSignalValue,
-  LayoutSignalName,
-  LayoutSignalSnapshot,
+  LayoutSignalGuard,
+  type EvidenceWitness,
+  type LayoutKnownSignalValue,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
 } from "./signal-model"
+import { LayoutScrollAxis } from "./graph"
 import type {
   LayoutConditionalSignalDeltaFact,
   LayoutContainingBlockFact,
@@ -36,7 +38,7 @@ const EMPTY_LAYOUT_RESERVED_SPACE_FACT: LayoutReservedSpaceFact = Object.freeze(
 })
 const EMPTY_LAYOUT_SCROLL_CONTAINER_FACT: LayoutScrollContainerFact = Object.freeze({
   isScrollContainer: false,
-  axis: "none",
+  axis: LayoutScrollAxis.None,
   overflow: null,
   overflowY: null,
   hasConditionalScroll: false,
@@ -78,9 +80,9 @@ export function readKnownSignalWithGuard(
 }
 
 function toEvidenceKind(value: LayoutKnownSignalValue): EvidenceValueKind {
-  if (value.guard === "conditional") return "conditional"
-  if (value.quality === "estimated") return "interval"
-  return "exact"
+  if (value.guard.kind === LayoutSignalGuard.Conditional) return EvidenceValueKind.Conditional
+  if (value.quality === "estimated") return EvidenceValueKind.Interval
+  return EvidenceValueKind.Exact
 }
 
 export function readNumericSignalEvidence(
@@ -91,21 +93,21 @@ export function readNumericSignalEvidence(
   if (!value) {
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
   if (value.kind !== "known") {
-    if (value.guard === "conditional") {
+    if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
-        kind: "conditional",
+        kind: EvidenceValueKind.Conditional,
       }
     }
 
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
@@ -123,21 +125,21 @@ export function readNormalizedSignalEvidence(
   if (!value) {
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
   if (value.kind !== "known") {
-    if (value.guard === "conditional") {
+    if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
-        kind: "conditional",
+        kind: EvidenceValueKind.Conditional,
       }
     }
 
     return {
       value: null,
-      kind: "unknown",
+      kind: EvidenceValueKind.Unknown,
     }
   }
 
@@ -153,7 +155,7 @@ export function readKnownSignal(
 ): LayoutKnownSignalValue | null {
   const value = readKnownSignalWithGuard(snapshot, name)
   if (!value) return null
-  if (value.guard !== "unconditional") return null
+  if (value.guard.kind !== LayoutSignalGuard.Unconditional) return null
   return value
 }
 
@@ -213,28 +215,28 @@ export function readReservedSpaceFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutReservedSpaceFact {
-  return graph.reservedSpaceFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
+  return graph.reservedSpaceFactsByNode.get(node) ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
 }
 
 export function readScrollContainerFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutScrollContainerFact {
-  return graph.scrollContainerFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
+  return graph.scrollContainerFactsByNode.get(node) ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
 }
 
 export function readFlowParticipationFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutFlowParticipationFact {
-  return graph.flowParticipationFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
+  return graph.flowParticipationFactsByNode.get(node) ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
 }
 
 export function readContainingBlockFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutContainingBlockFact {
-  return graph.containingBlockFactsByElementKey.get(node.key) ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
+  return graph.containingBlockFactsByNode.get(node) ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
 }
 
 export function readConditionalSignalDeltaFact(
@@ -242,7 +244,7 @@ export function readConditionalSignalDeltaFact(
   node: LayoutElementNode,
   name: LayoutSignalName,
 ): LayoutConditionalSignalDeltaFact {
-  const byProperty = graph.conditionalSignalDeltaFactsByElementKey.get(node.key)
+  const byProperty = graph.conditionalSignalDeltaFactsByNode.get(node)
   if (!byProperty) return EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
   return byProperty.get(name) ?? EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
 }
@@ -288,7 +290,7 @@ export function readBaselineOffsetFacts(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): ReadonlyMap<LayoutSignalName, readonly number[]> {
-  return graph.baselineOffsetFactsByElementKey.get(node.key) ?? EMPTY_BASELINE_FACTS
+  return graph.baselineOffsetFactsByNode.get(node) ?? EMPTY_BASELINE_FACTS
 }
 
 export function readElementRef(graph: LayoutGraph, node: LayoutElementNode): LayoutElementRef | null {

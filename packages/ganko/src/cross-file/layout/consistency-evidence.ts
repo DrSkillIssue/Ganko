@@ -1,19 +1,23 @@
-import type {
-  AlignmentCase,
-  AlignmentFactorId,
-  CohortIdentifiability,
-  EvidenceAtom,
-  EvidenceProvenance,
+import {
+  AlignmentTextContrast,
+  ContentCompositionClassification,
   EvidenceValueKind,
-  LogOddsInterval,
-  NumericEvidenceValue,
+  SignalConflictValue,
+  type AlignmentCase,
+  type AlignmentFactorId,
+  type CohortIdentifiability,
+  type EvidenceAtom,
+  type EvidenceProvenance,
+  type LogOddsInterval,
+  type NumericEvidenceValue,
 } from "./signal-model"
 import {
   alignmentStrengthCalibration,
   evidenceContributionCalibration,
   resolveAlignmentFactorContract,
 } from "./calibration"
-import { resolveCompositionDivergenceStrength } from "./content-composition"
+import { ContextCertainty } from "./context-model"
+import { resolveCompositionDivergence, type CompositionDivergenceResult } from "./content-composition"
 import { clamp, mergeEvidenceKind } from "./util"
 
 export interface ConsistencyEvidence {
@@ -23,6 +27,7 @@ export interface ConsistencyEvidence {
   readonly contextStrength: number
   readonly replacedStrength: number
   readonly compositionStrength: number
+  readonly majorityClassification: ContentCompositionClassification
   readonly identifiability: CohortIdentifiability
   readonly factSummary: AlignmentCase["cohortFactSummary"]
   readonly atoms: readonly EvidenceAtom[]
@@ -44,12 +49,12 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
     input.cohortProfile.medianDeclaredOffsetPx,
   )
 
-  const offset = normalizeDeviation(
+  const offsetRaw = normalizeDeviation(
     input.subjectEffectiveOffsetDeviation,
     input.cohortProfile.effectiveOffsetDispersionPx,
     effectiveOffsetScaleReference,
   )
-  const declaredOffset = normalizeDeviation(
+  const declaredOffsetRaw = normalizeDeviation(
     input.subjectDeclaredOffsetDeviation,
     input.cohortProfile.declaredOffsetDispersionPx,
     declaredOffsetScaleReference,
@@ -65,13 +70,19 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
   // never consulted. All baseline-dependent evidence factors are suppressed.
   // See `context-model.ts::BaselineRelevance` for CSS spec references.
   const baselinesIrrelevant = input.context.baselineRelevance === "irrelevant"
+  // When the block axis is the container's main axis (e.g. flex-direction: column),
+  // vertical offset differences are the layout algorithm's normal behavior.
+  // Suppress ALL evidence — offset, baseline, context, replaced, composition.
+  const blockAxisIsMainAxis = !input.context.crossAxisIsBlockAxis
+  const suppressAll = blockAxisIsMainAxis
+  const offset = suppressAll ? ZERO_STRENGTH : offsetRaw
+  const declaredOffset = suppressAll ? ZERO_STRENGTH : declaredOffsetRaw
 
-
-
-  const baselineStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
-  const contextStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
-  const replacedStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
-  const compositionStrength = baselinesIrrelevant ? ZERO_STRENGTH : resolveContentCompositionStrength(input)
+  const baselineStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
+  const contextStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
+  const replacedStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
+  const compositionResult = (baselinesIrrelevant || suppressAll) ? null : resolveContentCompositionStrength(input)
+  const compositionStrength = compositionResult ? compositionResult.evidence : ZERO_STRENGTH
   const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
   const provenance = input.cohortProvenance
   const atoms = buildEvidenceAtoms(
@@ -93,6 +104,7 @@ export function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvide
     contextStrength: contextStrength.strength,
     replacedStrength: replacedStrength.strength,
     compositionStrength: compositionStrength.strength,
+    majorityClassification: compositionResult ? compositionResult.divergence.majorityClassification : ContentCompositionClassification.Unknown,
     identifiability: input.subjectIdentifiability,
     factSummary,
     atoms,
@@ -141,7 +153,7 @@ function resolveOffsetScaleReference(
 
 function resolveBaselineStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
   const verticalAlign = input.cohortSignals.verticalAlign
-  const hasConflict = verticalAlign.value === "conflict"
+  const hasConflict = verticalAlign.value === SignalConflictValue.Conflict
   const conflict = hasConflict
     ? alignmentStrengthCalibration.baselineConflictBoost
     : 0
@@ -159,7 +171,7 @@ function resolveBaselineEvidenceKind(
   hasConflict: boolean,
 ): EvidenceValueKind {
   if (!hasConflict) return mergeEvidenceKind(lineHeightKind, verticalAlignKind)
-  if (lineHeightKind === "unknown") return verticalAlignKind
+  if (lineHeightKind === EvidenceValueKind.Unknown) return verticalAlignKind
   return mergeEvidenceKind(lineHeightKind, verticalAlignKind)
 }
 
@@ -191,7 +203,7 @@ function resolveContextConflictEvidence(input: AlignmentCase): StrengthEvidence 
   const alignSelf = input.cohortSignals.alignSelf
   const placeSelf = input.cohortSignals.placeSelf
   const kind = mergeEvidenceKind(alignSelf.kind, placeSelf.kind)
-  const hasConflict = alignSelf.value === "conflict" || placeSelf.value === "conflict"
+  const hasConflict = alignSelf.value === SignalConflictValue.Conflict || placeSelf.value === SignalConflictValue.Conflict
   if (!hasConflict) {
     return {
       strength: 0,
@@ -208,8 +220,8 @@ function resolveContextConflictEvidence(input: AlignmentCase): StrengthEvidence 
 function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
   const subject = input.subject.snapshot
   const hasReplacedPair =
-    subject.isControl
-    || subject.isReplaced
+    subject.node.isControl
+    || subject.node.isReplaced
     || input.cohortSignals.hasControlOrReplacedPeer
   if (!hasReplacedPair) {
     return {
@@ -218,17 +230,17 @@ function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: Streng
     }
   }
 
-  if (input.cohortSignals.textContrastWithPeers === "different") {
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Different) {
     return {
       strength: alignmentStrengthCalibration.replacedDifferentTextBoost,
-      kind: "exact",
+      kind: EvidenceValueKind.Exact,
     }
   }
 
-  if (input.cohortSignals.textContrastWithPeers === "unknown") {
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Unknown) {
     return {
       strength: alignmentStrengthCalibration.replacedUnknownTextBoost,
-      kind: "conditional",
+      kind: EvidenceValueKind.Conditional,
     }
   }
 
@@ -238,26 +250,37 @@ function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: Streng
   }
 }
 
-function resolveContentCompositionStrength(input: AlignmentCase): StrengthEvidence {
-  const divergenceStrength = resolveCompositionDivergenceStrength(
+interface CompositionStrengthResult {
+  readonly evidence: StrengthEvidence
+  readonly divergence: CompositionDivergenceResult
+}
+
+function resolveContentCompositionStrength(input: AlignmentCase): CompositionStrengthResult {
+  const divergence = resolveCompositionDivergence(
     input.subjectContentComposition,
     input.cohortContentCompositions,
     input.context,
   )
 
-  if (divergenceStrength <= 0) {
+  if (divergence.strength <= 0) {
     return {
-      strength: 0,
-      kind: "exact",
+      evidence: {
+        strength: 0,
+        kind: EvidenceValueKind.Exact,
+      },
+      divergence,
     }
   }
 
   const subjectClassification = input.subjectContentComposition.classification
-  const kind: EvidenceValueKind = subjectClassification === "unknown" ? "conditional" : "exact"
+  const kind: EvidenceValueKind = subjectClassification === ContentCompositionClassification.Unknown ? EvidenceValueKind.Conditional : EvidenceValueKind.Exact
 
   return {
-    strength: clamp(divergenceStrength, 0, 1),
-    kind,
+    evidence: {
+      strength: clamp(divergence.strength, 0, 1),
+      kind,
+    },
+    divergence,
   }
 }
 
@@ -345,9 +368,9 @@ function buildEvidenceAtoms(
 }
 
 function mapContextCertaintyToEvidenceKind(certainty: AlignmentCase["context"]["certainty"]): EvidenceValueKind {
-  if (certainty === "resolved") return "exact"
-  if (certainty === "conditional") return "conditional"
-  return "unknown"
+  if (certainty === ContextCertainty.Resolved) return EvidenceValueKind.Exact
+  if (certainty === ContextCertainty.Conditional) return EvidenceValueKind.Conditional
+  return EvidenceValueKind.Unknown
 }
 
 function pushSupportAtom(
@@ -404,19 +427,19 @@ function pushAtom(
 
 function toPositiveContribution(strength: number, maxWeight: number, valueKind: EvidenceValueKind): LogOddsInterval {
   const contribution = clamp(strength, 0, 2) * maxWeight
-  if (valueKind === "exact") {
+  if (valueKind === EvidenceValueKind.Exact) {
     return {
       min: contribution,
       max: contribution,
     }
   }
-  if (valueKind === "interval") {
+  if (valueKind === EvidenceValueKind.Interval) {
     return {
       min: contribution * evidenceContributionCalibration.supportIntervalLowerScale,
       max: contribution,
     }
   }
-  if (valueKind === "conditional") {
+  if (valueKind === EvidenceValueKind.Conditional) {
     return {
       min: 0,
       max: contribution * evidenceContributionCalibration.supportConditionalUpperScale,
@@ -432,19 +455,19 @@ function toPositiveContribution(strength: number, maxWeight: number, valueKind: 
 function toNegativeContribution(strength: number, maxPenalty: number, valueKind: EvidenceValueKind): LogOddsInterval {
   const penalty = clamp(strength, 0, 1) * maxPenalty
 
-  if (valueKind === "exact") {
+  if (valueKind === EvidenceValueKind.Exact) {
     return {
       min: -penalty,
       max: -penalty,
     }
   }
-  if (valueKind === "interval") {
+  if (valueKind === EvidenceValueKind.Interval) {
     return {
       min: -penalty,
       max: -penalty * evidenceContributionCalibration.penaltyIntervalUpperScale,
     }
   }
-  if (valueKind === "conditional") {
+  if (valueKind === EvidenceValueKind.Conditional) {
     return {
       min: -penalty,
       max: 0,
@@ -457,5 +480,5 @@ function toNegativeContribution(strength: number, maxPenalty: number, valueKind:
   }
 }
 
-const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: "exact" }
+const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: EvidenceValueKind.Exact }
 

@@ -32,10 +32,12 @@ import type { CallEntity } from "../../entities";
 import type { FunctionEntity } from "../../entities/function";
 import type { VariableEntity } from "../../entities/variable";
 import type { JSXElementEntity } from "../../entities/jsx";
+import type { FixOperation } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { getCallsByPrimitive } from "../../queries/get";
 import { getEnclosingComponentScope } from "../../queries";
+import { buildSolidImportFix } from "../util";
 
 /** Tags that represent conditional/lazy mount points. */
 const CONDITIONAL_MOUNT_TAGS = new Set([
@@ -47,18 +49,21 @@ const CONDITIONAL_MOUNT_TAGS = new Set([
 
 const messages = {
   loadingMismatch:
-    "createResource '{{name}}' has no initialValue but uses manual loading checks ({{name}}.loading). " +
-    "Without initialValue, Suspense intercepts before your loading UI renders. " +
-    "Add initialValue to the options: createResource(fetcher, { initialValue: ... })",
+    "createResource '{{name}}' has no initialValue but uses {{name}}.loading for manual loading UI. " +
+    "Suspense intercepts before your loading UI renders — the component is unmounted before the " +
+    "<Show>/<Switch> evaluates. Replace createResource with onMount + createSignal to decouple " +
+    "from Suspense entirely.",
   conditionalSuspense:
-    "createResource '{{name}}' is rendered inside a conditional mount point ({{mountTag}}) with a distant Suspense boundary. " +
-    "When the fetcher's Promise is pending, the SuspenseContext increment fires and unmounts the entire subtree. " +
-    "initialValue does NOT prevent this — it only prevents the accessor from returning undefined.",
+    "createResource '{{name}}' is inside a conditional mount point ({{mountTag}}) with a distant " +
+    "Suspense boundary. The SuspenseContext increment fires when the fetcher's Promise is pending " +
+    "and unmounts the entire page subtree — initialValue does NOT prevent this. Replace " +
+    "createResource with onMount + createSignal to avoid Suspense interaction.",
   missingErrorBoundary:
-    "createResource '{{name}}' has no <ErrorBoundary> between its component and the nearest <Suspense>. " +
-    "When the fetcher throws (network error, 401/403/503, timeout), the error propagates to Suspense " +
-    "which absorbs it and stays in its fallback state permanently. " +
-    "Wrap the component in <ErrorBoundary fallback={...}> or catch errors inside the fetcher.",
+    "createResource '{{name}}' has no <ErrorBoundary> between its component and the nearest " +
+    "<Suspense>. When the fetcher throws (network error, 401/403/503, timeout), the error " +
+    "propagates to Suspense which has no error handling — the boundary breaks permanently. " +
+    "Wrap the component in <ErrorBoundary> or replace createResource with onMount + createSignal " +
+    "and catch errors in the fetcher.",
 } as const;
 
 const options = {};
@@ -235,6 +240,8 @@ interface ComponentBoundaryAnalysis {
   suspenseDistance: number;
   /** True if any usage site has Suspense without an intervening ErrorBoundary. */
   lacksErrorBoundary: boolean;
+  /** JSX usage nodes where the component lacks an ErrorBoundary before Suspense. */
+  usagesLackingErrorBoundary: JSXElementEntity[];
 }
 
 /**
@@ -251,6 +258,7 @@ function analyzeComponentBoundaries(
     conditionalMountTag: null,
     suspenseDistance: 0,
     lacksErrorBoundary: false,
+    usagesLackingErrorBoundary: [],
   };
 
   const usages = graph.jsxByTag.get(componentName) ?? [];
@@ -277,6 +285,7 @@ function analyzeComponentBoundaries(
           foundSuspense = true;
           if (!foundErrorBoundary) {
             result.lacksErrorBoundary = true;
+            result.usagesLackingErrorBoundary.push(usage);
           }
           if (conditionalTag !== null && componentLevels > 1) {
             result.conditionalMountTag = conditionalTag;
@@ -293,6 +302,7 @@ function analyzeComponentBoundaries(
     // No Suspense or ErrorBoundary found — error propagates to route/layout level
     if (!foundSuspense && !foundErrorBoundary) {
       result.lacksErrorBoundary = true;
+      result.usagesLackingErrorBoundary.push(usage);
       if (conditionalTag !== null) {
         result.conditionalMountTag = conditionalTag;
         result.suspenseDistance = componentLevels;
@@ -330,13 +340,44 @@ function findResourceVariable(graph: SolidGraph, name: string): VariableEntity |
   return null;
 }
 
+/**
+ * Build a fix to wrap a component's JSX usage in `<ErrorBoundary>`.
+ *
+ * Inserts `<ErrorBoundary fallback={...}>` before the opening tag and
+ * `</ErrorBoundary>` after the closing tag of the JSX element.
+ */
+function buildErrorBoundaryFix(
+  usages: readonly JSXElementEntity[],
+  graph: SolidGraph,
+): readonly FixOperation[] | null {
+  if (usages.length === 0) return null;
+
+  // Wrap the first usage site that lacks an ErrorBoundary
+  const usage = usages[0];
+  if (!usage) return null;
+
+  const jsxNode = usage.node;
+  const startPos = jsxNode.range[0];
+  const endPos = jsxNode.range[1];
+
+  const ops: FixOperation[] = [
+    { range: [startPos, startPos], text: "<ErrorBoundary fallback={<div>Error</div>}>" },
+    { range: [endPos, endPos], text: "</ErrorBoundary>" },
+  ];
+
+  const importFix = buildSolidImportFix(graph, "ErrorBoundary");
+  if (importFix) ops.unshift(importFix);
+
+  return ops;
+}
+
 export const resourceImplicitSuspense = defineSolidRule({
   id: "resource-implicit-suspense",
   severity: "warn",
   messages,
   meta: {
     description: "Detect createResource that implicitly triggers or permanently breaks Suspense boundaries.",
-    fixable: false,
+    fixable: true,
     category: "reactivity",
   },
   options,
@@ -413,6 +454,11 @@ export const resourceImplicitSuspense = defineSolidRule({
       if (analysis.lacksErrorBoundary) {
         const fetcherFn = resolveFetcherFunction(graph, call);
         if (fetcherFn && fetcherCanThrow(graph, fetcherFn, throwVisited)) {
+          const errorBoundaryFix = buildErrorBoundaryFix(
+            analysis.usagesLackingErrorBoundary,
+            graph,
+          );
+
           emit(
             createDiagnostic(
               graph.file,
@@ -421,6 +467,7 @@ export const resourceImplicitSuspense = defineSolidRule({
               "missingErrorBoundary",
               resolveMessage(messages.missingErrorBoundary, { name: resourceName }),
               "error",
+              errorBoundaryFix ?? undefined,
             ),
           );
         }

@@ -1,10 +1,10 @@
 import type { LayoutAxisModel } from "./context-model"
-import type {
+import {
   EvidenceValueKind,
-  HotNumericSignalEvidence,
-  LayoutSignalSnapshot,
-  LayoutSnapshotHotSignals,
-  NumericEvidenceValue,
+  type HotNumericSignalEvidence,
+  type LayoutSignalSnapshot,
+  type LayoutSnapshotHotSignals,
+  type NumericEvidenceValue,
 } from "./signal-model"
 import { readNormalizedSignalEvidence, readNumericSignalEvidence } from "./signal-access"
 import { mergeEvidenceKind as mergeKind } from "./util"
@@ -78,13 +78,13 @@ function estimateBlockOffsetWithDeclaredFromSources(
 ): LayoutBlockOffsetEstimate {
   let declaredTotal = 0
   let declaredCount = 0
-  let declaredKind: EvidenceValueKind = "exact"
-  let declaredMissingKind: EvidenceValueKind = "exact"
+  let declaredKind: EvidenceValueKind = EvidenceValueKind.Exact
+  let declaredMissingKind: EvidenceValueKind = EvidenceValueKind.Exact
 
   let effectiveTotal = 0
   let effectiveCount = 0
-  let effectiveKind: EvidenceValueKind = "exact"
-  let effectiveMissingKind: EvidenceValueKind = "exact"
+  let effectiveKind: EvidenceValueKind = EvidenceValueKind.Exact
+  let effectiveMissingKind: EvidenceValueKind = EvidenceValueKind.Exact
   const positioned = position.value !== null && position.value !== "static"
 
   const add = (

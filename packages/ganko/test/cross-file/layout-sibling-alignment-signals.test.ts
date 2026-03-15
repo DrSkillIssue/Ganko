@@ -1,26 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { normalizeSignalMap } from "../../src/cross-file/layout";
+import { normalizeSignalMap, LayoutSignalSource, LayoutSignalGuard } from "../../src/cross-file/layout";
+import type { LayoutCascadedDeclaration } from "../../src/cross-file/layout/graph";
 
 function makeMap(entries: readonly [string, string][]) {
-  const out = new Map<string, {
-    value: string;
-    source: "selector" | "inline-style";
-    guard: "unconditional" | "conditional";
-    guardProvenance: {
-      kind: "unconditional" | "conditional";
-      conditions: readonly [];
-      key: "always";
-    };
-  }>();
+  const out = new Map<string, LayoutCascadedDeclaration>();
   for (const entry of entries) {
     out.set(entry[0], {
       value: entry[1],
-      source: "selector",
-      guard: "unconditional",
+      source: LayoutSignalSource.Selector,
       guardProvenance: {
-        kind: "unconditional",
+        kind: LayoutSignalGuard.Unconditional,
         conditions: [],
-        key: "always",
+        key: "always" as const,
       },
     });
   }

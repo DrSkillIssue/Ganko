@@ -4,6 +4,7 @@ import {
   readConditionalSignalDeltaFact,
   readFlowParticipationFact,
   readKnownNormalizedWithGuard,
+  LayoutSignalGuard,
 } from "../layout"
 import { defineCrossRule } from "../rule"
 import { emitLayoutDiagnostic, hasAnyPositiveKnownPx, isFlowRelevantBySiblingsOrText } from "./rule-runtime"
@@ -40,10 +41,10 @@ export const cssLayoutConditionalWhiteSpaceWrapShift = defineCrossRule({
       if (!whiteSpace) continue
 
       const whiteSpaceSignal = snapshot.signals.get("white-space")
-      if (!whiteSpaceSignal || whiteSpaceSignal.guard !== "conditional") continue
+      if (!whiteSpaceSignal || whiteSpaceSignal.guard.kind !== LayoutSignalGuard.Conditional) continue
       const flow = readFlowParticipationFact(context.layout, node)
       if (!flow.inFlow) continue
-      if (!isFlowRelevantBySiblingsOrText(node, snapshot.textualContent)) continue
+      if (!isFlowRelevantBySiblingsOrText(node, snapshot.node.textualContent)) continue
       if (hasStableTextShell(snapshot)) continue
 
       if (!emitLayoutDiagnostic(context.layout, node, emit, cssLayoutConditionalWhiteSpaceWrapShift.id, "conditionalWhiteSpaceShift", messages.conditionalWhiteSpaceShift, cssLayoutConditionalWhiteSpaceWrapShift.severity, { whiteSpace })) continue

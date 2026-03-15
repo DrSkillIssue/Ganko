@@ -4,43 +4,47 @@ import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import { noopLogger } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 
-import type {
-  LayoutCascadedDeclaration,
-  LayoutContainingBlockFact,
-  LayoutElementNode,
-  LayoutFlowParticipationFact,
-  LayoutGraph,
-  LayoutMatchEdge,
-  LayoutReservedSpaceFact,
-  LayoutReservedSpaceReason,
-  LayoutScrollContainerFact,
-  LayoutStyleRuleNode,
+import {
+  LayoutScrollAxis,
+  type LayoutCascadedDeclaration,
+  type LayoutContainingBlockFact,
+  type LayoutElementNode,
+  type LayoutFlowParticipationFact,
+  type LayoutGraph,
+  type LayoutMatchEdge,
+  type LayoutReservedSpaceFact,
+  type LayoutReservedSpaceReason,
+  type LayoutScrollContainerFact,
+  type LayoutStyleRuleNode,
 } from "./graph"
-import { toLayoutElementKey } from "./graph"
 import { collectCSSScopeBySolidFile } from "./scope"
 import { createLayoutPerfStats, type LayoutPerfStatsMutable } from "./perf"
 import { createLayoutModuleResolver } from "./module-resolver"
 import { createLayoutComponentHostResolver } from "./component-host"
 import type { AlignmentContext } from "./context-model"
-import type {
-  LayoutSignalName,
-  LayoutSignalSnapshot,
-  LayoutSnapshotHotSignals,
+import {
+  EvidenceValueKind,
+  LayoutSignalGuard,
+  LayoutTextualContentState,
+  type HotNormalizedSignalEvidence,
+  type HotNumericSignalEvidence,
+  type LayoutSignalName,
+  type LayoutSignalSnapshot,
+  type LayoutSignalValue,
+  type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { isControlTag, isReplacedTag } from "./signal-normalization"
 import { compileSelectorMatcher } from "./selector-match"
 import { resolveRuleGuard } from "./guard-model"
 import { buildSignalSnapshotIndex } from "./signal-collection"
-import { readNumericSignalEvidence, readNormalizedSignalEvidence } from "./signal-access"
 import { createAlignmentContextForParent, finalizeTableCellBaselineRelevance } from "./context-classification"
 import { buildCohortIndex } from "./cohort-index"
 import { buildMeasurementNodeIndex } from "./measurement-node"
 import {
   type SelectorBuildMetadata,
   buildScopedSelectorIndexBySolidFile,
-  buildSelectorCandidatesByElementKey,
+  buildSelectorCandidatesByNode,
 } from "./selector-dispatch"
 import { buildStatefulRuleIndexes } from "./stateful-rule-index"
 import { layoutOffsetSignals } from "./offset-baseline"
@@ -49,6 +53,7 @@ import {
   collectMonitoredDeclarations,
   resolveRuleLayerOrder,
   appendMatchingEdgesFromSelectorIds,
+  type SelectorMatchContext,
   buildCascadeMapForElement,
   compareLayoutEdge,
   buildConditionalDeltaIndex,
@@ -188,8 +193,6 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
         classTokens: record.classTokens,
         classTokenSet: record.classTokenSet,
         inlineStyleKeys: record.inlineStyleKeys,
-        parentElementId,
-        parentElementKey: parentNode ? parentNode.key : (parentElementId === null ? null : toLayoutElementKey(solid.file, parentElementId)),
         parentElementNode: parentNode,
         previousSiblingNode,
         siblingIndex,
@@ -235,23 +238,27 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     }
   }
 
-  const selectorCandidatesByElementKey = buildSelectorCandidatesByElementKey(elements, scopedSelectorsBySolidFile, perf)
+  const selectorCandidatesByNode = buildSelectorCandidatesByNode(elements, scopedSelectorsBySolidFile, perf)
+
+  const selectorMatchCtx: SelectorMatchContext = {
+    selectorMetadataById,
+    selectorsById,
+    rootElementsByFile,
+    perf,
+    logger,
+  }
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
-    const selectorIds = selectorCandidatesByElementKey.get(node.key) ?? EMPTY_NUMBER_LIST
+    const selectorIds = selectorCandidatesByNode.get(node) ?? EMPTY_NUMBER_LIST
     if (selectorIds.length === 0) continue
     appendMatchingEdgesFromSelectorIds(
+      selectorMatchCtx,
       selectorIds,
       node,
-      selectorMetadataById,
-      selectorsById,
       applies,
       appliesByElementNodeMutable,
-      perf,
-      rootElementsByFile,
-      logger,
     )
   }
 
@@ -262,7 +269,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     edges.sort(compareLayoutEdge)
   }
 
-  const appliesByElementKey = new Map<string, readonly LayoutMatchEdge[]>()
+  const appliesByNode = new Map<LayoutElementNode, readonly LayoutMatchEdge[]>()
 
   const tailwind = css.tailwind
   for (let i = 0; i < elements.length; i++) {
@@ -271,7 +278,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     const edges = appliesByElementNodeMutable.get(node) ?? []
     const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
     cascadeByElementNode.set(node, cascade)
-    appliesByElementKey.set(node.key, edges)
+    appliesByNode.set(node, edges)
   }
   perf.cascadeBuildMs = performance.now() - cascadeStartedAt
   const snapshotByElementNode = buildSignalSnapshotIndex(elements, cascadeByElementNode, perf)
@@ -280,7 +287,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const factIndex = buildElementFactIndex(elements, snapshotByElementNode)
   const conditionalDeltaIndex = buildConditionalDeltaIndex(
     elements,
-    appliesByElementKey,
+    appliesByNode,
     monitoredDeclarationsBySelectorId,
   )
   const elementsWithConditionalOverflowDelta = buildConditionalDeltaSignalGroupElements(
@@ -298,7 +305,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     contextByParentNode,
     measurementNodeByRootKey,
     snapshotByElementNode,
-    snapshotHotSignalsByElementKey: factIndex.snapshotHotSignalsByElementKey,
+    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
   })
 
   // Finalize table-cell baselineRelevance now that cohort vertical-align
@@ -322,11 +329,11 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     childrenByParentNode: childrenByParentNodeMutable,
     elementBySolidFileAndId: elementBySolidFileAndIdMutable,
     elementRefsBySolidFileAndId: elementRefsBySolidFileAndIdMutable,
-    appliesByElementKey,
-    selectorCandidatesByElementKey,
+    appliesByNode,
+    selectorCandidatesByNode,
     selectorsById,
     measurementNodeByRootKey,
-    snapshotHotSignalsByElementKey: factIndex.snapshotHotSignalsByElementKey,
+    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
     elementsByTagName: factIndex.elementsByTagName,
     elementsWithConditionalDeltaBySignal: conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     elementsWithConditionalOverflowDelta,
@@ -334,12 +341,12 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elementsByKnownSignalValue: factIndex.elementsByKnownSignalValue,
     dynamicSlotCandidateElements: factIndex.dynamicSlotCandidateElements,
     scrollContainerElements: factIndex.scrollContainerElements,
-    reservedSpaceFactsByElementKey: factIndex.reservedSpaceFactsByElementKey,
-    scrollContainerFactsByElementKey: factIndex.scrollContainerFactsByElementKey,
-    flowParticipationFactsByElementKey: factIndex.flowParticipationFactsByElementKey,
-    containingBlockFactsByElementKey: factIndex.containingBlockFactsByElementKey,
-    conditionalSignalDeltaFactsByElementKey: conditionalDeltaIndex.conditionalSignalDeltaFactsByElementKey,
-    baselineOffsetFactsByElementKey: conditionalDeltaIndex.baselineOffsetFactsByElementKey,
+    reservedSpaceFactsByNode: factIndex.reservedSpaceFactsByNode,
+    scrollContainerFactsByNode: factIndex.scrollContainerFactsByNode,
+    flowParticipationFactsByNode: factIndex.flowParticipationFactsByNode,
+    containingBlockFactsByNode: factIndex.containingBlockFactsByNode,
+    conditionalSignalDeltaFactsByNode: conditionalDeltaIndex.conditionalSignalDeltaFactsByNode,
+    baselineOffsetFactsByNode: conditionalDeltaIndex.baselineOffsetFactsByNode,
     statefulSelectorEntriesByRuleId: statefulRuleIndexes.selectorEntriesByRuleId,
     statefulNormalizedDeclarationsByRuleId: statefulRuleIndexes.normalizedDeclarationsByRuleId,
     statefulBaseValueIndex: statefulRuleIndexes.baseValueIndex,
@@ -352,12 +359,12 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 }
 
 interface ElementFactIndex {
-  readonly reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>
-  readonly scrollContainerFactsByElementKey: ReadonlyMap<string, LayoutScrollContainerFact>
+  readonly reservedSpaceFactsByNode: ReadonlyMap<LayoutElementNode, LayoutReservedSpaceFact>
+  readonly scrollContainerFactsByNode: ReadonlyMap<LayoutElementNode, LayoutScrollContainerFact>
   readonly scrollContainerElements: readonly LayoutElementNode[]
-  readonly flowParticipationFactsByElementKey: ReadonlyMap<string, LayoutFlowParticipationFact>
-  readonly containingBlockFactsByElementKey: ReadonlyMap<string, LayoutContainingBlockFact>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly flowParticipationFactsByNode: ReadonlyMap<LayoutElementNode, LayoutFlowParticipationFact>
+  readonly containingBlockFactsByNode: ReadonlyMap<LayoutElementNode, LayoutContainingBlockFact>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
   readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
   readonly elementsByKnownSignalValue: ReadonlyMap<LayoutSignalName, ReadonlyMap<string, readonly LayoutElementNode[]>>
   readonly dynamicSlotCandidateElements: readonly LayoutElementNode[]
@@ -367,11 +374,11 @@ function buildElementFactIndex(
   elements: readonly LayoutElementNode[],
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
 ): ElementFactIndex {
-  const reservedSpaceFactsByElementKey = new Map<string, LayoutReservedSpaceFact>()
-  const scrollContainerFactsByElementKey = new Map<string, LayoutScrollContainerFact>()
-  const flowParticipationFactsByElementKey = new Map<string, LayoutFlowParticipationFact>()
-  const containingBlockFactsByElementKey = new Map<string, LayoutContainingBlockFact>()
-  const snapshotHotSignalsByElementKey = new Map<string, LayoutSnapshotHotSignals>()
+  const reservedSpaceFactsByNode = new Map<LayoutElementNode, LayoutReservedSpaceFact>()
+  const scrollContainerFactsByNode = new Map<LayoutElementNode, LayoutScrollContainerFact>()
+  const flowParticipationFactsByNode = new Map<LayoutElementNode, LayoutFlowParticipationFact>()
+  const containingBlockFactsByNode = new Map<LayoutElementNode, LayoutContainingBlockFact>()
+  const snapshotHotSignalsByNode = new Map<LayoutElementNode, LayoutSnapshotHotSignals>()
   const elementsByTagName = new Map<string, LayoutElementNode[]>()
   const elementsByKnownSignalValue = new Map<LayoutSignalName, Map<string, LayoutElementNode[]>>()
   const dynamicSlotCandidateElements: LayoutElementNode[] = []
@@ -383,7 +390,7 @@ function buildElementFactIndex(
     if (!node) continue
     const snapshot = snapshotByElementNode.get(node)
 
-    if (node.textualContent === "unknown" && node.siblingCount >= 2) {
+    if (node.textualContent === LayoutTextualContentState.Unknown && node.siblingCount >= 2) {
       dynamicSlotCandidateElements.push(node)
     }
 
@@ -408,7 +415,7 @@ function buildElementFactIndex(
       }
     }
 
-    containingBlockFactsByElementKey.set(node.key, {
+    containingBlockFactsByNode.set(node, {
       nearestPositionedAncestorKey,
       nearestPositionedAncestorHasReservedSpace,
     })
@@ -416,12 +423,12 @@ function buildElementFactIndex(
     if (!snapshot) continue
 
     const reservedSpaceFact = computeReservedSpaceFact(snapshot)
-    reservedSpaceFactsByElementKey.set(node.key, reservedSpaceFact)
+    reservedSpaceFactsByNode.set(node, reservedSpaceFact)
     const scrollFact = computeScrollContainerFact(snapshot)
-    scrollContainerFactsByElementKey.set(node.key, scrollFact)
+    scrollContainerFactsByNode.set(node, scrollFact)
     if (scrollFact.isScrollContainer) scrollContainerElements.push(node)
-    flowParticipationFactsByElementKey.set(node.key, computeFlowParticipationFact(snapshot))
-    snapshotHotSignalsByElementKey.set(node.key, computeHotSignals(snapshot))
+    flowParticipationFactsByNode.set(node, computeFlowParticipationFact(snapshot))
+    snapshotHotSignalsByNode.set(node, computeHotSignals(snapshot))
 
     const positionSignal = snapshot.signals.get("position")
     const isPositioned = positionSignal !== undefined
@@ -457,58 +464,113 @@ function buildElementFactIndex(
   }
 
   return {
-    reservedSpaceFactsByElementKey,
-    scrollContainerFactsByElementKey,
+    reservedSpaceFactsByNode,
+    scrollContainerFactsByNode,
     scrollContainerElements,
-    flowParticipationFactsByElementKey,
-    containingBlockFactsByElementKey,
-    snapshotHotSignalsByElementKey,
+    flowParticipationFactsByNode,
+    containingBlockFactsByNode,
+    snapshotHotSignalsByNode,
     elementsByTagName,
     elementsByKnownSignalValue,
     dynamicSlotCandidateElements,
   }
 }
 
+const ABSENT_NUMERIC: HotNumericSignalEvidence = Object.freeze({
+  present: false, value: null, kind: EvidenceValueKind.Unknown,
+})
+const ABSENT_NORMALIZED: HotNormalizedSignalEvidence = Object.freeze({
+  present: false, value: null, kind: EvidenceValueKind.Unknown,
+})
+
+function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
+  if (signal.kind !== "known") {
+    return {
+      present: true,
+      value: null,
+      kind: signal.guard.kind === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+    }
+  }
+  return {
+    present: true,
+    value: signal.px,
+    kind: signal.guard.kind === LayoutSignalGuard.Conditional
+      ? EvidenceValueKind.Conditional
+      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+  }
+}
+
+function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence {
+  if (signal.kind !== "known") {
+    return {
+      present: true,
+      value: null,
+      kind: signal.guard.kind === LayoutSignalGuard.Conditional ? EvidenceValueKind.Conditional : EvidenceValueKind.Unknown,
+    }
+  }
+  return {
+    present: true,
+    value: signal.normalized,
+    kind: signal.guard.kind === LayoutSignalGuard.Conditional
+      ? EvidenceValueKind.Conditional
+      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+  }
+}
+
 function computeHotSignals(snapshot: LayoutSignalSnapshot): LayoutSnapshotHotSignals {
-  return {
-    lineHeight: computeHotNumeric(snapshot, "line-height"),
-    verticalAlign: computeHotNormalized(snapshot, "vertical-align"),
-    alignSelf: computeHotNormalized(snapshot, "align-self"),
-    placeSelf: computeHotNormalized(snapshot, "place-self"),
-    writingMode: computeHotNormalized(snapshot, "writing-mode"),
-    direction: computeHotNormalized(snapshot, "direction"),
-    display: computeHotNormalized(snapshot, "display"),
-    alignItems: computeHotNormalized(snapshot, "align-items"),
-    placeItems: computeHotNormalized(snapshot, "place-items"),
-    position: computeHotNormalized(snapshot, "position"),
-    insetBlockStart: computeHotNumeric(snapshot, "inset-block-start"),
-    insetBlockEnd: computeHotNumeric(snapshot, "inset-block-end"),
-    transform: computeHotNumeric(snapshot, "transform"),
-    translate: computeHotNumeric(snapshot, "translate"),
-    top: computeHotNumeric(snapshot, "top"),
-    bottom: computeHotNumeric(snapshot, "bottom"),
-    marginTop: computeHotNumeric(snapshot, "margin-top"),
-    marginBottom: computeHotNumeric(snapshot, "margin-bottom"),
-  }
-}
+  let lineHeight: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let verticalAlign: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let alignSelf: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let placeSelf: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let flexDirection: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let gridAutoFlow: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let writingMode: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let direction: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let display: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let alignItems: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let placeItems: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let position: HotNormalizedSignalEvidence = ABSENT_NORMALIZED
+  let insetBlockStart: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let insetBlockEnd: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let transform: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let translate: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let top: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let bottom: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let marginTop: HotNumericSignalEvidence = ABSENT_NUMERIC
+  let marginBottom: HotNumericSignalEvidence = ABSENT_NUMERIC
 
-function computeHotNumeric(
-  snapshot: LayoutSignalSnapshot,
-  name: LayoutSignalName,
-): LayoutSnapshotHotSignals["lineHeight"] {
-  return {
-    present: snapshot.signals.has(name),
-    ...readNumericSignalEvidence(snapshot, name),
+  for (const [name, value] of snapshot.signals) {
+    switch (name) {
+      case "line-height": lineHeight = toHotNumeric(value); break
+      case "vertical-align": verticalAlign = toHotNormalized(value); break
+      case "align-self": alignSelf = toHotNormalized(value); break
+      case "place-self": placeSelf = toHotNormalized(value); break
+      case "flex-direction": flexDirection = toHotNormalized(value); break
+      case "grid-auto-flow": gridAutoFlow = toHotNormalized(value); break
+      case "writing-mode": writingMode = toHotNormalized(value); break
+      case "direction": direction = toHotNormalized(value); break
+      case "display": display = toHotNormalized(value); break
+      case "align-items": alignItems = toHotNormalized(value); break
+      case "place-items": placeItems = toHotNormalized(value); break
+      case "position": position = toHotNormalized(value); break
+      case "inset-block-start": insetBlockStart = toHotNumeric(value); break
+      case "inset-block-end": insetBlockEnd = toHotNumeric(value); break
+      case "transform": transform = toHotNumeric(value); break
+      case "translate": translate = toHotNumeric(value); break
+      case "top": top = toHotNumeric(value); break
+      case "bottom": bottom = toHotNumeric(value); break
+      case "margin-top": marginTop = toHotNumeric(value); break
+      case "margin-bottom": marginBottom = toHotNumeric(value); break
+      default: break
+    }
   }
-}
 
-function computeHotNormalized(
-  snapshot: LayoutSignalSnapshot,
-  name: LayoutSignalName,
-): LayoutSnapshotHotSignals["verticalAlign"] {
   return {
-    present: snapshot.signals.has(name),
-    ...readNormalizedSignalEvidence(snapshot, name),
+    lineHeight, verticalAlign, alignSelf, placeSelf,
+    flexDirection, gridAutoFlow, writingMode, direction,
+    display, alignItems, placeItems, position,
+    insetBlockStart, insetBlockEnd, transform, translate,
+    top, bottom, marginTop, marginBottom,
   }
 }
 
@@ -565,7 +627,7 @@ function hasPositiveOrDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.guard !== "unconditional") return false
+  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
 
   let normalized = ""
   if (signal.kind === "known") {
@@ -574,8 +636,7 @@ function hasPositiveOrDeclaredDimension(
   }
 
   if (signal.kind === "unknown") {
-    if (signal.raw === null) return false
-    normalized = signal.raw.trim().toLowerCase()
+    return signal.source !== null
   }
 
   if (normalized.length === 0) return false
@@ -586,16 +647,15 @@ function hasPositiveOrDeclaredDimension(
 function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
   const signal = snapshot.signals.get("aspect-ratio")
   if (!signal) return false
-  if (signal.guard !== "unconditional") return false
+  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
+
+  if (signal.kind === "unknown") {
+    return false
+  }
 
   let normalized = ""
   if (signal.kind === "known") {
     normalized = signal.normalized.trim().toLowerCase()
-  }
-
-  if (signal.kind === "unknown") {
-    if (signal.raw === null) return false
-    normalized = signal.raw.trim().toLowerCase()
   }
 
   if (normalized.length === 0) return false
@@ -625,10 +685,10 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   const xScroll = shorthandAxis.x
   const yScroll = yFromLonghand === null ? shorthandAxis.y : yFromLonghand
 
-  const hasConditionalScroll = (overflowSignal?.guard === "conditional" && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === "conditional" && yFromLonghand === true)
-  const hasUnconditionalScroll = (overflowSignal?.guard === "unconditional" && (shorthandAxis.x || shorthandAxis.y))
-    || (overflowYSignal?.guard === "unconditional" && yFromLonghand === true)
+  const hasConditionalScroll = (overflowSignal?.guard.kind === LayoutSignalGuard.Conditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard.kind === LayoutSignalGuard.Conditional && yFromLonghand === true)
+  const hasUnconditionalScroll = (overflowSignal?.guard.kind === LayoutSignalGuard.Unconditional && (shorthandAxis.x || shorthandAxis.y))
+    || (overflowYSignal?.guard.kind === LayoutSignalGuard.Unconditional && yFromLonghand === true)
 
   return {
     isScrollContainer: xScroll || yScroll,
@@ -640,21 +700,19 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   }
 }
 
+const NO_SCROLL = Object.freeze({ x: false, y: false })
+const BOTH_SCROLL = Object.freeze({ x: true, y: true })
+
 function parseOverflowShorthandAxis(value: string | null): { x: boolean; y: boolean } {
-  if (value === null) return { x: false, y: false }
-
-  const tokens = splitWhitespaceTokens(value)
-  if (tokens.length === 0) return { x: false, y: false }
-  const first = tokens[0]
-  if (!first) return { x: false, y: false }
-  if (tokens.length === 1) {
-    const scroll = SCROLLABLE_VALUES.has(first)
-    return { x: scroll, y: scroll }
+  if (value === null) return NO_SCROLL
+  const trimmed = value.trim()
+  const spaceIdx = trimmed.indexOf(" ")
+  if (spaceIdx === -1) {
+    const scroll = SCROLLABLE_VALUES.has(trimmed)
+    return scroll ? BOTH_SCROLL : NO_SCROLL
   }
-
-  const second = tokens[1]
-  if (!second) return { x: SCROLLABLE_VALUES.has(first), y: false }
-
+  const first = trimmed.slice(0, spaceIdx)
+  const second = trimmed.slice(spaceIdx + 1).trimStart()
   return {
     x: SCROLLABLE_VALUES.has(first),
     y: SCROLLABLE_VALUES.has(second),
@@ -663,17 +721,17 @@ function parseOverflowShorthandAxis(value: string | null): { x: boolean; y: bool
 
 function parseSingleAxisScroll(value: string | null): boolean | null {
   if (value === null) return null
-  const tokens = splitWhitespaceTokens(value)
-  const first = tokens[0]
-  if (!first) return null
+  const trimmed = value.trim()
+  const spaceIdx = trimmed.indexOf(" ")
+  const first = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)
   return SCROLLABLE_VALUES.has(first)
 }
 
-function toScrollAxis(x: boolean, y: boolean): LayoutScrollContainerFact["axis"] {
-  if (x && y) return "both"
-  if (x) return "x"
-  if (y) return "y"
-  return "none"
+function toScrollAxis(x: boolean, y: boolean): LayoutScrollAxis {
+  if (x && y) return LayoutScrollAxis.Both
+  if (x) return LayoutScrollAxis.X
+  if (y) return LayoutScrollAxis.Y
+  return LayoutScrollAxis.None
 }
 
 function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlowParticipationFact {
@@ -693,8 +751,8 @@ function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlo
   return {
     inFlow: !outOfFlow,
     position,
-    hasConditionalOutOfFlow: signal.guard === "conditional" && outOfFlow,
-    hasUnconditionalOutOfFlow: signal.guard === "unconditional" && outOfFlow,
+    hasConditionalOutOfFlow: signal.guard.kind === LayoutSignalGuard.Conditional && outOfFlow,
+    hasUnconditionalOutOfFlow: signal.guard.kind === LayoutSignalGuard.Unconditional && outOfFlow,
   }
 }
 

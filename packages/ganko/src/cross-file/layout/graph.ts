@@ -3,20 +3,20 @@ import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { SolidGraph } from "../../solid/impl"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { AlignmentContext } from "./context-model"
-import type {
-  LayoutCohortStats,
-  LayoutGuardProvenance,
-  LayoutSignalName,
-  LayoutSignalGuard,
-  LayoutSnapshotHotSignals,
-  LayoutSignalSnapshot,
+import type { LayoutRuleGuard } from "./guard-model"
+import {
+  type LayoutCohortStats,
+  type LayoutSignalName,
+  LayoutSignalSource,
+  type LayoutSnapshotHotSignals,
+  type LayoutSignalSnapshot,
+  LayoutTextualContentState,
 } from "./signal-model"
 
 export interface LayoutCascadedDeclaration {
   readonly value: string
-  readonly source: "selector" | "inline-style"
-  readonly guard: LayoutSignalGuard
-  readonly guardProvenance: LayoutGuardProvenance
+  readonly source: LayoutSignalSource
+  readonly guardProvenance: LayoutRuleGuard
 }
 
 export interface LayoutElementNode {
@@ -28,8 +28,6 @@ export interface LayoutElementNode {
   readonly classTokens: readonly string[]
   readonly classTokenSet: ReadonlySet<string>
   readonly inlineStyleKeys: readonly string[]
-  readonly parentElementId: number | null
-  readonly parentElementKey: string | null
   readonly parentElementNode: LayoutElementNode | null
   readonly previousSiblingNode: LayoutElementNode | null
   readonly siblingIndex: number
@@ -39,7 +37,7 @@ export interface LayoutElementNode {
   readonly selectorDispatchKeys: readonly string[]
   readonly attributes: ReadonlyMap<string, string | null>
   readonly inlineStyleValues: ReadonlyMap<string, string>
-  readonly textualContent: "yes" | "no" | "unknown" | "dynamic-text"
+  readonly textualContent: LayoutTextualContentState
   readonly isControl: boolean
   readonly isReplaced: boolean
 }
@@ -51,9 +49,6 @@ export interface LayoutStyleRuleNode {
 }
 
 export interface LayoutMatchEdge {
-  readonly solidFile: string
-  readonly elementId: number
-  readonly elementKey: string
   readonly selectorId: number
   readonly specificityScore: number
   readonly sourceOrder: number
@@ -85,7 +80,7 @@ export interface LayoutReservedSpaceFact {
   readonly hasUsableAspectRatio: boolean
 }
 
-export type LayoutScrollAxis = "x" | "y" | "both" | "none"
+export const enum LayoutScrollAxis { None = 0, X = 1, Y = 2, Both = 3 }
 
 export interface LayoutScrollContainerFact {
   readonly isScrollContainer: boolean
@@ -156,21 +151,21 @@ export interface LayoutGraphCascade {
   readonly styleRules: readonly LayoutStyleRuleNode[]
   readonly applies: readonly LayoutMatchEdge[]
   readonly cssScopeBySolidFile: ReadonlyMap<string, readonly string[]>
-  readonly appliesByElementKey: ReadonlyMap<string, readonly LayoutMatchEdge[]>
-  readonly selectorCandidatesByElementKey: ReadonlyMap<string, readonly number[]>
+  readonly appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>
+  readonly selectorCandidatesByNode: ReadonlyMap<LayoutElementNode, readonly number[]>
   readonly selectorsById: ReadonlyMap<number, SelectorEntity>
   readonly cascadeByElementNode: WeakMap<LayoutElementNode, ReadonlyMap<string, LayoutCascadedDeclaration>>
   readonly snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>
-  readonly snapshotHotSignalsByElementKey: ReadonlyMap<string, LayoutSnapshotHotSignals>
+  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
 }
 
 export interface LayoutGraphFacts {
-  readonly reservedSpaceFactsByElementKey: ReadonlyMap<string, LayoutReservedSpaceFact>
-  readonly scrollContainerFactsByElementKey: ReadonlyMap<string, LayoutScrollContainerFact>
-  readonly flowParticipationFactsByElementKey: ReadonlyMap<string, LayoutFlowParticipationFact>
-  readonly containingBlockFactsByElementKey: ReadonlyMap<string, LayoutContainingBlockFact>
-  readonly conditionalSignalDeltaFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
-  readonly baselineOffsetFactsByElementKey: ReadonlyMap<string, ReadonlyMap<LayoutSignalName, readonly number[]>>
+  readonly reservedSpaceFactsByNode: ReadonlyMap<LayoutElementNode, LayoutReservedSpaceFact>
+  readonly scrollContainerFactsByNode: ReadonlyMap<LayoutElementNode, LayoutScrollContainerFact>
+  readonly flowParticipationFactsByNode: ReadonlyMap<LayoutElementNode, LayoutFlowParticipationFact>
+  readonly containingBlockFactsByNode: ReadonlyMap<LayoutElementNode, LayoutContainingBlockFact>
+  readonly conditionalSignalDeltaFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>
+  readonly baselineOffsetFactsByNode: ReadonlyMap<LayoutElementNode, ReadonlyMap<LayoutSignalName, readonly number[]>>
 }
 
 export interface LayoutGraphCohorts {

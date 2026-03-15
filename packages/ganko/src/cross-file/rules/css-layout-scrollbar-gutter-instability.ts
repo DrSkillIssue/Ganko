@@ -1,5 +1,5 @@
 import { defineCrossRule } from "../rule"
-import { collectSignalSnapshot, readKnownNormalized, readScrollContainerElements, readScrollContainerFact } from "../layout"
+import { collectSignalSnapshot, readKnownNormalized, readScrollContainerElements, readScrollContainerFact, LayoutScrollAxis } from "../layout"
 import { emitLayoutDiagnostic } from "./rule-runtime"
 
 const messages = {
@@ -24,7 +24,7 @@ export const cssLayoutScrollbarGutterInstability = defineCrossRule({
       const snapshot = collectSignalSnapshot(context, node)
       const scroll = readScrollContainerFact(context.layout, node)
       if (!scroll.isScrollContainer) continue
-      if (scroll.axis !== "y" && scroll.axis !== "both") continue
+      if (scroll.axis !== LayoutScrollAxis.Y && scroll.axis !== LayoutScrollAxis.Both) continue
 
       // scrollbar-width: none means no scrollbar is rendered, so no CLS from scrollbar appearance
       const scrollbarWidth = readKnownNormalized(snapshot, "scrollbar-width")

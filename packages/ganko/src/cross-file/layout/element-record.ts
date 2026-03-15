@@ -7,6 +7,7 @@ import { containsJSX } from "../../solid/util/function"
 import { noopLogger, isBlank } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import { toKebabCase } from "@drskillissue/ganko-shared"
+import { LayoutTextualContentState } from "./signal-model"
 import { isControlTag, isMonitoredSignal } from "./signal-normalization"
 import { toLayoutElementKey } from "./graph"
 import { collectStaticAttributes, createLayoutComponentHostResolver, type LayoutComponentHostDescriptor } from "./component-host"
@@ -32,7 +33,7 @@ export interface LayoutElementRecord {
   readonly attributes: ReadonlyMap<string, string | null>
   readonly selectorDispatchKeys: readonly string[]
   readonly inlineStyleValues: ReadonlyMap<string, string>
-  readonly textualContent: TextualContentState
+  readonly textualContent: LayoutTextualContentState
   readonly parentElementId: number | null
 }
 
@@ -41,7 +42,7 @@ export interface SiblingTotals {
   readonly siblingTypeCountByParentId: ReadonlyMap<number, ReadonlyMap<string, number>>
 }
 
-export type TextualContentState = "yes" | "no" | "unknown" | "dynamic-text"
+export type TextualContentState = LayoutTextualContentState
 
 const EMPTY_INLINE_STYLE_VALUES: ReadonlyMap<string, string> = new Map()
 const EMPTY_ATTRIBUTES: ReadonlyMap<string, string | null> = new Map()
@@ -110,8 +111,8 @@ export function getTextualContentState(
     if (child.kind === "expression") {
       if (isStructuralExpression(child.node)) {
         if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (structural expression child)`)
-        memo.set(element.id, "unknown")
-        return "unknown"
+        memo.set(element.id, LayoutTextualContentState.Unknown)
+        return LayoutTextualContentState.Unknown
       }
       hasTextOnlyExpression = true
       continue
@@ -119,8 +120,8 @@ export function getTextualContentState(
     if (child.kind !== "text") continue
     if (child.node.type !== "JSXText") continue
     if (isBlank(child.node.value)) continue
-    memo.set(element.id, "yes")
-    return "yes"
+    memo.set(element.id, LayoutTextualContentState.Yes)
+    return LayoutTextualContentState.Yes
   }
 
   let childHasUnknown = false
@@ -132,43 +133,41 @@ export function getTextualContentState(
     const childState = getTextualContentState(child, memo, compositionMetaByElementId, logger)
 
     if (!child.isDomElement) {
-      // Non-DOM children that resolve to control elements (button, input, select, textarea)
-      // have intrinsic sizing — their text content does not cause layout shifts in the parent.
       const childMeta = compositionMetaByElementId.get(child.id)
       if (childMeta !== undefined && isControlTag(childMeta.tagName)) {
         if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag}#${child.id} resolves to control tag=${childMeta.tagName}, skipping`)
         continue
       }
 
-      if (childState !== "no") {
+      if (childState !== LayoutTextualContentState.No) {
         if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag ?? child.id}#${child.id} has state=${childState} → childHasUnknown`)
         childHasUnknown = true
       }
       continue
     }
 
-    if (childState === "yes") {
-      memo.set(element.id, "yes")
-      return "yes"
+    if (childState === LayoutTextualContentState.Yes) {
+      memo.set(element.id, LayoutTextualContentState.Yes)
+      return LayoutTextualContentState.Yes
     }
-    if (childState === "unknown") childHasUnknown = true
-    if (childState === "dynamic-text") childHasDynamicText = true
+    if (childState === LayoutTextualContentState.Unknown) childHasUnknown = true
+    if (childState === LayoutTextualContentState.DynamicText) childHasDynamicText = true
   }
 
   if (childHasUnknown) {
     if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (child has unknown)`)
-    memo.set(element.id, "unknown")
-    return "unknown"
+    memo.set(element.id, LayoutTextualContentState.Unknown)
+    return LayoutTextualContentState.Unknown
   }
 
   if (hasTextOnlyExpression || childHasDynamicText) {
     if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → dynamic-text`)
-    memo.set(element.id, "dynamic-text")
-    return "dynamic-text"
+    memo.set(element.id, LayoutTextualContentState.DynamicText)
+    return LayoutTextualContentState.DynamicText
   }
 
-  memo.set(element.id, "no")
-  return "no"
+  memo.set(element.id, LayoutTextualContentState.No)
+  return LayoutTextualContentState.No
 }
 
 function isStructuralExpression(node: T.Node): boolean {
