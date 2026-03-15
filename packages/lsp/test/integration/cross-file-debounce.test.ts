@@ -6,11 +6,11 @@
  * over stdio to catch cache invalidation bugs that the simplified TestServer
  * cannot reach.
  *
- * The bug: processChangesCallback Phase 2 publishes changed files with
- * includeCrossFile=false (zero cross-file diagnostics). Phase 3 rebuilds
- * cross-file results but excludes the changed files. Without the fix
- * (Phase 4: republishMergedDiagnostics), changed files permanently lose
- * their cross-file diagnostics until the next save.
+ * The bug: processChangesCallback publishes changed files with
+ * includeCrossFile=false, invalidates the changed file's cached cross-file
+ * slice, then excludes the changed file from affected-file republishing.
+ * If no other open file triggers a cross-file rebuild, the changed file's
+ * final publish permanently loses its cross-file diagnostics until save.
  */
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
@@ -68,6 +68,21 @@ export function App() {
 }
 `;
 
+const TSX_WITH_UNDEFINED_CLASS_V1 = `import "./styles.css";
+
+export function App() {
+  return <div class="missing">Hello</div>;
+}
+`;
+
+const TSX_WITH_UNDEFINED_CLASS_V2 = `
+import "./styles.css";
+
+export function App() {
+  return <div class="missing">Hello</div>;
+}
+`;
+
 describe("cross-file debounce", () => {
   let tempDir: string;
   let client: LSPClient;
@@ -97,12 +112,11 @@ describe("cross-file debounce", () => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("publishes cross-file diagnostics for changed files after debounce", async () => {
+  it("preserves CSS cross-file diagnostics after whitespace-only debounce edits with only the changed file open", async () => {
     client = new LSPClient(tempDir);
     await client.initialize();
 
-    // Open both files — server needs both for cross-file analysis
-    client.openFile(tsxPath, TSX_CONTENT);
+    // Open only the changed CSS file. The Solid file remains on disk in the file index.
     client.openFile(cssPath, CSS_V1);
 
     // Wait for initial diagnostics on the CSS file to settle.
@@ -138,14 +152,51 @@ describe("cross-file debounce", () => {
       d => typeof d.code === "string" && d.code.startsWith("css-layout-"),
     ) ?? [];
 
-    // The fix (republishMergedDiagnostics) ensures cross-file diagnostics
-    // are present after the debounce
     expect(finalCrossFile.length).toBeGreaterThan(0);
 
     // Verify line numbers shifted by 1 (blank line inserted at top of CSS)
     for (const diag of finalCrossFile) {
       const code = diag.code;
       const initialMatch = findByCode(initialCrossFile, code);
+      if (initialMatch) {
+        expect(diag.range.start.line).toBe(initialMatch.range.start.line + 1);
+      }
+    }
+  }, 30000);
+
+  it("preserves Solid cross-file diagnostics after whitespace-only debounce edits with only the changed file open", async () => {
+    writeFileSync(join(tempDir, "App.tsx"), TSX_WITH_UNDEFINED_CLASS_V1);
+
+    client = new LSPClient(tempDir);
+    await client.initialize();
+
+    // Open only the changed Solid file. The CSS file remains on disk in the file index.
+    client.openFile(tsxPath, TSX_WITH_UNDEFINED_CLASS_V1);
+
+    const initialPubs = await client.collectDiagnostics(tsxPath, 5000);
+    expect(initialPubs.length).toBeGreaterThan(0);
+
+    const initial = initialPubs[initialPubs.length - 1];
+    expect(initial).toBeDefined();
+
+    const initialUndefinedClass = initial?.diagnostics.filter(
+      d => d.code === "jsx-no-undefined-css-class",
+    ) ?? [];
+    expect(initialUndefinedClass.length).toBeGreaterThan(0);
+
+    client.changeFile(tsxPath, TSX_WITH_UNDEFINED_CLASS_V2, 2);
+
+    const publications = await client.collectDiagnostics(tsxPath, 2000);
+    const finalPublication = publications[publications.length - 1];
+    expect(finalPublication).toBeDefined();
+
+    const finalUndefinedClass = finalPublication?.diagnostics.filter(
+      d => d.code === "jsx-no-undefined-css-class",
+    ) ?? [];
+    expect(finalUndefinedClass.length).toBeGreaterThan(0);
+
+    for (const diag of finalUndefinedClass) {
+      const initialMatch = findByCode(initialUndefinedClass, diag.code);
       if (initialMatch) {
         expect(diag.range.start.line).toBe(initialMatch.range.start.line + 1);
       }

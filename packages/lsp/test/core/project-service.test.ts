@@ -21,6 +21,7 @@ import {
 
 const FIXTURES_DIR = join(__dirname, "../fixtures/basic-app");
 const COUNTER_FILE = join(FIXTURES_DIR, "counter.tsx");
+const EFFECT_FILE = join(FIXTURES_DIR, "effect-usage.tsx");
 
 describe("TypeScriptProjectService", () => {
   describe("createTypeScriptProjectService", () => {
@@ -31,6 +32,8 @@ describe("TypeScriptProjectService", () => {
 
       expect(service).toBeDefined();
       expect(service.getProgramForFile).toBeInstanceOf(Function);
+      expect(service.getProgram).toBeInstanceOf(Function);
+      expect(service.warmProgram).toBeInstanceOf(Function);
       expect(service.getLanguageServiceForFile).toBeInstanceOf(Function);
       expect(service.updateFile).toBeInstanceOf(Function);
       expect(service.closeFile).toBeInstanceOf(Function);
@@ -226,6 +229,22 @@ export function Counter() {
       service.closeFile(COUNTER_FILE);
       const afterClose = service.openFiles().size;
       expect(afterClose).toBeLessThan(beforeClose);
+    });
+
+    it("reuses a warmed program for unopened workspace files", () => {
+      const program = service.warmProgram(COUNTER_FILE);
+
+      expect(program).not.toBeNull();
+      expect(program?.getSourceFile(EFFECT_FILE)).toBeDefined();
+
+      const open = service.openFiles();
+      expect(open.has(COUNTER_FILE)).toBe(true);
+      expect(open.has(EFFECT_FILE)).toBe(false);
+
+      const reused = service.getProgram(EFFECT_FILE);
+      expect(reused).not.toBeNull();
+      expect(reused?.getSourceFile(EFFECT_FILE)).toBeDefined();
+      expect(service.openFiles().has(EFFECT_FILE)).toBe(false);
     });
   });
 

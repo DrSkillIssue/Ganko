@@ -53,6 +53,7 @@ import {
 
 import {
   type DocumentState,
+  type PendingChange,
   createDocumentState,
   handleDidOpen,
   handleDidChange,
@@ -210,6 +211,42 @@ function collectAffectedPaths(
   }
   if (logger?.enabled) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
   return out;
+}
+
+/**
+ * Rebuild workspace cross-file results once for the current cache state.
+ *
+ * The debounce flow publishes changed files with single-file diagnostics first,
+ * then merges fresh cross-file results. That merge must not depend on some
+ * other open file triggering a cross-file run as a side effect.
+ */
+function refreshCrossFileCache(
+  context: ServerContext,
+  project: Project,
+  changed: readonly PendingChange[],
+): void {
+  const fileIndex = context.fileIndex;
+  if (!fileIndex) return;
+
+  let seedPath: string | null = null;
+  for (let i = 0, len = changed.length; i < len; i++) {
+    const change = changed[i];
+    if (!change) continue;
+    seedPath = change.path;
+    break;
+  }
+  if (seedPath === null) return;
+
+  runCrossFileDiagnostics(
+    seedPath,
+    fileIndex,
+    project,
+    context.graphCache,
+    context.tailwindValidator,
+    context.resolveContent,
+    context.serverState.ruleOverrides,
+    context.externalCustomProperties,
+  );
 }
 
 /**
@@ -699,6 +736,9 @@ function setupDocumentHandlers(context: ServerContext): void {
       publishFileDiagnostics(context, project, change.path, change.content, false);
       diagnosed.add(change.path);
     }
+
+    if (context.log.enabled) context.log.debug("processChangesCallback: refreshing cross-file cache for changed batch");
+    refreshCrossFileCache(context, project, changes);
 
     context.rediagnoseAffected(paths, diagnosed);
 

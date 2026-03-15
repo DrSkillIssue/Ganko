@@ -13,6 +13,7 @@
  */
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
@@ -508,27 +509,39 @@ export async function runLint(args: readonly string[]): Promise<void> {
     const cache = new GraphCache(log);
     const t0 = performance.now();
 
+    const firstSolidFile = fileIndex.solidFiles.values().next();
+    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
+      const tWarm = performance.now();
+      project.warmProgram(firstSolidFile.value);
+      if (log.enabled) log.info(`ts warmup: ${(performance.now() - tWarm).toFixed(0)}ms`);
+    }
+
     for (let i = 0, len = filesToLint.length; i < len; i++) {
       const path = filesToLint[i];
       if (!path) continue;
       if (classifyFile(path) === "css") continue;
-      let content: string;
-      try {
-        content = readFileSync(path, "utf-8");
-      } catch {
-        if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
-        continue;
+      const key = canonicalPath(path);
+      let program = project.getProgram(key);
+      let content = program?.getSourceFile(key)?.text;
+
+      if (content === undefined) {
+        try {
+          content = readFileSync(path, "utf-8");
+        } catch {
+          if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
+          continue;
+        }
+        project.updateFile(key, content);
+        program = project.getProgram(key);
       }
 
-      const key = canonicalPath(path);
       if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key} (${content.length} chars)`);
-      project.updateFile(key, content);
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
       if (log.enabled) log.trace(`lint: ${key} program=${program !== null ? "yes" : "NO"}`);
       const input = parseWithOptionalProgram(key, content, program, log);
       const graph = buildSolidGraph(input);
 
-      const version = project.getScriptVersion(key) ?? "0";
+      const version = project.getScriptVersion(key)
+        ?? `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
       cache.setSolidGraph(key, version, graph);
 
       const { results, emit } = createEmit(eslintResult.overrides);

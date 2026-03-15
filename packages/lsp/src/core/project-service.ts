@@ -19,6 +19,12 @@ export interface TypeScriptProjectService {
   /** Open a file and get its TypeScript Program */
   getProgramForFile(filePath: string, content?: string): ts.Program | null;
 
+  /** Get the current program for a file, reusing a warmed workspace program when possible. */
+  getProgram(filePath: string): ts.Program | null;
+
+  /** Warm the configured project by forcing program construction from a sentinel file. */
+  warmProgram(filePath: string, content?: string): ts.Program | null;
+
   /** Get language service for cross-file features */
   getLanguageServiceForFile(filePath: string): ts.LanguageService | null;
 
@@ -82,6 +88,7 @@ export function createTypeScriptProjectService(
   const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
   const origSetTimeout = service.host.setTimeout.bind(service.host);
   const origClearTimeout = service.host.clearTimeout.bind(service.host);
+  let warmSeed: string | null = null;
 
   service.host.setTimeout = (cb: (...args: unknown[]) => void, ms: number) => {
     const id = origSetTimeout(cb, ms);
@@ -93,43 +100,72 @@ export function createTypeScriptProjectService(
     origClearTimeout(id);
   };
 
+  function resolveProgramFromScriptInfo(filePath: string, logMiss = true): ts.Program | null {
+    const scriptInfo = service.getScriptInfo(filePath);
+    if (!scriptInfo) {
+      if (logMiss) log?.warning(`getProgram: no scriptInfo for ${filePath}`);
+      return null;
+    }
+
+    const project = service.getDefaultProjectForFile(scriptInfo.fileName, true);
+    if (!project) {
+      if (logMiss) log?.warning(`getProgram: no project for ${filePath}`);
+      return null;
+    }
+
+    return project.getLanguageService(true).getProgram() ?? null;
+  }
+
+  function openProgramForFile(filePath: string, content?: string): ts.Program | null {
+    if (log?.enabled) log.trace(`getProgramForFile ENTER: ${filePath} (content=${content !== undefined ? `${content.length} chars` : "from disk"})`);
+
+    if (content !== undefined) {
+      service.openClientFile(filePath, content);
+    } else {
+      service.openClientFile(filePath);
+    }
+
+    const program = resolveProgramFromScriptInfo(filePath);
+    if (log?.enabled) {
+      if (program) {
+        const sf = program.getSourceFile(filePath);
+        log.trace(`getProgramForFile EXIT: program obtained, sourceFile=${sf !== undefined ? "found" : "MISSING"} for ${filePath}`);
+      } else {
+        log.trace(`getProgramForFile EXIT: NO program for ${filePath}`);
+      }
+    }
+    return program;
+  }
+
+  function getCachedProgramForFile(filePath: string): ts.Program | null {
+    const direct = resolveProgramFromScriptInfo(filePath, false);
+    if (direct !== null) return direct;
+
+    if (warmSeed === null) return null;
+
+    const program = resolveProgramFromScriptInfo(warmSeed, false);
+    if (program?.getSourceFile(filePath) === undefined) return null;
+    return program;
+  }
+
   return {
     getProgramForFile(filePath: string, content?: string): ts.Program | null {
       const key = canonicalPath(filePath);
-      if (log?.enabled) log.trace(`getProgramForFile ENTER: ${key} (content=${content !== undefined ? `${content.length} chars` : "from disk"})`);
+      return openProgramForFile(key, content);
+    },
 
-      if (content !== undefined) {
-        service.openClientFile(key, content);
-      } else {
-        service.openClientFile(key);
-      }
+    getProgram(filePath: string): ts.Program | null {
+      const key = canonicalPath(filePath);
+      const cached = getCachedProgramForFile(key);
+      if (cached !== null) return cached;
+      return openProgramForFile(key);
+    },
 
-      const scriptInfo = service.getScriptInfo(key);
-      if (!scriptInfo) {
-        log?.warning(`getProgramForFile: no scriptInfo for ${key}`);
-        return null;
-      }
-
-      const project = service.getDefaultProjectForFile(scriptInfo.fileName, true);
-      if (!project) {
-        log?.warning(`getProgramForFile: no project for ${key}`);
-        return null;
-      }
-
-      if (log?.enabled) {
-        const projectName = project.getProjectName();
-        const isConfigured = project.projectKind === 1;
-        log.trace(`getProgramForFile: project=${projectName} kind=${isConfigured ? "configured" : "inferred"} for ${key}`);
-      }
-
-      const program = project.getLanguageService(true).getProgram() ?? null;
-      if (log?.enabled) {
-        if (program) {
-          const sf = program.getSourceFile(key);
-          log.trace(`getProgramForFile EXIT: program obtained, sourceFile=${sf !== undefined ? "found" : "MISSING"} for ${key}`);
-        } else {
-          log.trace(`getProgramForFile EXIT: NO program for ${key}`);
-        }
+    warmProgram(filePath: string, content?: string): ts.Program | null {
+      const key = canonicalPath(filePath);
+      const program = openProgramForFile(key, content);
+      if (program !== null) {
+        warmSeed = key;
       }
       return program;
     },
@@ -208,6 +244,7 @@ export function createTypeScriptProjectService(
     closeFile(filePath: string): void {
       const key = canonicalPath(filePath);
       service.closeClientFile(key);
+      if (warmSeed === key) warmSeed = null;
       if (log?.enabled) log.trace(`closeFile: ${key}`);
     },
 

@@ -27,6 +27,12 @@ export interface Project {
   /** Run plugins on files and get diagnostics */
   run(files: readonly string[]): readonly Diagnostic[]
 
+  /** Get the current TypeScript program for a file. */
+  getProgram(path: string): ts.Program | null
+
+  /** Warm the TypeScript program for the containing project. */
+  warmProgram(path: string, content?: string): ts.Program | null
+
   /** Get TypeScript language service for cross-file features */
   getLanguageService(path: string): ts.LanguageService | null
 
@@ -75,6 +81,14 @@ export function createProject(config: ProjectConfig): Project {
       const result = runner.run(files);
       if (log?.enabled) log.trace(`project.run: ${result.length} diagnostics from ${files.length} files`);
       return result;
+    },
+
+    getProgram(path) {
+      return tsService.getProgram(path);
+    },
+
+    warmProgram(path, content) {
+      return tsService.warmProgram(path, content);
     },
 
     getLanguageService(path) {

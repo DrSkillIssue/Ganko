@@ -170,6 +170,7 @@ async function handleLintRequest(
     });
   }
 
+  let projectRecreated = false;
   if (state.project === null || state.projectRoot !== projectRoot) {
     if (state.project !== null) {
       log.info(`project root changed from ${state.projectRoot} to ${projectRoot}, discarding warm state`);
@@ -184,6 +185,7 @@ async function handleLintRequest(
       rules: eslintResult.overrides,
       log,
     });
+    projectRecreated = true;
   }
 
   const project = state.project;
@@ -219,11 +221,53 @@ async function handleLintRequest(
     filesToLint = fileIndex.allFiles();
   }
 
-  if (filesToLint.length === 0) {
-    return { kind: "lint-response", id: request.id, diagnostics: [] };
+  if (projectRecreated && fileIndex.solidFiles.size > 0) {
+    const firstSolidFile = fileIndex.solidFiles.values().next();
+    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
+      const tWarm = performance.now();
+      project.warmProgram(firstSolidFile.value);
+      log.info(`ts warmup: ${(performance.now() - tWarm).toFixed(0)}ms`);
+    }
   }
 
   const allDiagnostics: Diagnostic[] = [];
+
+  const solidPathsToSync = params.crossFile
+    ? [...fileIndex.solidFiles]
+    : filesToLint.filter(path => classifyFile(path) === "solid");
+  const solidContentByPath = new Map<string, string>();
+
+  for (let i = 0, len = solidPathsToSync.length; i < len; i++) {
+    const path = solidPathsToSync[i];
+    if (!path) continue;
+
+    let content: string;
+    try {
+      content = await readFile(path, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const key = canonicalPath(path);
+    solidContentByPath.set(key, content);
+
+    const program = project.getProgram(key);
+    const current = program?.getSourceFile(key)?.text;
+    if (current !== content) {
+      project.updateFile(key, content);
+    }
+  }
+
+  if (filesToLint.length === 0) {
+    const activeFiles = new Set(fileIndex.solidFiles);
+    const openFiles = project.openFiles();
+    for (const openPath of openFiles) {
+      if (!activeFiles.has(openPath)) {
+        project.closeFile(openPath);
+      }
+    }
+    return { kind: "lint-response", id: request.id, diagnostics: [] };
+  }
 
   /** Re-read CSS files from disk and diff against cached content.
    * Only invalidate the GraphCache CSS generation when content actually
@@ -312,22 +356,19 @@ async function handleLintRequest(
     const path = filesToLint[i];
     if (!path) continue;
     if (classifyFile(path) === "css") continue;
-    let content: string;
-    try {
-      content = await readFile(path, "utf-8");
-    } catch {
+    const key = canonicalPath(path);
+    const content = solidContentByPath.get(key);
+    if (content === undefined) {
       continue;
     }
 
-    const key = canonicalPath(path);
-    project.updateFile(key, content);
+    const program = project.getProgram(key);
 
     const version = project.getScriptVersion(key)
       ?? `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
     const needsRebuild = !cache.hasSolidGraph(key, version);
 
     if (needsRebuild) {
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
       const input = parseWithOptionalProgram(key, content, program, log);
       const graph = buildSolidGraph(input);
       cache.setSolidGraph(key, version, graph);
@@ -346,7 +387,6 @@ async function handleLintRequest(
       if (cachedGraph === null) {
         log.warning(`getCachedSolidGraph miss after hasSolidGraph hit for ${key} v=${version}`);
       }
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
       const input = parseWithOptionalProgram(key, content, program, log);
       const graphToUse = cachedGraph ?? buildSolidGraph(input);
       if (cachedGraph === null) {
@@ -591,8 +631,7 @@ async function prewarmDaemon(state: DaemonState): Promise<void> {
       });
     }
 
-    /** Trigger TS program build — the 10-15s cost. Find a sentinel
-     *  solid file via a minimal file index (ESLint ignores only).
+    /** Trigger full TS program build once via a sentinel solid file.
      *  The file index itself is not cached — the first lint request
      *  rebuilds it with the full exclude set from CLI params. */
     const tempIndex = createFileIndex(projectRoot, eslintResult.globalIgnores, log);
@@ -600,10 +639,8 @@ async function prewarmDaemon(state: DaemonState): Promise<void> {
     if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
       const sentinel = firstSolidFile.value;
       log.info(`pre-warm: triggering TS program build via ${sentinel}`);
-      const content = readFileSync(sentinel, "utf-8");
       const project = state.project;
-      project.updateFile(sentinel, content);
-      project.getLanguageService(sentinel);
+      project.warmProgram(sentinel, readFileSync(sentinel, "utf-8"));
     }
     if (state.shutdownStarted) return;
 

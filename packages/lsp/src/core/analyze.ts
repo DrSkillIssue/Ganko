@@ -83,7 +83,7 @@ export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; 
  */
 export function buildSolidGraphForPath(project: Project, path: string, logger?: Logger): () => SolidGraph {
   return () => {
-    const program = project.getLanguageService(path)?.getProgram() ?? null;
+    const program = project.getProgram(path);
     const sf = program?.getSourceFile(path);
     if (sf) {
       return buildSolidGraph(parseWithOptionalProgram(path, sf.text, program, logger));
@@ -123,7 +123,7 @@ export function runSingleFileDiagnostics(
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
-    const program = project.getLanguageService(key)?.getProgram() ?? null;
+    const program = project.getProgram(key);
     if (logger?.enabled) logger.trace(`runSingleFileDiagnostics: ${key} program=${program !== null ? "yes" : "NO"}`);
     analyzeInput(parseWithOptionalProgram(key, content, program, logger), emit);
     if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
