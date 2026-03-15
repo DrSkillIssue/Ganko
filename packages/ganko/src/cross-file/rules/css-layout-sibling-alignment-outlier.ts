@@ -4,6 +4,7 @@ import {
   collectAlignmentCases,
   evaluateAlignmentCase,
   formatAlignmentCauses,
+  formatPrimaryFix,
   readFlowParticipationFact,
   runLayoutDetector,
   type AlignmentCase,
@@ -15,7 +16,7 @@ import { readNodeRefById, formatFixed } from "./rule-runtime"
 
 const messages = {
   misalignedSibling:
-    "Element '{{subject}}' appears vertically misaligned relative to sibling cohort in '{{parent}}' (context {{context}}, severity {{severity}}, confidence {{confidence}}{{offsetClause}}; causes: {{causes}}).",
+    "Vertically misaligned '{{subject}}' in '{{parent}}'.{{fix}}{{offsetClause}}",
 } as const
 
 /**
@@ -61,6 +62,7 @@ const siblingAlignmentDetector: LayoutDetector<AlignmentCase> = {
         severity: decision.evaluation.severity,
         confidence: decision.evaluation.confidence,
         causes: formatAlignmentCauses(decision.evaluation.signalFindings),
+        primaryFix: formatPrimaryFix(decision.evaluation.signalFindings),
         contextKind: decision.evaluation.contextKind,
         contextCertainty: decision.evaluation.contextCertainty,
         estimatedOffsetPx: decision.evaluation.estimatedOffsetPx,
@@ -172,11 +174,16 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         offset !== null
         && Math.abs(offset) > 0.25
       const offsetClause = hasOffset
-        ? `, estimated offset ${formatFixed(offset)}px`
+        ? ` Estimated offset: ${formatFixed(offset)}px.`
         : ""
       const causes = detection.evidence.causes.length === 0
         ? "alignment signals indicate an outlier"
         : detection.evidence.causes.join("; ")
+      const primaryFix = detection.evidence.primaryFix
+      const firstChar = primaryFix.length > 0 ? primaryFix[0] : undefined
+      const fix = firstChar !== undefined
+        ? ` ${firstChar.toUpperCase()}${primaryFix.slice(1)}.`
+        : ""
 
       if (log.enabled) {
         log.debug(
@@ -198,11 +205,8 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
           resolveMessage(messages.misalignedSibling, {
             subject,
             parent,
-            context: detection.evidence.contextKind,
-            severity,
-            confidence,
+            fix,
             offsetClause,
-            causes,
           }),
           "warn",
         ),

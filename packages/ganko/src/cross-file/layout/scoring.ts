@@ -14,7 +14,6 @@ import {
   type ConsistencyRejectionReason,
 } from "./consistency-policy"
 import {
-  formatCompositionClassification,
   formatCompositionFixSuggestion,
 } from "./content-composition"
 import { clamp } from "./util"
@@ -87,6 +86,7 @@ function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: Alignment
     const next: AlignmentSignalFinding = {
       kind: factor.kind,
       message: factor.message,
+      fix: factor.fix,
       weight,
     }
 
@@ -107,52 +107,52 @@ function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: Alignment
 function toFindingFactor(
   factorId: AlignmentFactorId,
   input: AlignmentCase,
-  evidence: ConsistencyEvidence,
+  _evidence: ConsistencyEvidence,
 ): {
   readonly kind: AlignmentFindingKind
   readonly message: string
+  readonly fix: string
 } | null {
   switch (factorId) {
     case "offset-delta":
       return {
         kind: "offset-delta",
-        message: "explicit block-axis offset differs from sibling cohort",
+        message: "block-axis offset differs from siblings",
+        fix: "normalize margin/padding to match sibling cohort",
       }
     case "declared-offset-delta":
       return {
         kind: "declared-offset-delta",
-        message: "declared block-axis offset differs from sibling cohort",
+        message: "declared block-axis offset differs from siblings",
+        fix: "remove or unify the offset",
       }
     case "baseline-conflict":
       return {
         kind: "baseline-conflict",
-        message: "baseline/line-height signals conflict between siblings",
+        message: "baseline/line-height mismatch between siblings",
+        fix: "unify line-height or add vertical-align",
       }
     case "context-conflict":
       return {
         kind: "context-conflict",
-        message: "container and child alignment settings conflict",
+        message: "container and child alignment conflict",
+        fix: "check align-items on the parent",
       }
     case "replaced-control-risk":
       return {
         kind: "replaced-control-risk",
-        message: "replaced/control baseline behavior differs from neighboring text",
+        message: "replaced element baseline differs from text siblings",
+        fix: "add vertical-align: middle to the replaced element",
       }
     case "content-composition-conflict":
       return {
         kind: "content-composition-conflict",
-        message: formatContentCompositionFinding(input, evidence),
+        message: "content composition differs from siblings",
+        fix: formatCompositionFixSuggestion(input.subjectContentComposition),
       }
     default:
       return null
   }
-}
-
-function formatContentCompositionFinding(input: AlignmentCase, evidence: ConsistencyEvidence): string {
-  const subjectClassification = formatCompositionClassification(input.subjectContentComposition.classification)
-  const majorityClassification = formatCompositionClassification(evidence.majorityClassification)
-  const fixSuggestion = formatCompositionFixSuggestion(input.subjectContentComposition)
-  return `siblings have identical CSS but different content composition (subject: ${subjectClassification}, majority: ${majorityClassification}; fix: ${fixSuggestion})`
 }
 
 function round(value: number): number {

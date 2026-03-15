@@ -8,6 +8,7 @@ export interface LayoutEvidence {
   readonly severity: number
   readonly confidence: number
   readonly causes: readonly string[]
+  readonly primaryFix: string
   readonly contextKind: AlignmentContextKind
   readonly contextCertainty: ContextCertainty
   readonly estimatedOffsetPx: number | null
