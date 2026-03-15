@@ -38,6 +38,26 @@ export function formatAlignmentCauses(findings: readonly AlignmentSignalFinding[
   return out
 }
 
+/**
+ * Returns the fix suggestion from the highest-weight finding.
+ * Used as the primary actionable text in user-facing diagnostics.
+ */
+export function formatPrimaryFix(findings: readonly AlignmentSignalFinding[]): string {
+  if (findings.length === 0) return ""
+
+  let best: AlignmentSignalFinding | null = null
+  for (let i = 0; i < findings.length; i++) {
+    const finding = findings[i]
+    if (!finding) continue
+    if (best === null || finding.weight > best.weight) {
+      best = finding
+    }
+  }
+
+  if (best === null) return ""
+  return best.fix
+}
+
 function compareAscii(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1

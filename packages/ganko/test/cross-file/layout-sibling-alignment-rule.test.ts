@@ -5,7 +5,7 @@ import { getLatestLayoutPerfStatsForTest } from "../../src/cross-file";
 import { parseCode } from "../solid/test-utils";
 
 const OFFSET_RE = /\d+\.\d{2}px/
-const CONFIDENCE_RE = /confidence \d+\.\d{2}/
+
 
 interface CssFixture {
   readonly path: string;
@@ -87,12 +87,9 @@ describe("css-layout-sibling-alignment-outlier", () => {
     if (!d0) throw new Error("Expected diagnostic at index 0");
     expect(d0.messageId).toBe("misalignedSibling");
     expect(d0.rule).toBe("css-layout-sibling-alignment-outlier");
-    expect(d0.message).toContain("estimated offset");
+    expect(d0.message).toContain("Estimated offset");
     expect(d0.message).toMatch(OFFSET_RE);
-    expect(d0.message).toMatch(CONFIDENCE_RE);
-    expect(d0.message).toContain("causes:");
-    expect(d0.message).toContain("explicit block-axis offset differs from sibling cohort");
-    expect(d0.message).toContain("replaced/control baseline behavior differs from neighboring text");
+    expect(d0.message).toContain("Vertically misaligned");
   });
 
   it("emits when control/text siblings use unresolved line-height values", () => {
@@ -856,8 +853,8 @@ describe("css-layout-sibling-alignment-outlier", () => {
     const d0 = diagnostics[0];
     if (!d0) throw new Error("Expected diagnostic at index 0");
     expect(d0.messageId).toBe("misalignedSibling");
-    expect(d0.message).toContain("context");
-    expect(d0.message).not.toContain("estimated offset");
+    expect(d0.message).toContain("Vertically misaligned");
+    expect(d0.message).not.toContain("Estimated offset");
   });
 
   it("treats text-only expression siblings as decidable textual evidence", () => {

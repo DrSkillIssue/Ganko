@@ -76,7 +76,7 @@ export function formatText(diagnostics: readonly Diagnostic[], cwd: string): str
     for (let i = 0, len = fileDiags.length; i < len; i++) {
       const d = fileDiags[i];
       if (!d) continue;
-      const loc = `${d.loc.start.line}:${d.loc.start.column}`;
+      const loc = `${rel}:${d.loc.start.line}:${d.loc.start.column}`;
       const sevColor = d.severity === "error" ? ANSI.red : ANSI.yellow;
       const sevLabel = d.severity === "error" ? "error" : "warn";
 

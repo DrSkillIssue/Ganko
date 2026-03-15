@@ -324,26 +324,31 @@ describe("layout alignment policy semantics", () => {
       {
         kind: "baseline-conflict",
         message: "a-cause",
+        fix: "fix-a",
         weight: 0.5,
       },
       {
         kind: "context-conflict",
         message: "context-cause",
+        fix: "fix-context",
         weight: 0.7,
       },
       {
         kind: "offset-delta",
         message: "later-offset-cause",
+        fix: "fix-offset-later",
         weight: 0.4,
       },
       {
         kind: "baseline-conflict",
         message: "A-cause",
+        fix: "fix-A",
         weight: 0.5,
       },
       {
         kind: "offset-delta",
         message: "first-offset-cause",
+        fix: "fix-offset-first",
         weight: 0.9,
       },
     ];

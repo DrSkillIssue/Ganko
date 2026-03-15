@@ -313,6 +313,7 @@ export interface PosteriorInterval {
 export interface AlignmentSignalFinding {
   readonly kind: AlignmentFindingKind
   readonly message: string
+  readonly fix: string
   readonly weight: number
 }
 

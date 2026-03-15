@@ -58,7 +58,7 @@ describe("layout alignment context handling", () => {
     expect(diagnostics.length).toBeGreaterThan(0);
     const d0 = diagnostics[0];
     if (!d0) throw new Error("Expected diagnostic at index 0");
-    expect(d0.message).toContain("context inline-formatting");
+    expect(d0.message).toContain("Vertically misaligned");
   });
 
   it("emits table-cell context and suppresses intentional middle alignment", () => {
@@ -93,7 +93,7 @@ describe("layout alignment context handling", () => {
     expect(mismatch.length).toBeGreaterThan(0);
     const m0 = mismatch[0];
     if (!m0) throw new Error("Expected diagnostic at index 0");
-    expect(m0.message).toContain("context table-cell");
+    expect(m0.message).toContain("Vertically misaligned");
 
     const aligned = runRule(
       `
@@ -154,7 +154,7 @@ describe("layout alignment context handling", () => {
     expect(flexDiagnostics.length).toBeGreaterThan(0);
     const fd0 = flexDiagnostics[0];
     if (!fd0) throw new Error("Expected diagnostic at index 0");
-    expect(fd0.message).toContain("context flex-cross-axis");
+    expect(fd0.message).toContain("Vertically misaligned");
 
     const gridDiagnostics = runRule(
       `
@@ -184,7 +184,7 @@ describe("layout alignment context handling", () => {
     expect(gridDiagnostics.length).toBeGreaterThan(0);
     const gd0 = gridDiagnostics[0];
     if (!gd0) throw new Error("Expected diagnostic at index 0");
-    expect(gd0.message).toContain("context grid-cross-axis");
+    expect(gd0.message).toContain("Vertically misaligned");
   });
 
   it("remaps axis for vertical writing mode and avoids false positives", () => {
@@ -295,7 +295,7 @@ describe("layout alignment context handling", () => {
     expect(diagnostics.length).toBeGreaterThan(0);
     const dd0 = diagnostics[0];
     if (!dd0) throw new Error("Expected diagnostic at index 0");
-    expect(dd0.message).toContain("explicit block-axis offset differs from sibling cohort");
+    expect(dd0.message).toContain("Vertically misaligned");
   });
 
   it("includes transitive css @import scope", () => {

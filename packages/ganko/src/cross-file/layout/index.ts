@@ -81,7 +81,7 @@ export {
   normalizeSignalMapWithCounts,
 } from "./signal-normalization"
 export { classifyAlignmentContext, getContextElementRef, finalizeTableCellBaselineRelevance } from "./context-classification"
-export { formatAlignmentCauses, orderAlignmentFindings } from "./diagnostics"
+export { formatAlignmentCauses, formatPrimaryFix, orderAlignmentFindings } from "./diagnostics"
 export { buildLayoutGraph } from "./build"
 export type { LayoutPerfStats, LayoutPerfStatsMutable } from "./perf"
 export {
