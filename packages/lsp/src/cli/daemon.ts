@@ -19,7 +19,7 @@ import { writeFile, rename, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, createLogger } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createFileIndex, type FileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
@@ -61,6 +61,11 @@ interface DaemonState {
   pending: Promise<void>
   /** Guard against double shutdown from concurrent signals. */
   shutdownStarted: boolean
+  /** ESLint config cached from pre-warm or first lint. */
+  eslintConfig: ESLintConfigResult | null
+  /** Promise tracking the background pre-warm. Awaited on first lint to
+   *  ensure the warm state is ready before proceeding. */
+  prewarm: Promise<void> | null
 }
 
 function resetIdleTimer(state: DaemonState): void {
@@ -127,7 +132,7 @@ function invalidateCaches(state: DaemonState): void {
   state.tailwind = null;
   state.externalCustomProperties = null;
   state.cssContentMap = null;
-
+  state.eslintConfig = null;
 }
 
 async function handleLintRequest(
@@ -139,16 +144,35 @@ async function handleLintRequest(
 
   const log = state.log;
 
-  /** H1: Load ESLint config once, use everywhere. */
-  const eslintResult = params.noEslintConfig
-    ? EMPTY_ESLINT_RESULT
-    : await loadESLintConfig(projectRoot, params.eslintConfigPath, log).catch((err) => {
-        log.warning(`failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
-        return EMPTY_ESLINT_RESULT;
-      });
+  /** Await background pre-warm if still in progress. The pre-warmed
+   *  ESLint config is consumed once and cleared — subsequent requests
+   *  must re-read the config file because it may change between runs. */
+  let usedPrewarmConfig = false;
+  if (state.prewarm !== null) {
+    await state.prewarm;
+    state.prewarm = null;
+    usedPrewarmConfig = true;
+  }
+
+  /** H1: Load ESLint config — reuse pre-warm result only on the first
+   *  request after pre-warm. Subsequent requests always re-read because
+   *  the config file may be edited between lint invocations. */
+  let eslintResult: ESLintConfigResult;
+  if (params.noEslintConfig) {
+    eslintResult = EMPTY_ESLINT_RESULT;
+  } else if (usedPrewarmConfig && state.eslintConfig !== null && params.eslintConfigPath === undefined) {
+    eslintResult = state.eslintConfig;
+    state.eslintConfig = null;
+  } else {
+    eslintResult = await loadESLintConfig(projectRoot, params.eslintConfigPath, log).catch((err) => {
+      log.warning(`failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+      return EMPTY_ESLINT_RESULT;
+    });
+  }
 
   if (state.project === null || state.projectRoot !== projectRoot) {
     if (state.project !== null) {
+      log.info(`project root changed from ${state.projectRoot} to ${projectRoot}, discarding warm state`);
       state.project.dispose();
     }
     state.projectRoot = projectRoot;
@@ -533,6 +557,63 @@ async function writePidFile(pidPath: string): Promise<void> {
 }
 
 /**
+ * Pre-warm the TS ProjectService in the background after daemon startup.
+ *
+ * Only warms resources that are expensive AND stable across request
+ * configurations: the ESLint config, the TS project service constructor,
+ * and the TS program build (the dominant 10-15s cost). File index,
+ * Tailwind validator, CSS content map, and dependency scan all depend on
+ * `--exclude` patterns from the CLI invocation and are deferred to the
+ * first lint request.
+ *
+ * This matches the pattern used by Biome, oxlint, and eslint_d: only
+ * pre-warm what doesn't depend on request params.
+ */
+async function prewarmDaemon(state: DaemonState): Promise<void> {
+  const { log, projectRoot } = state;
+  const t0 = performance.now();
+  log.info("pre-warm: starting background initialization");
+
+  try {
+    const eslintResult = await loadESLintConfig(projectRoot, undefined, log).catch((err) => {
+      log.warning(`pre-warm: failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+      return EMPTY_ESLINT_RESULT;
+    });
+    if (state.shutdownStarted) return;
+    state.eslintConfig = eslintResult;
+
+    if (state.project === null) {
+      state.project = createProject({
+        rootPath: projectRoot,
+        plugins: [SolidPlugin],
+        rules: eslintResult.overrides,
+        log,
+      });
+    }
+
+    /** Trigger TS program build — the 10-15s cost. Find a sentinel
+     *  solid file via a minimal file index (ESLint ignores only).
+     *  The file index itself is not cached — the first lint request
+     *  rebuilds it with the full exclude set from CLI params. */
+    const tempIndex = createFileIndex(projectRoot, eslintResult.globalIgnores, log);
+    const firstSolidFile = tempIndex.solidFiles.values().next();
+    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
+      const sentinel = firstSolidFile.value;
+      log.info(`pre-warm: triggering TS program build via ${sentinel}`);
+      const content = readFileSync(sentinel, "utf-8");
+      const project = state.project;
+      project.updateFile(sentinel, content);
+      project.getLanguageService(sentinel);
+    }
+    if (state.shutdownStarted) return;
+
+    log.info(`pre-warm: completed in ${(performance.now() - t0).toFixed(0)}ms`);
+  } catch (err) {
+    log.warning(`pre-warm: failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
  * Start the daemon server for a given project root.
  *
  * Probes an existing socket before unlinking — if another daemon is
@@ -574,6 +655,8 @@ export async function startDaemon(projectRoot: string): Promise<void> {
     cssContentMap: null,
     pending: Promise.resolve(),
     shutdownStarted: false,
+    eslintConfig: null,
+    prewarm: null,
   };
 
   server.on("connection", (socket: Socket) => {
@@ -612,13 +695,15 @@ export async function startDaemon(projectRoot: string): Promise<void> {
       try { chmodSync(sockPath, 0o600); } catch { /* best-effort on non-Unix */ }
     }
 
+    resetIdleTimer(state);
+
     void writePidFile(pidPath).then(() => {
       log.info(`daemon listening on ${sockPath} (pid=${process.pid})`);
-      resetIdleTimer(state);
     }).catch((err) => {
       log.warning(`failed to write PID file: ${err instanceof Error ? err.message : String(err)}`);
-      resetIdleTimer(state);
     });
+
+    state.prewarm = prewarmDaemon(state);
   });
 
   process.on("SIGTERM", () => { shutdown(state); });

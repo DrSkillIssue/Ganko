@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "path";
+import { readFileSync } from "node:fs";
 import {
   createTypeScriptProjectService,
   type TypeScriptProjectService,
@@ -225,6 +226,75 @@ export function Counter() {
       service.closeFile(COUNTER_FILE);
       const afterClose = service.openFiles().size;
       expect(afterClose).toBeLessThan(beforeClose);
+    });
+  });
+
+  describe("updateFile version stability", () => {
+    it("does not bump script version when content is identical", () => {
+      const service = createTypeScriptProjectService({
+        tsconfigRootDir: FIXTURES_DIR,
+      });
+
+      const content = `
+import { createSignal } from "solid-js";
+export const App = () => {
+  const [x] = createSignal(0);
+  return <div>{x()}</div>;
+};
+`;
+      /** Open the file with content. */
+      service.updateFile(COUNTER_FILE, content);
+      const v1 = service.getScriptVersionForFile(COUNTER_FILE);
+      expect(v1).not.toBeNull();
+
+      /** Update with identical content — version must NOT change. */
+      service.updateFile(COUNTER_FILE, content);
+      const v2 = service.getScriptVersionForFile(COUNTER_FILE);
+      expect(v2).toBe(v1);
+
+      service.dispose();
+    });
+
+    it("bumps script version when content changes", () => {
+      const service = createTypeScriptProjectService({
+        tsconfigRootDir: FIXTURES_DIR,
+      });
+
+      const content1 = "export const x = 1;";
+      const content2 = "export const x = 2;";
+
+      service.updateFile(COUNTER_FILE, content1);
+      const v1 = service.getScriptVersionForFile(COUNTER_FILE);
+
+      service.updateFile(COUNTER_FILE, content2);
+      const v2 = service.getScriptVersionForFile(COUNTER_FILE);
+
+      expect(v1).not.toBeNull();
+      expect(v2).not.toBeNull();
+      expect(v2).not.toBe(v1);
+
+      service.dispose();
+    });
+
+    it("skips version bump after openClientFile with same disk content", () => {
+      const service = createTypeScriptProjectService({
+        tsconfigRootDir: FIXTURES_DIR,
+      });
+
+      /** Open via getLanguageServiceForFile (reads from disk). */
+      service.getLanguageServiceForFile(COUNTER_FILE);
+      const v1 = service.getScriptVersionForFile(COUNTER_FILE);
+      expect(v1).not.toBeNull();
+
+      /** Read the actual file content from disk. */
+      const diskContent = readFileSync(COUNTER_FILE, "utf-8");
+
+      /** updateFile with same content — version must NOT change. */
+      service.updateFile(COUNTER_FILE, diskContent);
+      const v2 = service.getScriptVersionForFile(COUNTER_FILE);
+      expect(v2).toBe(v1);
+
+      service.dispose();
     });
   });
 

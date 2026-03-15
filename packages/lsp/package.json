@@ -50,9 +50,10 @@
     "test:watch": "vitest --watch",
     "tsc": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@drskillissue/ganko": "workspace:^"
+  },
   "devDependencies": {
-    "@drskillissue/ganko": "workspace:^",
     "@drskillissue/ganko-shared": "workspace:^",
     "@typescript-eslint/parser": "^8.57.0",
     "@typescript-eslint/project-service": "^8.57.0",
