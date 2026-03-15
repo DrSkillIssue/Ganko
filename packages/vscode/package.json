@@ -3016,7 +3016,7 @@
     "@drskillissue/ganko": "workspace:^"
   },
   "devDependencies": {
-    "@types/vscode": "~1.105.0",
+    "@types/vscode": "~1.110.0",
     "@vscode/vsce": "^3.7.1",
     "@drskillissue/ganko-lsp": "workspace:^"
   }
