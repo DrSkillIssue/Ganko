@@ -187,9 +187,18 @@ export function createTypeScriptProjectService(
       const key = canonicalPath(filePath);
       const scriptInfo = service.getScriptInfo(key);
       if (scriptInfo) {
+        /** Compare before editing — editContent() unconditionally bumps
+         *  the script version (unlike ScriptInfo.open → reload which has
+         *  a built-in equality check). Skipping the edit when content is
+         *  identical prevents unnecessary graph rebuilds downstream. */
         const snapshot = scriptInfo.getSnapshot();
-        scriptInfo.editContent(0, snapshot.getLength(), content);
-        if (log?.enabled) log.trace(`updateFile: edited ${key} (${content.length} chars)`);
+        const existing = snapshot.getText(0, snapshot.getLength());
+        if (existing !== content) {
+          scriptInfo.editContent(0, snapshot.getLength(), content);
+          if (log?.enabled) log.trace(`updateFile: edited ${key} (${content.length} chars)`);
+        } else if (log?.enabled) {
+          log.trace(`updateFile: skipped ${key} (content unchanged)`);
+        }
       } else {
         service.openClientFile(key, content);
         if (log?.enabled) log.trace(`updateFile: opened ${key} (${content.length} chars)`);

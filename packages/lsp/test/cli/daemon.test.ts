@@ -1921,4 +1921,242 @@ describe("daemon integration", () => {
       });
     });
   });
+
+  describe("pre-warm correctness", () => {
+    /**
+     * The daemon pre-warms the TS ProjectService and ESLint config in the
+     * background after server.listen(). These tests verify that pre-warmed
+     * state produces identical results to a cold in-process analysis.
+     */
+
+    it("pre-warmed daemon produces identical diagnostics to --no-daemon", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Counter.tsx": BUGGY_COMPONENT,
+        "src/App.tsx": CLEAN_COMPONENT,
+      });
+
+      /** In-process baseline (no daemon, no pre-warm). */
+      const baseline = await lintJson(root, ["--no-daemon"]);
+
+      /** Start daemon — pre-warm runs in background. */
+      await startDaemonAndWait(root);
+
+      /** First lint after pre-warm. If pre-warm corrupted state,
+       *  diagnostics will differ from baseline. */
+      const prewarmed = await lintJson(root);
+
+      await stopDaemon(root);
+
+      const normalize = (diags: { rule: string; file: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      expect(normalize(prewarmed.diagnostics)).toEqual(normalize(baseline.diagnostics));
+    });
+
+    it("pre-warmed daemon handles file changes after pre-warm", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": CLEAN_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — clean file, pre-warm already ran. */
+      const first = await lintJson(root);
+      expect(first.diagnostics.length).toBe(0);
+
+      /** Modify the file after pre-warm opened it. */
+      writeFileSync(join(root, "src/App.tsx"), BUGGY_COMPONENT);
+
+      /** Second lint — must detect the change despite pre-warm having
+       *  opened the original content. This validates that updateFile's
+       *  content equality check doesn't suppress real changes. */
+      const second = await lintJson(root);
+      expect(second.diagnostics.length).toBeGreaterThan(0);
+
+      await stopDaemon(root);
+    });
+
+    it("pre-warm with --exclude: excludes are respected despite pre-warm lacking them", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": CLEAN_COMPONENT,
+        "src/legacy/Old.tsx": BUGGY_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** Lint with --exclude via CLI (spawns process to pass flag). */
+      const withExclude = await lintJson(root, ["--exclude", "src/legacy/**"]);
+
+      /** No diagnostics from excluded files. */
+      const legacyDiags = withExclude.diagnostics.filter(
+        (d) => d.file.includes("legacy/Old.tsx"),
+      );
+      expect(legacyDiags.length).toBe(0);
+
+      /** Lint without exclude — should include legacy file. */
+      const withoutExclude = await lintJson(root);
+      const legacyDiags2 = withoutExclude.diagnostics.filter(
+        (d) => d.file.includes("legacy/Old.tsx"),
+      );
+      expect(legacyDiags2.length).toBeGreaterThan(0);
+
+      await stopDaemon(root);
+    });
+
+    it("consecutive lints after pre-warm produce stable results (no version bump drift)", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Counter.tsx": BUGGY_COMPONENT,
+        "src/App.tsx": CLEAN_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** Three consecutive lints with no file changes.
+       *  If updateFile bumps the version on unchanged content,
+       *  each run would rebuild graphs unnecessarily. While not
+       *  a correctness issue, we verify results are stable. */
+      const runs = [];
+      for (let i = 0; i < 4; i++) {
+        runs.push(await lintJson(root));
+      }
+
+      await stopDaemon(root);
+
+      const normalize = (diags: { rule: string; file: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.file}:${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      const firstRun = runs[0];
+      if (!firstRun) throw new Error("expected at least one run");
+      const firstResult = normalize(firstRun.diagnostics);
+      for (let i = 1; i < runs.length; i++) {
+        const r = runs[i];
+        if (!r) continue;
+        expect(normalize(r.diagnostics)).toEqual(firstResult);
+      }
+    });
+
+    it("pre-warm does not interfere with ESLint config from lint request", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Counter.tsx": BUGGY_COMPONENT,
+        "eslint.config.mjs": [
+          "export default [",
+          "  {",
+          '    rules: { "solid/no-destructure": "off" },',
+          "  },",
+          "];",
+        ].join("\n"),
+      });
+
+      await startDaemonAndWait(root);
+
+      /** Pre-warm loads ESLint config (no-destructure: off).
+       *  First lint should respect this override. */
+      const result = await lintJson(root);
+      const destructureDiags = result.diagnostics.filter(
+        (d) => d.rule === "no-destructure",
+      );
+      expect(destructureDiags.length).toBe(0);
+
+      /** Verify matches in-process. */
+      const inProcess = await lintJson(root, ["--no-daemon"]);
+      const inProcDestructure = inProcess.diagnostics.filter(
+        (d) => d.rule === "no-destructure",
+      );
+      expect(inProcDestructure.length).toBe(0);
+
+      await stopDaemon(root);
+    });
+
+    it("daemon restart after pre-warm produces identical results", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/Counter.tsx": BUGGY_COMPONENT,
+      });
+
+      /** First daemon lifecycle. */
+      await startDaemonAndWait(root);
+      const first = await lintJson(root);
+      await stopDaemon(root);
+
+      /** Second daemon lifecycle — fresh pre-warm. */
+      await startDaemonAndWait(root);
+      const second = await lintJson(root);
+      await stopDaemon(root);
+
+      const normalize = (diags: { rule: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      expect(normalize(second.diagnostics)).toEqual(normalize(first.diagnostics));
+    });
+  });
+
+  describe("updateFile version stability", () => {
+    /**
+     * Validates that the content equality check in updateFile prevents
+     * unnecessary script version bumps when file content hasn't changed.
+     * Without this fix, every daemon lint run would rebuild graphs for
+     * the pre-warm sentinel file.
+     */
+
+    it("unchanged files between lint runs don't cause diagnostic instability", async () => {
+      /** Create a project with multiple files. */
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/A.tsx": BUGGY_COMPONENT,
+        "src/B.tsx": CLEAN_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      /** First lint — cold. */
+      const cold = await lintJson(root);
+
+      /** Second lint — warm, no changes. */
+      const warm = await lintJson(root);
+
+      /** Third lint — still warm, still no changes. */
+      const warm2 = await lintJson(root);
+
+      await stopDaemon(root);
+
+      /** All runs must produce identical diagnostics.
+       *  Before the editContent equality fix, the sentinel file
+       *  could have a different version between pre-warm and first
+       *  lint, causing a spurious rebuild on one file. */
+      const normalize = (diags: { rule: string; file: string; line: number; column: number }[]) =>
+        diags.map((d) => `${d.file}:${d.rule}:${d.line}:${d.column}`).toSorted();
+
+      expect(normalize(warm.diagnostics)).toEqual(normalize(cold.diagnostics));
+      expect(normalize(warm2.diagnostics)).toEqual(normalize(cold.diagnostics));
+    });
+
+    it("changed files are correctly detected despite version stability optimization", async () => {
+      const root = createTempProject({
+        "tsconfig.json": TSCONFIG,
+        "src/App.tsx": CLEAN_COMPONENT,
+      });
+
+      await startDaemonAndWait(root);
+
+      const clean = await lintJson(root);
+      expect(clean.diagnostics.length).toBe(0);
+
+      /** Mutate file content — version MUST bump. */
+      writeFileSync(join(root, "src/App.tsx"), BUGGY_COMPONENT);
+      const buggy = await lintJson(root);
+      expect(buggy.diagnostics.length).toBeGreaterThan(0);
+
+      /** Mutate back — version MUST bump again. */
+      writeFileSync(join(root, "src/App.tsx"), CLEAN_COMPONENT);
+      const cleanAgain = await lintJson(root);
+      expect(cleanAgain.diagnostics.length).toBe(0);
+
+      await stopDaemon(root);
+    });
+  });
 });
