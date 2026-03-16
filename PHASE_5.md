@@ -1,153 +1,266 @@
-# Phase 5: Persistent `.tsbuildinfo` Cache for Cold Start
+# Phase 5: Content-Addressed `SolidGraph` Cache
 
-**Estimated Impact**: Cold start program build from ~3-8s → ~200ms
-**Files touched**: `batch-program.ts` (from Phase 1), `incremental-program.ts` (from Phase 1), `daemon.ts`
-**Risk**: Low-Medium (TypeScript's incremental API is stable and well-documented)
-**Depends on**: Phase 1 (direct `ts.Program`)
+**Effort**: M (1-2 days)
+**Depends on**: Phase 1 (graph is `ts.Node`-based, version comes from content hash)
+**Independent value**: Skip graph building for unchanged files. Daemon warm lint drops to sub-second.
 
-## Problem
+---
 
-Every cold start (fresh CLI invocation, new daemon, LSP restart) pays the full `ts.createProgram` cost: parsing tsconfig, resolving module graph, reading all source files, type-checking. For a 230-file SolidJS project, this takes 3-8s.
+## Critical issue: `ts.Node` identity across program rebuilds
 
-TypeScript already solved this problem for `tsc --incremental` via `.tsbuildinfo` files. The `ts.createIncrementalProgram` API can read a previously-saved `BuilderProgram` state and skip re-checking files whose content hasn't changed.
+Post-Phase 1, `SolidGraph` contains `ts.Node` references from the `ts.Program` that created it. When the program rebuilds (watch program update, new `ts.createProgram` call), ALL `ts.Node` object references from the old program become stale — they point to a dead AST tree.
 
-## Solution
+This means:
+- Cached `SolidGraph` instances hold `ts.Node` pointers from the OLD program
+- Cross-file rules that traverse `ts.Node` from cached graphs will read stale data
+- `WeakMap<ts.Node, ...>` caches on the graph become unreachable (old nodes are GC'd)
 
-### Use `ts.createIncrementalProgram` Instead of `ts.createProgram`
+### Impact analysis
 
-Replace the batch `ts.createProgram` call from Phase 1 with `ts.createIncrementalProgram`:
+**Where `ts.Node` references from cached graphs are accessed:**
 
-```typescript
-const parsedConfig = ts.getParsedCommandLineOfConfigFile(tsconfigPath, {}, host);
+1. **Cross-file rules** (`cross-file/rules/*.ts`): Access `entity.node` on entities from cached graphs. These entity nodes are from the old program's AST.
+2. **Rule execution** (`runSolidRules`): Always runs fresh — takes a freshly-built graph. Not affected.
+3. **LayoutGraph construction** (`buildLayoutGraph`): Reads entities from cached SolidGraphs. Entity nodes are stale.
+4. **HandlerContext.getSolidGraph**: Returns cached graph. Handlers that access `.node` properties get stale nodes.
 
-const program = ts.createIncrementalProgram({
-  rootNames: parsedConfig.fileNames,
-  options: {
-    ...parsedConfig.options,
-    incremental: true,
-    tsBuildInfoFile: resolve(rootPath, "node_modules/.cache/ganko/.tsbuildinfo"),
-  },
-  host: compilerHost,
-});
-```
+### Resolution: content-addressed graphs are valid when content is identical
 
-### Save `.tsbuildinfo` After Program Build
+When file content is identical (same hash), the `ts.Node` tree structure is identical. The only difference is object identity — the new program creates new `ts.Node` objects with the same shapes.
 
-After building the program, emit the builder state:
+For cross-file rules:
+- Rules read `.node.getText(sourceFile)` → the text is the same (content didn't change)
+- Rules read `.node.kind` / `ts.is*()` → identical (same AST structure)
+- Rules read `.node.getStart(sf)` / `.node.end` → depends on which `sourceFile` is passed
 
-```typescript
-// Save incremental state for next cold start
-const builderProgram = program.getProgram();
-ts.emitBuilderProgram(builderProgram, host, /*emitOnlyDts*/ undefined, /*cancellationToken*/ undefined);
-```
+The issue is NOT structural correctness — it's which `ts.SourceFile` the node belongs to. If a rule calls `node.getSourceFile()`, it returns the OLD sourceFile. If a rule calls `node.getText(oldSourceFile)`, it works because the old sourceFile has the same text.
 
-Or more precisely, use `ts.createEmitAndSemanticDiagnosticsBuilderProgram` which handles `.tsbuildinfo` writing:
+**The real danger**: functions that do `checker.getTypeAtLocation(cachedNode)`. The new `TypeChecker` from the new program does NOT recognize nodes from the old program. TypeChecker operates on object identity.
 
-```typescript
-const builderHost = ts.createIncrementalCompilerHost(parsedConfig.options);
-const builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
-  parsedConfig.fileNames,
-  parsedConfig.options,
-  builderHost,
-  ts.readBuilderProgram(parsedConfig.options, builderHost), // reads existing .tsbuildinfo
-);
-```
+### Decision: cached graphs are ONLY used for diagnostic output, NOT for type checking
 
-### Cache Location
+After Phase 1:
+- `buildSolidGraph(input)` → runs phases, builds entities, resolves types → writes results into the graph
+- `runSolidRules(graph, sourceFile, emit)` → reads graph data, emits diagnostics
 
-Store in `node_modules/.cache/ganko/.tsbuildinfo`:
-- `node_modules/.cache/` is the standard cache directory convention (used by Babel, ESLint, Vite)
-- Survives across runs, cleared by `rm -rf node_modules`
-- Per-project isolation via the project root's `node_modules`
+The graph already contains the resolved results of type checking (entity types, reactivity classifications, etc.). Rules read these results from entities — they do NOT call the TypeChecker on cached nodes. The TypeChecker is used during `buildSolidGraph` (phases), not during `runSolidRules`.
 
-### What Gets Cached
+Therefore: **cached graphs can be safely reused for rule execution as long as the content hash matches.** The TypeChecker is only needed during graph construction, and graph construction is skipped on cache hit.
 
-The `.tsbuildinfo` file contains:
-- File version hashes (content → version map)
-- Dependency graph between files
-- Computed declaration signatures
-- Semantic diagnostics cache
+For cross-file analysis: `buildLayoutGraph` reads entity data (classifications, names, scopes) — not types. Safe to use cached graphs.
 
-On cold start with a warm cache:
-- TypeScript reads the `.tsbuildinfo`
-- Compares file content hashes against disk
-- Only re-parses and re-checks files whose content changed
-- Reuses cached type information for unchanged files
+---
 
-### Daemon Integration
+## Version key: content hash
 
-The daemon already persists state in memory across requests. With `.tsbuildinfo`:
-- **Daemon startup**: reads `.tsbuildinfo` → near-instant program rebuild
-- **Daemon shutdown/crash**: `.tsbuildinfo` survives on disk → next daemon starts fast
-- **CLI without daemon**: reads same `.tsbuildinfo` → benefits from daemon's previous work
+Current: `project.getScriptVersion(path)` from `ProjectService` internals.
 
-### CLI Integration
-
-For `ganko lint` without daemon:
-1. Read `.tsbuildinfo` from cache
-2. Build incremental program (validates cached state against current files)
-3. Run analysis
-4. Write updated `.tsbuildinfo` to cache (captures any new file changes)
-
-Cost of step 4 is ~10-50ms (serializing the builder state).
-
-## Changes
-
-### `batch-program.ts` (from Phase 1)
-
-Replace `ts.createProgram` with `ts.createIncrementalProgram`:
+Post-Phase 1: `ProjectService` is gone. Version comes from content hash:
 
 ```typescript
-function createBatchProgram(rootPath: string, log?: Logger): BatchTypeScriptService {
-  const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
-  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, rootPath);
+import { createHash } from "node:crypto";
 
-  const host = ts.createIncrementalCompilerHost(parsedConfig.options);
-  const cacheDir = resolve(rootPath, "node_modules/.cache/ganko");
-  const buildInfoPath = resolve(cacheDir, ".tsbuildinfo");
-
-  const options = {
-    ...parsedConfig.options,
-    incremental: true,
-    tsBuildInfoFile: buildInfoPath,
-  };
-
-  const oldProgram = ts.readBuilderProgram(options, host);
-
-  const builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
-    parsedConfig.fileNames,
-    options,
-    host,
-    oldProgram,
-  );
-
-  const program = builder.getProgram();
-
-  return {
-    program,
-    checker: program.getTypeChecker(),
-    getSourceFileText(path) { ... },
-    dispose() {
-      // Write .tsbuildinfo on dispose (captures state for next run)
-      mkdirSync(cacheDir, { recursive: true });
-      builder.emit();
-    },
-  };
+function contentHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 ```
 
-### `daemon.ts`
+16 hex chars = 64 bits of entropy. Collision probability: negligible for ~10^3 files.
 
-On daemon startup prewarm:
-- Use incremental program (reads `.tsbuildinfo` if exists)
-- On daemon shutdown: `.tsbuildinfo` already written by `dispose()`
+---
+
+## `packages/ganko/src/cache.ts` changes
+
+### Version source change
+
+No structural change to `GraphCache`. The version string is already a `string` parameter — callers just pass a different value:
+
+Before: `project.getScriptVersion(path)` → returns ProjectService-internal string like `"1"`, `"2"`
+After: `contentHash(sourceFile.text)` → returns `"a1b2c3d4e5f6g7h8"`
+
+### `runSolidRules` on cached graph (daemon optimization)
+
+Post-Phase 1, the daemon's cache-hit path (daemon.ts:383-401) no longer calls `parseWithOptionalProgram`. The optimized path:
+
+```typescript
+const version = contentHash(sourceFile.text);
+const needsRebuild = !cache.hasSolidGraph(key, version);
+
+if (needsRebuild) {
+  const input = createSolidInput(key, program, log);
+  const graph = buildSolidGraph(input);
+  cache.setSolidGraph(key, version, graph);
+
+  const { results, emit } = createEmit(eslintResult.overrides);
+  runSolidRules(graph, sourceFile, emit);
+  // ... collect diagnostics
+} else {
+  // Cache hit: re-run rules on cached graph with CURRENT sourceFile
+  const graph = cache.getCachedSolidGraph(key, version)!;
+
+  const { results, emit } = createEmit(eslintResult.overrides);
+  runSolidRules(graph, sourceFile, emit);
+  // ... collect diagnostics
+}
+```
+
+The cache-hit path:
+1. Skips `buildSolidGraph` (~5-13ms savings per file)
+2. Still runs `runSolidRules` (rules may have changed between runs)
+3. Passes the CURRENT `sourceFile` — rules that compute locations use the current file's positions
+
+---
+
+## `packages/lsp/src/cli/lint.ts` changes
+
+Replace `project.getScriptVersion(key)` with `contentHash`:
+
+```typescript
+import { createHash } from "node:crypto";
+
+function contentHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+// In the per-file loop:
+const version = contentHash(sourceFile.text);
+cache.setSolidGraph(key, version, graph);
+```
+
+---
+
+## `packages/lsp/src/cli/daemon.ts` changes
+
+### Content sync + version computation
+
+Replace `project.getScriptVersion` with content hash:
+
+```typescript
+// In the per-file lint loop:
+const version = contentHash(content);
+const needsRebuild = !cache.hasSolidGraph(key, version);
+```
+
+### Eliminate the cache-hit re-parse bug
+
+Current code (daemon.ts:383-401):
+
+```typescript
+} else {
+  // File unchanged — re-run single-file rules from cached graph.
+  // Parse is still needed for sourceCode, but graph build is skipped.
+  const cachedGraph = cache.getCachedSolidGraph(key, version);
+  // ...
+  const input = parseWithOptionalProgram(key, content, program, log);  // BUG: re-parses
+  const graphToUse = cachedGraph ?? buildSolidGraph(input);
+  // ...
+  runSolidRules(graphToUse, input.sourceCode, emit);  // uses re-parsed sourceCode
+}
+```
+
+Post-Phase 1 + Phase 5:
+
+```typescript
+} else {
+  // File unchanged — re-run rules on cached graph, no re-parse needed
+  const graph = cache.getCachedSolidGraph(key, version)!;
+  const sourceFile = program.getSourceFile(key)!;  // O(1) from program cache
+  const { results, emit } = createEmit(eslintResult.overrides);
+  runSolidRules(graph, sourceFile, emit);
+  // ... collect diagnostics
+}
+```
+
+Zero re-parsing. Zero graph rebuilding. Only rule execution on the cached graph.
+
+---
+
+## `packages/lsp/src/core/analyze.ts` changes
+
+### `buildSolidGraphForPath` (used by cross-file analysis)
+
+Replace version source:
+
+```typescript
+import { createHash } from "node:crypto";
+
+function contentHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+```
+
+In `rebuildGraphsAndRunCrossFileRules`:
+
+```typescript
+for (const solidPath of fileIndex.solidFiles) {
+  const sourceFile = program.getSourceFile(solidPath);
+  if (!sourceFile) continue;
+  const version = contentHash(sourceFile.text);
+  if (!cache.hasSolidGraph(solidPath, version)) {
+    const input = createSolidInput(solidPath, program, log);
+    const graph = buildSolidGraph(input);
+    cache.setSolidGraph(solidPath, version, graph);
+  }
+}
+```
+
+---
+
+## `packages/lsp/src/server/connection.ts` changes
+
+### `getSolidGraph` in HandlerContext
+
+Replace version source:
+
+```typescript
+getSolidGraph(path) {
+  if (classifyFile(path) !== "solid") return null;
+  const sourceFile = project.getSourceFile(path);
+  if (!sourceFile) return null;
+  const version = contentHash(sourceFile.text);
+  return graphCache.getSolidGraph(path, version, () => {
+    const input = createSolidInput(path, program);
+    return buildSolidGraph(input);
+  });
+},
+```
+
+---
+
+## Shared `contentHash` utility
+
+Create `packages/shared/src/content-hash.ts`:
+
+```typescript
+import { createHash } from "node:crypto";
+
+export function contentHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+```
+
+Export from `packages/shared/src/index.ts`.
+
+Import in: `lint.ts`, `daemon.ts`, `analyze.ts`, `connection.ts`.
+
+---
+
+## What is NOT cached on disk
+
+`SolidGraph` contains `ts.Node` references (pointers into the program's AST). These cannot be serialized/deserialized. Graph caching is in-memory only.
+
+This is correct because:
+- The CLI creates a fresh program each run → graphs must be rebuilt regardless
+- The daemon keeps the program in memory → graphs persist naturally
+- The LSP keeps the watch program in memory → same
+- Disk serialization would require converting all `ts.Node` references to position-based identifiers and back — more expensive than rebuilding
+
+---
 
 ## Verification
 
-1. Cold `ganko lint` — writes `.tsbuildinfo`
-2. Second `ganko lint` — reads `.tsbuildinfo`, significantly faster program build
-3. Edit a single file → third `ganko lint` — only re-checks edited file + dependents
-4. Delete `.tsbuildinfo` → falls back to full program build (no crash)
-5. `bun run test` — all tests pass
-6. Measure: cold with cache vs cold without cache
+1. **Daemon warm lint**: Run `ganko lint` twice via daemon. Second run should show ~0 graph rebuilds in debug log (`getSolidGraph HIT` for all files, `hasSolidGraph: ... hit=true`).
+2. **Content hash stability**: Same file content → same hash → cache hit. Modify a file → different hash → cache miss → rebuild.
+3. **No re-parse on cache hit**: Debug log should NOT show `parseWithOptionalProgram` or `createSolidInput` on cache-hit files.
+4. **Cross-file reuse**: Cross-file analysis uses cached graphs. Debug log shows `crossFile: rebuilt 0/230 SolidGraphs` on no-change run.
+5. **Diagnostic correctness**: `ganko lint` output identical whether cache is warm or cold.

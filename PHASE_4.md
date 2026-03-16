@@ -1,179 +1,243 @@
-# Phase 4: Decouple LSP Initial Diagnostics from Workspace Warmup
+# Phase 4: Persistent Incremental Cache (`.tsbuildinfo`)
 
-**Estimated Impact**: First diagnostics in <100ms instead of 13s
-**Files touched**: `lifecycle.ts`, `connection.ts`, `project.ts`
-**Risk**: Medium (changes the LSP initialization contract, must handle race conditions between lazy warmup and eager requests)
-**Depends on**: Phase 1 (direct `ts.Program` with `WatchProgram`)
+**Effort**: M (1-2 days)
+**Depends on**: Phase 1 (direct `ts.Program` with `CompilerHost`)
+**Independent value**: Cold start program build from ~3-8s → ~200ms. Workers (Phase 2) become cheap.
 
-## Problem
+---
 
-`handleInitialized` (`lifecycle.ts:151`) blocks on a serial pipeline before declaring readiness:
+## What `.tsbuildinfo` does
 
-1. Load ESLint config (async disk I/O)
-2. `createFileIndex` (sync disk scan)
-3. `readCSSFilesFromDisk` (sync reads of all CSS files)
-4. `resolveTailwindValidator` (async, may download/resolve)
-5. `scanDependencyCustomProperties` (sync scan of node_modules)
-6. `createProject` (constructs `ProjectService`, allocates TS infrastructure)
-7. `setTimeout(() => warmProgram(...), 0)` (deferred but still blocks first diagnostic)
+TypeScript's incremental compilation stores the dependency graph, source file versions, and semantic signature hashes in a JSON file. On subsequent invocations, `ts.createIncrementalProgram` reads this file and skips re-parsing/re-checking files whose content hash matches the stored version. For a 230-file project, this reduces program creation from ~3-8s (cold) to ~200ms (warm).
 
-Only after all of this does `resolveReady()` fire. Every `didOpen` handler awaits `context.ready` — so the first file opened sits waiting for the entire workspace to be prepared.
+---
 
-This is the wrong model. Fast tools (VS Code ESLint, typescript-language-server, rust-analyzer) return **something useful for the current file first**, then fill in workspace knowledge later.
+## Cache location
 
-## Solution: Three-Tier Diagnostics
+```
+<projectRoot>/node_modules/.cache/ganko/.tsbuildinfo
+```
 
-### Tier 1: Immediate File-Local Diagnostics (target: <100ms)
+- `node_modules/.cache/` is the established convention for tool caches (Babel, ESLint, Vite, Next.js)
+- `.gitignore` typically covers `node_modules/`
+- `npm install` / `bun install` clears `node_modules/.cache/` — fresh cache after dependency changes, which is correct because type declarations may have changed
 
-On `didOpen`, before the workspace is warm:
-- Parse the file with `parseContent` (no `ts.Program`, no type info)
-- Build `SolidGraph` from the parse result
-- Run single-file rules (non-type-aware rules cover ~95% of diagnostics)
-- Publish diagnostics immediately
+---
 
-No workspace scan. No Tailwind. No cross-file. No TS program.
+## `packages/lsp/src/core/batch-program.ts` changes
 
-### Tier 2: Typed Diagnostics for Open Files (target: as TS program becomes available)
-
-Once the background `ts.Program` build completes:
-- Re-parse open files with `parseContentWithProgram` (full type info)
-- Re-run single-file rules (type-aware rules now fire)
-- Publish updated diagnostics
-
-### Tier 3: Background Workspace Diagnostics (target: within 5-10s of startup)
-
-Background tasks that run after Tier 2:
-- File index scan
-- CSS/Tailwind/dependency resolution
-- Cross-file graph building
-- Cross-file rule execution
-- Publish cross-file diagnostics merged with Tier 2 results
-
-## Implementation
-
-### `lifecycle.ts` Changes
+Phase 1 creates `BatchTypeScriptService` with `ts.createProgram`. Replace with `ts.createIncrementalProgram`:
 
 ```typescript
-export async function handleInitialized(
-  _params: InitializedParams,
-  state: ServerState,
-  connection: Connection,
-  context?: ServerContext,
-): Promise<void> {
-  if (!state.rootPath || !context) {
-    state.initialized = true;
-    context?.resolveReady();
-    return;
+import ts from "typescript";
+import { resolve, dirname } from "node:path";
+import { mkdirSync } from "node:fs";
+
+export interface BatchTypeScriptService {
+  readonly program: ts.Program
+  readonly checker: ts.TypeChecker
+  /** Save .tsbuildinfo to disk for future warm starts */
+  saveBuildInfo(): void
+  dispose(): void
+}
+
+const CACHE_DIR = "node_modules/.cache/ganko";
+const BUILD_INFO_FILE = ".tsbuildinfo";
+
+export function createBatchProgram(rootPath: string): BatchTypeScriptService {
+  const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
+  if (!tsconfigPath) throw new Error(`No tsconfig.json found in ${rootPath}`);
+
+  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, dirname(tsconfigPath));
+
+  const cacheDir = resolve(rootPath, CACHE_DIR);
+  const tsBuildInfoFile = resolve(cacheDir, BUILD_INFO_FILE);
+
+  const incrementalOptions: ts.CompilerOptions = {
+    ...parsedConfig.options,
+    incremental: true,
+    tsBuildInfoFile,
+    noEmit: true,
+  };
+
+  const host = ts.createIncrementalCompilerHost(incrementalOptions, ts.sys);
+
+  const builderProgram = ts.createIncrementalProgram({
+    rootNames: parsedConfig.fileNames,
+    options: incrementalOptions,
+    host,
+  });
+
+  const program = builderProgram.getProgram();
+
+  return {
+    program,
+    checker: program.getTypeChecker(),
+
+    saveBuildInfo() {
+      try {
+        mkdirSync(cacheDir, { recursive: true });
+      } catch { /* exists */ }
+      builderProgram.emit(
+        undefined,
+        (fileName, data) => {
+          ts.sys.writeFile(fileName, data);
+        },
+        undefined,
+        true, // emitOnlyDtsFiles — we only want .tsbuildinfo, not actual .js/.d.ts
+      );
+    },
+
+    dispose() { /* no-op for batch */ },
+  };
+}
+```
+
+Key details:
+- `ts.createIncrementalCompilerHost` creates a host that reads `.tsbuildinfo` from disk if it exists
+- `ts.createIncrementalProgram` uses the stored build info to skip unchanged files
+- `builderProgram.emit(..., true)` with `emitOnlyDtsFiles=true` writes ONLY the `.tsbuildinfo` file — no `.js` or `.d.ts` output
+- `noEmit: true` in options ensures no emit happens during type checking
+
+---
+
+## `packages/lsp/src/cli/lint.ts` changes
+
+Save `.tsbuildinfo` after successful lint:
+
+### Serial path
+
+```typescript
+// After serial analysis completes:
+batch.saveBuildInfo();
+batch.dispose();
+```
+
+### Worker path
+
+Workers do NOT save `.tsbuildinfo`. The main thread saves it after cross-file analysis (which builds its own program):
+
+```typescript
+if (options.crossFile) {
+  const batch = createBatchProgram(projectRoot);
+  // ... cross-file analysis ...
+  batch.saveBuildInfo();
+  batch.dispose();
+}
+```
+
+If `--no-cross-file` is set with workers, no `.tsbuildinfo` is saved on the worker path. This is acceptable — the next run with cross-file analysis will save it.
+
+Alternative: have the main thread create a `BatchTypeScriptService` purely for saving `.tsbuildinfo` even without cross-file analysis. Cost: ~200ms (warm) to create the incremental program + save. This is worth it because it benefits subsequent runs:
+
+```typescript
+// After workers complete, always save .tsbuildinfo
+{
+  const batch = createBatchProgram(projectRoot);
+  batch.saveBuildInfo();
+  if (!options.crossFile) {
+    batch.dispose();
+  } else {
+    // Reuse for cross-file analysis
+    // ... cross-file analysis using batch.program ...
+    batch.dispose();
   }
-
-  // Resolve ready IMMEDIATELY — Tier 1 diagnostics don't need workspace state
-  state.initialized = true;
-  context.resolveReady();
-
-  // Background: kick off workspace warmup (non-blocking)
-  context.startBackgroundWarmup(state);
 }
 ```
 
-### `connection.ts` Changes
+---
 
-New state on `ServerContext`:
+## `packages/lsp/src/cli/daemon.ts` changes
+
+The daemon uses `IncrementalTypeScriptService` (watch program) post-Phase 1, NOT `BatchTypeScriptService`. The watch program does not use `.tsbuildinfo` — it keeps the program in memory across requests.
+
+However, the daemon's warm state benefits from `.tsbuildinfo` on initial startup. During `prewarmDaemon`, the first program build should use `ts.createIncrementalProgram` to load the cached build info.
+
+Post-Phase 1, the daemon creates an `IncrementalTypeScriptService` which uses `ts.createWatchProgram`. The watch host's `readFile` can serve `.tsbuildinfo`:
 
 ```typescript
-interface ServerContext {
-  // ... existing ...
-
-  /** Whether the TS program is available for type-aware analysis */
-  readonly programReady: Promise<void>
-
-  /** Whether cross-file analysis infrastructure is available */
-  readonly workspaceReady: Promise<void>
-
-  /** Start background warmup (called from handleInitialized) */
-  startBackgroundWarmup(state: ServerState): void
-}
+// In createIncrementalProgram (incremental-program.ts):
+// The watch program does NOT use .tsbuildinfo directly.
+// But the first program build is what takes 3-8s.
+// .tsbuildinfo is for batch (CLI) programs.
 ```
 
-New `didOpen` flow:
+Actually, `ts.createWatchProgram` already does incremental compilation internally — it tracks source file versions across rebuilds within the same process. But it does NOT persist state to disk between process restarts.
+
+For the daemon specifically:
+- The daemon process stays alive between requests (state is in memory)
+- The daemon's `prewarmDaemon` builds the program once on startup
+- Subsequent requests use the warm program with incremental updates
+- `.tsbuildinfo` does not help the daemon because it already keeps the program in memory
+
+The daemon does NOT need `.tsbuildinfo` changes. Phase 4 benefits only the CLI path.
+
+---
+
+## `packages/lsp/src/cli/lint-worker.ts` changes (Phase 2 interaction)
+
+Workers build their own `ts.Program`. They should also use `ts.createIncrementalProgram` to benefit from `.tsbuildinfo`:
 
 ```typescript
-documents.onDidOpen(async (event) => {
-  const path = handleDidOpen(event, documentState);
-  await context.ready; // fires immediately now
+function runLintTask(task: WorkerTask): readonly WorkerResult[] {
+  const configFile = ts.readConfigFile(task.tsconfigPath, ts.sys.readFile);
+  const parsedConfig = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    task.rootPath,
+  );
 
-  if (!path || !context.project) return;
+  const cacheDir = resolve(task.rootPath, "node_modules/.cache/ganko");
+  const tsBuildInfoFile = resolve(cacheDir, ".tsbuildinfo");
 
-  // Tier 1: file-local diagnostics, no type info
-  publishFileDiagnosticsLocal(context, path, event.document.getText());
+  const options: ts.CompilerOptions = {
+    ...parsedConfig.options,
+    incremental: true,
+    tsBuildInfoFile,
+    noEmit: true,
+  };
 
-  // Tier 2: once program is ready, re-diagnose with type info
-  context.programReady.then(() => {
-    if (documentState.openDocuments.has(event.document.uri)) {
-      publishFileDiagnostics(context, context.project!, path, event.document.getText());
-    }
+  const host = ts.createIncrementalCompilerHost(options, ts.sys);
+  const builderProgram = ts.createIncrementalProgram({
+    rootNames: parsedConfig.fileNames,
+    options,
+    host,
   });
+  const program = builderProgram.getProgram();
 
-  // Tier 3: once workspace is ready, add cross-file diagnostics
-  context.workspaceReady.then(() => {
-    if (documentState.openDocuments.has(event.document.uri)) {
-      publishFileDiagnostics(context, context.project!, path, event.document.getText(), true);
-    }
-  });
-});
-```
+  // ... per-file analysis (unchanged) ...
 
-### Background Warmup Pipeline
-
-```typescript
-async function backgroundWarmup(context: ServerContext, state: ServerState): Promise<void> {
-  const { log, rootPath } = state;
-
-  // Step 1: ESLint config (fast, needed for overrides)
-  const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log);
-  state.eslintOverrides = eslintResult.overrides;
-  state.ruleOverrides = mergeOverrides(eslintResult.overrides, state.vscodeOverrides);
-
-  // Step 2: Build ts.Program (the expensive part — 3-8s)
-  // Uses WatchProgram from Phase 1
-  const project = createProject({ rootPath, plugins: [...], rules: state.ruleOverrides, mode: "incremental" });
-  state.project = project;
-  context.setProject(project);
-  context.resolveProgramReady(); // Tier 2 diagnostics can now fire
-
-  // Step 3: File index + CSS + Tailwind + dependencies (parallel where possible)
-  const [fileIndex, tailwind, externalProps] = await Promise.all([
-    Promise.resolve(createFileIndex(rootPath, effectiveExclude(state), log)),
-    resolveTailwindValidator(readCSSFilesFromDisk(fileIndex.cssFiles)).catch(() => null),
-    Promise.resolve(scanDependencyCustomProperties(rootPath)),
-  ]);
-  context.fileIndex = fileIndex;
-  context.tailwindValidator = tailwind;
-  context.externalCustomProperties = externalProps;
-  context.resolveWorkspaceReady(); // Tier 3 diagnostics can now fire
+  return results;
 }
 ```
 
-### Race Condition Handling
+Workers READ `.tsbuildinfo` but do NOT write it (multiple workers writing concurrently would corrupt the file). Only the main thread writes.
 
-Key invariant: **no handler should crash if the program/workspace isn't ready yet**.
+All workers read the same `.tsbuildinfo` file. Since reads are concurrent and the file is immutable during the lint run, this is safe.
 
-- `getLanguageService()` returns `null` before `programReady` resolves → handlers already handle this
-- `runCrossFileDiagnostics()` requires `fileIndex` → skip if `null`, caller uses cached results (empty on first open)
-- `didChange` during warmup: queue changes, process after `programReady`
-- `didSave` during warmup: same queuing strategy
+---
 
-### Feature Handlers (hover, definition, etc.)
+## Cache invalidation
 
-These already return `null`/fallback when `HandlerContext` isn't available. With the new model:
-- Before `programReady`: return `null` (no IntelliSense until program builds)
-- After `programReady`: full functionality
-- This is the same UX as VS Code's TypeScript: IntelliSense isn't instant on workspace open, it loads progressively
+`.tsbuildinfo` is automatically invalidated by TypeScript when:
+- Source file content changes (version hash mismatch)
+- `tsconfig.json` options change
+- TypeScript version changes (format version check)
+
+Manual invalidation:
+- `bun install` / `npm install` clears `node_modules/.cache/`
+- User can delete `node_modules/.cache/ganko/.tsbuildinfo` manually
+
+No explicit invalidation logic is needed in ganko code.
+
+---
 
 ## Verification
 
-- LSP in VS Code: open a file, see diagnostics within 100ms
-- Wait 5-10s, see additional type-aware and cross-file diagnostics appear
-- Hover/definition/completion: unavailable briefly, then functional
-- No duplicate diagnostics (each tier replaces previous, not appends)
-- `bun run test` — all tests pass
-- Close and reopen a file during warmup — no crash
+1. **Cold start**: Delete `.tsbuildinfo`. Run `ganko lint --no-daemon`. Measure time. Expect ~3-8s for program creation.
+2. **Warm start**: Run `ganko lint --no-daemon` again. Measure time. Expect ~200ms for program creation.
+3. **`.tsbuildinfo` creation**: Verify `node_modules/.cache/ganko/.tsbuildinfo` exists after first run.
+4. **Correctness**: `ganko lint` output identical on cold vs warm starts.
+5. **Workers benefit**: `ganko lint --no-daemon --log-level debug` — verify worker program creation time drops from ~3-8s to ~200ms on warm starts.
+6. **Dependency change**: Run `bun install`, verify `.tsbuildinfo` is gone, next run rebuilds from scratch.

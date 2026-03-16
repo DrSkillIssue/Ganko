@@ -1,177 +1,228 @@
-# Phase 6: Parse Result Cache (Content Hash → ESTree)
+# Phase 6: Bundle Size + Cold Start Cleanup
 
-**Estimated Impact**: Skip parse entirely for unchanged files (~40-60% of per-file cost)
-**Files touched**: `packages/ganko/src/solid/parse.ts`, new `packages/lsp/src/core/parse-cache.ts`
-**Risk**: Low (parse is pure — same input always produces same output)
-**Depends on**: Phase 1 (to know how file content is accessed)
+**Effort**: S (half day)
+**Depends on**: Phase 1 (ESTree deps removed from code)
+**Independent value**: 2-4MB smaller bundle. ~200ms faster worker/CLI cold start.
 
-## Problem
+---
 
-`parseForESLint` is called for every file on every lint run. For unchanged files, the parse result (AST, scope manager, parser services) is identical. The parse cost includes:
+## Dependency removal analysis
 
-- Lexing and parsing TypeScript/JSX source text
-- Building the ESTree AST from TypeScript's internal AST
-- Constructing the scope manager
-- Building visitor keys
-- Wrapping in `SourceCode`
+### `packages/ganko/package.json` (SDK)
 
-For a 230-file project, this adds up to significant CPU time even when no files have changed.
+Current dependencies:
 
-## Solution
-
-### Content-Addressed Parse Cache
-
-Hash the file content and cache the parse result. On subsequent runs, if the hash matches, return the cached result without re-parsing.
-
-```typescript
-interface ParseCache {
-  /** Get cached parse result if content hash matches */
-  get(path: string, contentHash: string): CachedParseResult | null
-
-  /** Store parse result for a content hash */
-  set(path: string, contentHash: string, result: CachedParseResult): void
-
-  /** Evict a file from the cache */
-  evict(path: string): void
-
-  /** Clear all cached results */
-  clear(): void
-}
-
-interface CachedParseResult {
-  readonly sourceCode: TSESLint.SourceCode
-  readonly parserServices: Partial<ParserServices> | null
+```json
+{
+  "@typescript-eslint/parser": "^8.57.0",
+  "@typescript-eslint/typescript-estree": "^8.57.0",
+  "@typescript-eslint/utils": "^8.57.0",
+  "postcss": "^8.5.8",
+  "postcss-safe-parser": "^7.0.1",
+  "postcss-scss": "^4.0.9",
+  "postcss-value-parser": "^4.2.0",
+  "zod": "^4.3.6"
 }
 ```
 
-### Hash Function
+After Phase 1:
 
-Use a fast non-cryptographic hash for content addressing. Options:
+| Package | Action | Reason |
+|---------|--------|--------|
+| `@typescript-eslint/parser` | **Remove** | `parseForESLint` is deleted. No code calls the parser. |
+| `@typescript-eslint/typescript-estree` | **Remove** | `simpleTraverse` import in `parse.ts` is deleted with the file. |
+| `@typescript-eslint/utils` | **Keep (ESLint adapter only)** | `eslint-adapter.ts` imports `TSESLint` for `RuleModule`, `RuleContext` types. `eslint-plugin.ts` imports `TSESLint`. These types are needed for the ESLint integration surface — users run ganko rules through ESLint. |
+| `postcss` | Keep | CSS analysis |
+| `postcss-safe-parser` | Keep | CSS analysis |
+| `postcss-scss` | Keep | CSS analysis |
+| `postcss-value-parser` | Keep | CSS analysis |
+| `zod` | Keep | Schema validation |
 
-- `xxhash` via Bun's native implementation — fastest
-- `crypto.createHash('sha256')` — available everywhere, fast enough for this use case
-- Content length + first/last 64 bytes as a cheap pre-filter (avoid hashing large unchanged files)
+**Important**: `@typescript-eslint/utils` must remain as a dependency, NOT a devDependency. The ESLint adapter is part of the published SDK (`exports["./eslint-plugin"]`). ESLint users who `import ganko from "@drskillissue/ganko/eslint-plugin"` need the `TSESLint` types at runtime for ESLint rule registration.
 
-**Decision**: Use `crypto.createHash('sha256').update(content).digest('hex').slice(0, 16)` — 16 hex chars (64 bits) is sufficient for collision resistance across <1000 files. Already used in `daemon.ts:368` for version hashing.
+However, the ESLint adapter only uses `TSESLint` types (type-level imports). At runtime, `@typescript-eslint/utils` is needed only because ESLint's internal rule runner type-checks rule definitions against `TSESLint.RuleModule`. The actual runtime import is `import type { TSESLint }` — type-only, erased at compile time.
 
-### Cache Scope
+**BUT**: `tsup` bundles the SDK. If `@typescript-eslint/utils` is not in `dependencies`, it won't be installed when a user installs `@drskillissue/ganko`. Since all ganko imports of `@typescript-eslint/utils` are `import type`, they're erased — the bundle doesn't contain any `@typescript-eslint/utils` code. So it can safely be moved to `devDependencies` IF the bundle is self-contained.
 
-**In-process cache** (Map in memory):
-- Daemon: persists across lint requests → most files hit cache on repeat runs
-- LSP: persists across file changes → unchanged files stay cached
-- CLI: per-invocation only → no benefit for cold runs (but combined with `.tsbuildinfo` from Phase 5, the TS parse portion is already cached)
+Verify: after `bun run build`, check if `dist/eslint-plugin.js` contains any `require("@typescript-eslint/utils")` calls. If not, move to `devDependencies`.
 
-**On-disk cache** (optional, future):
-- Serialize `SourceCode` + `parserServices` to disk
-- Load on cold start instead of re-parsing
-- Complexity: `SourceCode` contains closures and scope manager references — serialization is non-trivial
-- **Decision**: Defer on-disk cache. In-process cache covers the high-value cases (daemon, LSP).
+Post-Phase 1 `package.json`:
 
-### What Can Be Cached
-
-| Component | Cacheable? | Notes |
-|-----------|-----------|-------|
-| ESTree AST | Yes | Pure transform of source text |
-| Scope Manager | Yes | Derived from AST, deterministic |
-| Visitor Keys | Yes | Derived from AST node types |
-| `SourceCode` wrapper | Yes | Wraps AST + scope manager |
-| Parser Services (non-typed) | Yes | ESTree node maps |
-| Parser Services (typed) | **No** | Contains `ts.Program` references — invalidated when program changes |
-| TypeChecker | **No** | Comes from `ts.Program`, not from parse |
-
-**Key insight**: The `parseContent` path (no type info) is fully cacheable. The `parseContentWithProgram` path produces a `SourceCode` that is cacheable, but the `parserServices` with typed node maps are tied to the specific `ts.Program` instance.
-
-For the typed path, cache the AST/SourceCode portion and re-derive the typed services from the current program. This still saves the expensive lexing/parsing/AST-construction work.
-
-### Integration Points
-
-#### `parse.ts` — Add Cache Parameter
-
-```typescript
-export function parseContent(
-  path: string,
-  content: string,
-  logger?: Logger,
-  cache?: ParseCache,
-): SolidInput {
-  if (cache) {
-    const hash = contentHash(content);
-    const cached = cache.get(path, hash);
-    if (cached) {
-      return { file: path, sourceCode: cached.sourceCode, parserServices: cached.parserServices, checker: null };
-    }
+```json
+{
+  "dependencies": {
+    "postcss": "^8.5.8",
+    "postcss-safe-parser": "^7.0.1",
+    "postcss-scss": "^4.0.9",
+    "postcss-value-parser": "^4.2.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@drskillissue/ganko-shared": "workspace:^",
+    "@typescript-eslint/rule-tester": "^8.57.0",
+    "@typescript-eslint/utils": "^8.57.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
   }
-
-  const result = parseForESLint(content, { ... });
-  // ... build SourceCode ...
-
-  if (cache) {
-    cache.set(path, hash, { sourceCode, parserServices: result.services ?? null });
-  }
-
-  return input;
 }
 ```
 
-#### `daemon.ts` — Use Persistent Cache
+### `packages/lsp/package.json` (LSP/CLI)
 
-The daemon maintains a `ParseCache` instance across requests. On warm runs, most files hit the cache.
+Current devDependencies:
 
-#### `connection.ts` (LSP) — Use Persistent Cache
+```json
+{
+  "@typescript-eslint/parser": "^8.57.0",
+  "@typescript-eslint/project-service": "^8.57.0",
+  "@typescript-eslint/utils": "^8.57.0",
+  "ignore": "^7.0.5",
+  "typescript": "^5.9.3",
+  "vscode-languageserver": "^9.0.1",
+  "vscode-languageserver-textdocument": "^1.0.12",
+  "zod": "^4.3.6"
+}
+```
 
-The LSP maintains a `ParseCache` per session. On `didChange`, evict the changed file. All other files stay cached.
+After Phase 1:
 
-#### `lint.ts` (CLI) — Use Per-Invocation Cache
+| Package | Action | Reason |
+|---------|--------|--------|
+| `@typescript-eslint/parser` | **Remove** | Used by `eslint-config.ts` to load ESLint config — verify. If `loadESLintConfig` uses ESLint's `calculateConfigArray` which needs the parser registered, keep it. Otherwise remove. |
+| `@typescript-eslint/project-service` | **Remove** | `project-service.ts` is deleted. |
+| `@typescript-eslint/utils` | **Remove** | Only used for `TSESTree` type imports in `connection.ts` (`import type { TSESTree as T }`). After migration, no imports remain. |
+| `ignore` | Keep | Glob ignore pattern matching |
+| `typescript` | Keep | Direct `ts.Program` usage |
+| `vscode-languageserver` | Keep | LSP protocol |
+| `vscode-languageserver-textdocument` | Keep | Document manager |
+| `zod` | Keep | Schema validation |
 
-For CLI, a per-invocation cache still helps if cross-file analysis re-parses files (currently it does in `rebuildGraphsAndRunCrossFileRules` via `buildSolidGraphForPath`). With the cache, the second parse hits the cache.
+**Verify `@typescript-eslint/parser` in ESLint config loading**: Check `packages/lsp/src/core/eslint-config.ts` for runtime references to the parser.
 
-## Changes
+Post-Phase 1 `package.json`:
 
-### New: `packages/lsp/src/core/parse-cache.ts`
+```json
+{
+  "devDependencies": {
+    "@drskillissue/ganko-shared": "workspace:^",
+    "ignore": "^7.0.5",
+    "typescript": "^5.9.3",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "zod": "^4.3.6"
+  }
+}
+```
+
+If `eslint-config.ts` needs `@typescript-eslint/parser`:
+
+```json
+{
+  "devDependencies": {
+    "@drskillissue/ganko-shared": "workspace:^",
+    "@typescript-eslint/parser": "^8.57.0",
+    "ignore": "^7.0.5",
+    "typescript": "^5.9.3",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "zod": "^4.3.6"
+  }
+}
+```
+
+---
+
+## `packages/lsp/tsup.config.ts` changes
+
+Current `BUNDLED_DEPS`:
 
 ```typescript
-import { createHash } from "node:crypto";
-
-interface CachedParseResult { ... }
-
-export function contentHash(content: string): string {
-  return createHash("sha256").update(content).digest("hex").slice(0, 16);
-}
-
-export function createParseCache(): ParseCache {
-  const cache = new Map<string, { hash: string; result: CachedParseResult }>();
-
-  return {
-    get(path, hash) {
-      const entry = cache.get(path);
-      if (entry && entry.hash === hash) return entry.result;
-      return null;
-    },
-    set(path, hash, result) {
-      cache.set(path, { hash, result });
-    },
-    evict(path) {
-      cache.delete(path);
-    },
-    clear() {
-      cache.clear();
-    },
-  };
-}
+const BUNDLED_DEPS = [
+  "@drskillissue/ganko",
+  "@drskillissue/ganko-shared",
+  "vscode-languageserver",
+  "vscode-languageserver-textdocument",
+  "@typescript-eslint/parser",
+  "@typescript-eslint/project-service",
+  "@typescript-eslint/utils",
+  "@typescript-eslint/typescript-estree",
+  "@typescript-eslint/scope-manager",
+  "@typescript-eslint/types",
+  "@typescript-eslint/visitor-keys",
+  "typescript",
+  "eslint",
+  "zod",
+  "ignore",
+] as const;
 ```
 
-### Modified: `packages/ganko/src/solid/parse.ts`
+Post-Phase 1:
 
-Add optional `cache` parameter to `parseContent` and `parseContentWithProgram`.
+```typescript
+const BUNDLED_DEPS = [
+  "@drskillissue/ganko",
+  "@drskillissue/ganko-shared",
+  "vscode-languageserver",
+  "vscode-languageserver-textdocument",
+  "typescript",
+  "zod",
+  "ignore",
+] as const;
+```
 
-### Modified: `daemon.ts`, `connection.ts`, `lint.ts`
+Removed:
+- `@typescript-eslint/parser` — no longer imported
+- `@typescript-eslint/project-service` — no longer imported
+- `@typescript-eslint/utils` — no longer imported
+- `@typescript-eslint/typescript-estree` — no longer imported
+- `@typescript-eslint/scope-manager` — no longer imported
+- `@typescript-eslint/types` — no longer imported
+- `@typescript-eslint/visitor-keys` — no longer imported
+- `eslint` — only needed if `eslint-config.ts` uses the ESLint API. If it does, keep it.
 
-Pass `parseCache` instance to parse functions.
+**Verify `eslint` in BUNDLED_DEPS**: Check if `eslint-config.ts` imports from `eslint`. If yes, keep `eslint` in BUNDLED_DEPS. The LSP's ESLint config loading reads ESLint config files, which may require the `eslint` package to be resolvable.
+
+---
+
+## Bundle size impact
+
+Current LSP bundle size (approximate):
+- `@typescript-eslint/*` packages: ~2-3MB bundled (parser, estree, scope-manager, visitor-keys, types)
+- `eslint` core: ~1MB bundled (if included)
+
+After removal: 2-4MB reduction in `dist/entry.js` and `dist/index.js`.
+
+Cold start improvement: less JavaScript to parse on `require()`. Node.js V8 parse time is ~1MB/100ms. 2-4MB reduction → ~200-400ms faster cold start for CLI and worker threads.
+
+---
+
+## ganko SDK `tsup.config.ts`
+
+Check if the ganko SDK's tsup config also bundles `@typescript-eslint/*`:
+
+```typescript
+// packages/ganko/tsup.config.ts — verify
+```
+
+If the SDK marks `@typescript-eslint/*` as external (peer/dev dependency), no changes needed. If it bundles them via `noExternal`, the bundle shrinks by the same 2-3MB.
+
+---
+
+## `packages/ganko/src/solid/rules/jsx/no-innerhtml.ts` — `ASTUtils` runtime import
+
+Line 23: `import { ASTUtils } from "@typescript-eslint/utils";`
+
+This is a RUNTIME import (not `import type`). `ASTUtils` is used for `ASTUtils.isIdentifier()` or similar. After Phase 1, this import is replaced by `ts.isIdentifier()` — but verify it's actually migrated. If this file isn't fully migrated in Phase 1, the runtime import breaks when `@typescript-eslint/utils` is removed.
+
+This is Phase 1's responsibility, not Phase 6's. Phase 6 verifies that Phase 1 completed all migrations before removing dependencies.
+
+---
 
 ## Verification
 
-1. `bun run test` — all tests pass
-2. Daemon: first lint → cache miss. Second lint (no changes) → all cache hits, measurably faster
-3. Daemon: edit one file → that file misses cache, all others hit
-4. LSP: open file, change, save → only changed file re-parsed
-5. Verify diagnostic equivalence: cached parse produces identical diagnostics to uncached
+1. **Bundle size**: `du -sh dist/` before and after. Expect 2-4MB reduction.
+2. **No runtime `@typescript-eslint/*` imports**: `rg "@typescript-eslint" dist/ --type js` → zero matches.
+3. **`bun run ci` passes**: build + test + lint + tsc + manifest check.
+4. **ESLint integration**: `eslint --rule ganko/signal-call src/App.tsx` still works (the ESLint adapter uses `@typescript-eslint/utils` types at compile time only).
+5. **Cold start**: `time node dist/entry.js --version` — measure. Should be ~200ms faster than pre-Phase 6.
