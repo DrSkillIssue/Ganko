@@ -2,6 +2,20 @@
 
 26 failing tests across 11 test files. Grouped by root cause. **All 26 resolved.**
 
+2 additional failures discovered in `memory-leaks.test.ts`. Resolved.
+
+---
+
+## Group F: memory-leaks.test.ts timeouts (2 tests) ✅ RESOLVED
+
+**File:** `packages/lsp/test/integration/memory-leaks.test.ts`
+**Root cause:** `buildCachedFile` creates a `ts.createProgram` per call. Each invocation re-parsed ~100 lib `.d.ts` files from disk. At scale (500+ calls in loops), this exceeded the 30s timeout.
+
+**Fix:** Cached lib `SourceFile` objects in a module-scope `Map`. Lib files are immutable so parsing once and reusing across all `ts.createProgram` invocations is safe. 12x speedup.
+
+- [x] `handles repeated add/remove cycles` (line 39, 10s was 121s)
+- [x] `survives many file operations` (line 90, 3.9s was 48s)
+
 ---
 
 ## Group A: Determinism test timeouts (2 tests) ✅ RESOLVED
@@ -103,4 +117,5 @@
 | C | 1 | ✅ Same as B |
 | D | 5 | ✅ Added resolveContent fallback in publishFileDiagnostics |
 | E | 3 | ✅ allowJs + log format fix |
-| **Total** | **26** | **All resolved** |
+| F | 2 | ✅ Cached lib SourceFiles in test CompilerHost |
+| **Total** | **28** | **All resolved** |

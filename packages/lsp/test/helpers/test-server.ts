@@ -240,6 +240,13 @@ const compilerOptions: ts.CompilerOptions = {
 };
 
 /**
+ * Cache parsed lib SourceFile objects at module scope. Lib .d.ts files are
+ * immutable so parsing them once and reusing across all ts.createProgram
+ * invocations is safe and eliminates the dominant cost per call.
+ */
+const libSourceFileCache = new Map<string, ts.SourceFile | undefined>();
+
+/**
  * Build a ts.Program from virtual file content, run ganko analysis,
  * and return the cached result.
  */
@@ -255,7 +262,11 @@ function buildCachedFile(path: string, content: string): CachedFile {
         if (virtual !== undefined) {
           return ts.createSourceFile(fileName, virtual, languageVersion, true);
         }
-        return defaultHost.getSourceFile(fileName, languageVersion);
+        const cached = libSourceFileCache.get(fileName);
+        if (cached !== undefined) return cached;
+        const sf = defaultHost.getSourceFile(fileName, languageVersion);
+        libSourceFileCache.set(fileName, sf);
+        return sf;
       },
       fileExists(fileName) {
         return fileMap.has(fileName) || defaultHost.fileExists(fileName);
