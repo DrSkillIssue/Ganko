@@ -182,7 +182,7 @@ function isMembershipFindPredicate(call: ts.CallExpression): boolean {
 }
 
 function callbackBodyExpression(body: ts.Block | ts.Expression | ts.ConciseBody): ts.Expression | null {
-  if (!ts.isBlock(body)) return body as ts.Expression
+  if (!ts.isBlock(body)) return body
   if (body.statements.length !== 1) return null
   const statement = body.statements[0]
   if (!statement) return null

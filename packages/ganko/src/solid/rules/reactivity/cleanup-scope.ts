@@ -164,7 +164,7 @@ function isInDirective(graph: SolidGraph, scope: ScopeEntity, directiveNames: Re
       continue;
     }
 
-    const name = getFunctionName(node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction);
+    const name = getFunctionName(node);
     if (name !== null && directiveNames.has(name)) {
       return true;
     }
@@ -255,15 +255,14 @@ function isInCustomReactivePrimitive(graph: SolidGraph, scope: ScopeEntity): boo
       continue;
     }
 
-    const fnNode = node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
-    const name = getFunctionName(fnNode);
+    const name = getFunctionName(node);
     if (name !== null && isReactivePrimitiveName(name)) {
       return true;
     }
 
     // Check if this function is a property callback inside an object literal
     // argument to a create*/use* call (e.g. createSimpleContext({ init: () => ... }))
-    if (isFunctionInReactivePrimitiveConfig(fnNode)) {
+    if (isFunctionInReactivePrimitiveConfig(node)) {
       return true;
     }
   }
@@ -298,7 +297,7 @@ function getLocationDescription(scope: ScopeEntity): string {
     if (current.kind === "function") {
       const node = current.node;
       if (node !== null && isFunctionNode(node)) {
-        const name = getFunctionName(node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction);
+        const name = getFunctionName(node);
         if (name) {
           return `utility function '${name}'`;
         }

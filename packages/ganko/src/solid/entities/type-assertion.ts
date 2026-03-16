@@ -10,6 +10,7 @@
 
 import type ts from "typescript";
 import type { ScopeEntity } from "./scope";
+import type { FunctionNode } from "../util/function";
 
 /**
  * The kind of type assertion being performed.
@@ -63,7 +64,7 @@ export interface TypeAssertionEntity {
 export interface TypePredicateEntity {
   readonly id: number;
   /** The function node */
-  readonly node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+  readonly node: FunctionNode;
   /** The parameter name being narrowed */
   readonly parameterName: string;
   /** The type being asserted */
@@ -83,7 +84,7 @@ export interface TypePredicateEntity {
 export interface UnsafeGenericAssertionEntity {
   readonly id: number;
   /** The function node */
-  readonly node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+  readonly node: FunctionNode;
   /** The generic type parameter being asserted to */
   readonly typeParameterName: string;
   /** The type assertion node within the function */
@@ -123,8 +124,8 @@ export type UnsafeAnnotationKind = "any" | "unknown";
  */
 export interface UnsafeTypeAnnotationEntity {
   readonly id: number;
-  /** The TSAnyKeyword or TSUnknownKeyword node */
-  readonly node: ts.KeywordTypeNode;
+  /** The AnyKeyword or UnknownKeyword type node */
+  readonly node: ts.TypeNode;
   /** Whether this is `any` or `unknown` */
   readonly kind: UnsafeAnnotationKind;
   /** Where the annotation appears */

@@ -8,7 +8,7 @@ import { getPrimitiveByName, toPrimitiveInfo } from "../../../queries/get";
 export function handleCall(ctx: VisitorContext, node: ts.CallExpression | ts.NewExpression): void {
   const graph = ctx.graph;
   const file = ctx.file;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const callee = node.expression;
 
   // Detect if this is a Solid primitive call

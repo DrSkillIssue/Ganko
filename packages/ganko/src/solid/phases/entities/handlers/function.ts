@@ -8,10 +8,10 @@ import { getFunctionName, getFunctionVariableName, getParameterName, getDeclarat
 import { visitParameterTypeAnnotation, visitTypeNode } from "../visitors/type";
 import { handleTypePredicate } from "./assertion";
 
-export function handleFunction(ctx: VisitorContext, node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): void {
+export function handleFunction(ctx: VisitorContext, node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration): void {
   const graph = ctx.graph;
   const file = ctx.file;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const name = getFunctionName(node);
   const variableName = getFunctionVariableName(node);
 

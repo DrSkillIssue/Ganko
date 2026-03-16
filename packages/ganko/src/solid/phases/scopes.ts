@@ -36,7 +36,7 @@ export function runScopesPhase(graph: SolidGraph, input: SolidInput): void {
   // Create program scope for the source file
   const programScope = createScope({
     id: graph.nextScopeId(),
-    node: sourceFile as unknown as ts.Node,
+    node: sourceFile,
     file,
     kind: "program",
     parent: null,
@@ -45,7 +45,7 @@ export function runScopesPhase(graph: SolidGraph, input: SolidInput): void {
   })
   buildScopeChain(programScope)
   graph.addScope(programScope)
-  graph.scopeForCache.set(sourceFile as unknown as ts.Node, programScope)
+  graph.scopeForCache.set(sourceFile, programScope)
 
   // Pass 1: Walk the AST creating scopes and variables
   walkNode(sourceFile, programScope, programScope, graph, file, checker, symbolVarMap)
@@ -168,7 +168,7 @@ function walkNode(
   if (scopeKind !== null) {
     const newScope = createScope({
       id: graph.nextScopeId(),
-      node: node as ts.Node,
+      node: node,
       file,
       kind: scopeKind,
       parent: currentScope,
@@ -485,7 +485,7 @@ function classifyIdentifier(
     const assignment = {
       id: variable.assignments.length,
       node: parent,
-      value: assignmentValue ?? id as unknown as ts.Expression,
+      value: assignmentValue ?? id,
       operator,
       isInLoop: inLoop,
       isInConditional: inCond,

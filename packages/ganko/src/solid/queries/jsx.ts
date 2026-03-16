@@ -41,7 +41,7 @@ export function findJSXContext(graph: SolidGraph, node: ts.Node): JSXContext | n
         continue;
       }
       const jsxElement = ts.isJsxOpeningElement(jsxOpeningOrSelf) ? jsxOpeningOrSelf.parent : jsxOpeningOrSelf;
-      const element = graph.jsxByNode.get(jsxElement as any);
+      const element = graph.jsxByNode.get(jsxElement);
       if (!element) {
         current = current.parent;
         depth++;
@@ -67,24 +67,24 @@ export function findJSXContext(graph: SolidGraph, node: ts.Node): JSXContext | n
         depth++;
         continue;
       }
-      const element = graph.jsxByNode.get(containerParent as any);
+      const element = graph.jsxByNode.get(containerParent);
       if (!element) {
         current = current.parent;
         depth++;
         continue;
       }
-      return { element, attribute: null, kind: "child", containerNode: current as any };
+      return { element, attribute: null, kind: "child", containerNode: current };
     }
 
     if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current)) {
-      const element = graph.jsxByNode.get(current as any);
+      const element = graph.jsxByNode.get(current);
       if (!element) {
         current = current.parent;
         depth++;
         continue;
       }
       const elementParent = current.parent;
-      const containerNode = (elementParent && ts.isJsxExpression(elementParent)) ? elementParent as any : null;
+      const containerNode = (elementParent && ts.isJsxExpression(elementParent)) ? elementParent : null;
       return { element, attribute: null, kind: "expression", containerNode };
     }
 

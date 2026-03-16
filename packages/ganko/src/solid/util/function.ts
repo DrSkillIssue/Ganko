@@ -7,7 +7,7 @@
 import ts from "typescript";
 import { COMPONENT_PATTERN, isUpperAlpha } from "@drskillissue/ganko-shared";
 
-export type FunctionNode = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+export type FunctionNode = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration;
 
 /**
  * Check if a node is a function node (declaration or expression).
@@ -51,12 +51,18 @@ export function isFunctionExpression(node: ts.Node): boolean {
  * @param node - The function node
  * @returns The function name, or null if unnamed and not in assignable context
  */
-export function getFunctionName(node: FunctionNode): string | null {
+export function getFunctionName(node: ts.Node): string | null {
   if (ts.isFunctionDeclaration(node) && node.name) {
     return node.name.text;
   }
   if (ts.isFunctionExpression(node) && node.name) {
     return node.name.text;
+  }
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  if (ts.isConstructorDeclaration(node)) {
+    return "constructor";
   }
   const parent = node.parent;
   if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {

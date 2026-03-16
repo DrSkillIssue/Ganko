@@ -79,7 +79,7 @@ function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
         name: "default",
         kind: isComponentName(name) ? ExportKind.COMPONENT : ExportKind.FUNCTION,
         entityId: fn?.id ?? -1,
-        node: stmt as any,
+        node: stmt,
         isDefault: true,
       }));
     } else {
@@ -88,7 +88,7 @@ function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
         name,
         kind: isComponentName(name) ? ExportKind.COMPONENT : ExportKind.FUNCTION,
         entityId: fn?.id ?? -1,
-        node: stmt as any,
+        node: stmt,
       }));
     }
   }
@@ -103,7 +103,7 @@ function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
       name: isDefault ? "default" : name,
       kind: ExportKind.CLASS,
       entityId: cls?.id ?? -1,
-      node: stmt as any,
+      node: stmt,
       isDefault,
     }));
   }
@@ -144,7 +144,7 @@ function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
           name,
           kind,
           entityId,
-          node: stmt as any,
+          node: stmt,
           reactiveKind,
         }));
       }
@@ -205,7 +205,7 @@ function extractNamedExportDeclaration(stmt: ts.ExportDeclaration, graph: SolidG
         name: exportedName,
         kind,
         entityId,
-        node: stmt as any,
+        node: stmt,
         reactiveKind,
         source: sourceModule,
         importedName: localName !== exportedName ? localName : null,
@@ -261,7 +261,7 @@ function extractDefaultExport(stmt: ts.ExportAssignment, graph: SolidGraph): voi
     name: "default",
     kind,
     entityId,
-    node: stmt as any,
+    node: stmt,
     isDefault: true,
     reactiveKind,
   }));
@@ -272,7 +272,7 @@ interface CreateExportArgs {
   name: string;
   kind: ExportKind;
   entityId: number;
-  node: any;
+  node: ts.Node;
   isDefault?: boolean;
   isTypeOnly?: boolean;
   reactiveKind?: ReactiveKind | null;

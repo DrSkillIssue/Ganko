@@ -102,8 +102,8 @@ function findGuardIf(expr: ts.BinaryExpression): ts.IfStatement | null {
 /**
  * Checks if the if-test is `!expr` where expr is our binary expression.
  */
-function isDirectUnaryTest(test: ts.Expression, expr: ts.BinaryExpression): boolean {
-  return ts.isPrefixUnaryExpression(test) && test.operator === ts.SyntaxKind.ExclamationToken && (test.operand as ts.Node) === (expr as ts.Node)
+function isDirectUnaryTest(test: ts.Expression, expr: ts.Expression): boolean {
+  return ts.isPrefixUnaryExpression(test) && test.operator === ts.SyntaxKind.ExclamationToken && test.operand === expr
 }
 
 export const preferSetHasOverEqualityChain = defineSolidRule({

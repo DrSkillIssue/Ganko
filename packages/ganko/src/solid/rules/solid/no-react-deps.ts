@@ -142,8 +142,8 @@ export const noReactDeps = defineSolidRule({
 
         // Trace arguments to their actual values using graph.traceToValue()
         if (!arg0) return;
-        const tracedArg0 = traceToValue(graph, arg0 as ts.Expression, call.scope)
-        const tracedArg1 = traceToValue(graph, arg1 as ts.Expression, call.scope)
+        const tracedArg0 = traceToValue(graph, arg0, call.scope)
+        const tracedArg1 = traceToValue(graph, arg1, call.scope)
 
         if (!isReactDepsPattern(tracedArg0, tracedArg1)) continue
 
@@ -159,7 +159,7 @@ export const noReactDeps = defineSolidRule({
             "noUselessDep",
             resolveMessage(messages.noUselessDep, { name: primitiveName }),
             "error",
-            isInlineArray ? createRemoveArgFix(graph, arg1 as ts.Expression) : undefined,
+            isInlineArray ? createRemoveArgFix(graph, arg1) : undefined,
           ),
         )
       }

@@ -136,7 +136,7 @@ function collectSetterReads(setter: VariableEntity): ts.Node[] {
       for (let vi = 0, vlen = vars.length; vi < vlen; vi++) {
         const v = vars[vi]
         if (!v) continue
-        if (v.name === (parent.name as ts.Identifier).text) {
+        if (v.name === parent.name.text) {
           const aliasReads = v.reads
           for (let ri = 0, rlen = aliasReads.length; ri < rlen; ri++) {
             const aliasRead = aliasReads[ri]

@@ -17,7 +17,7 @@ export function handleNonNullAssertion(ctx: VisitorContext, node: ts.NonNullExpr
 
 export function handleTypeAssertion(ctx: VisitorContext, node: ts.AsExpression | ts.TypeAssertion): void {
   const graph = ctx.graph;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const kind = getTypeAssertionKind(ctx, node);
   const expr = node.expression;
 
@@ -88,7 +88,7 @@ export function checkUnsafeGenericAssertion(ctx: VisitorContext,
   assertion: ts.AsExpression | ts.TypeAssertion,
 ): void {
   const fnNode = fn.node;
-  const typeParams = (fnNode as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction).typeParameters;
+  const typeParams = fnNode.typeParameters;
   if (!typeParams || typeParams.length === 0) return;
 
   const targetType = assertion.type;
@@ -119,7 +119,7 @@ export function checkUnsafeGenericAssertion(ctx: VisitorContext,
 }
 
 export function handleTypePredicate(ctx: VisitorContext,
-  fnNode: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction,
+  fnNode: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration,
   predicate: ts.TypePredicateNode,
 ): void {
   const paramName = predicate.parameterName;
@@ -150,7 +150,7 @@ export function handleTypePredicate(ctx: VisitorContext,
  * - Index signatures (`[key: string]: unknown`) — structural constraint
  * - Mapped types, conditional types — type-level
  */
-export function handleUnsafeTypeAnnotation(ctx: VisitorContext, node: ts.KeywordTypeNode): void {
+export function handleUnsafeTypeAnnotation(ctx: VisitorContext, node: ts.TypeNode): void {
   const kind: UnsafeAnnotationKind = node.kind === ts.SyntaxKind.AnyKeyword ? "any" : "unknown"
 
   const resolved = resolveAnnotationPosition(node)
@@ -182,7 +182,7 @@ interface ResolvedPosition {
  * Returns null for positions that should be exempt (type-level, catch clauses,
  * generic type arguments, index signatures).
  */
-function resolveAnnotationPosition(node: ts.KeywordTypeNode): ResolvedPosition | null {
+function resolveAnnotationPosition(node: ts.TypeNode): ResolvedPosition | null {
   let current: ts.Node | undefined = node.parent
   let depth = 0
 

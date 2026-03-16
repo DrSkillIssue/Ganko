@@ -99,7 +99,7 @@ function setFunctionContext(
   call: CallEntity,
   graph: SolidGraph,
 ): void {
-  const fnScope = getScopeFor(graph, node as any);
+  const fnScope = getScopeFor(graph, node);
   const primitiveName = call.primitive?.name ?? "unknown";
   const context: TrackingContext = { type, source: primitiveName };
   fnScope._resolvedContext = context;
@@ -182,7 +182,7 @@ function setEventHandlerContexts(graph: SolidGraph): void {
 
     // Handle inline function expressions: onClick={() => ...}
     if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
-      const fnScope = getScopeFor(graph, expr as any);
+      const fnScope = getScopeFor(graph, expr);
       fnScope._resolvedContext = deferredContext;
       propagateContextToChildren(fnScope, deferredContext);
       continue;
@@ -249,7 +249,7 @@ function setFlowComponentContexts(graph: SolidGraph): void {
 
       const fnNode = findFunctionChildExpression(element.children);
       if (fnNode) {
-        const fnScope = getScopeFor(graph, fnNode as any);
+        const fnScope = getScopeFor(graph, fnNode);
         fnScope._resolvedContext = semantic.children;
         propagateContextToChildren(fnScope, semantic.children);
       }
@@ -288,7 +288,7 @@ function setFallbackPropContext(
       : value;
     if (!expr) break;
     if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
-      const fnScope = getScopeFor(graph, expr as any);
+      const fnScope = getScopeFor(graph, expr);
       fnScope._resolvedContext = context;
       propagateContextToChildren(fnScope, context);
     }

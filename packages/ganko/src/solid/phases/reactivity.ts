@@ -81,7 +81,7 @@ export function runReactivityPhase(graph: SolidGraph, _input: SolidInput): void 
     const declaration = variable.declarations[0];
     if (!declaration) continue;
 
-    const result = typeResolver.getReactiveKindWithType(declaration as any);
+    const result = typeResolver.getReactiveKindWithType(declaration);
     if (result.kind) {
       setVariableReactivity(variable, true, result.kind, result.kind === "signal" || result.kind === "accessor", result.type);
     }

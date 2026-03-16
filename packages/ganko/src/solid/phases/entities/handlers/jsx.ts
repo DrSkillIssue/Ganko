@@ -10,7 +10,7 @@ import { isDomElement } from "@drskillissue/ganko-shared";
 export function handleJSXElement(ctx: VisitorContext, node: ts.JsxElement): void {
   const graph = ctx.graph;
   const file = ctx.file;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const tag = getJSXElementTag(node);
 
   // Build attributes and register JSX spread entities
@@ -58,7 +58,7 @@ export function handleJSXElement(ctx: VisitorContext, node: ts.JsxElement): void
 export function handleJSXSelfClosingElement(ctx: VisitorContext, node: ts.JsxSelfClosingElement): void {
   const graph = ctx.graph;
   const file = ctx.file;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const tag = getJSXElementTag(node);
 
   // Build attributes
@@ -92,7 +92,7 @@ export function handleJSXSelfClosingElement(ctx: VisitorContext, node: ts.JsxSel
 export function handleJSXFragment(ctx: VisitorContext, node: ts.JsxFragment): void {
   const graph = ctx.graph;
   const file = ctx.file;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
 
   const children: JSXChildEntity[] = [];
   for (let i = 0, len = node.children.length; i < len; i++) {

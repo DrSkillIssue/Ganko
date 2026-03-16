@@ -35,9 +35,9 @@ function wireJSXHierarchy(graph: SolidGraph): void {
   for (let i = 0, len = elements.length; i < len; i++) {
     const element = elements[i];
     if (!element) continue;
-    const parentNode = findParentJSXNode(element.node as ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment);
+    const parentNode = findParentJSXNode(element.node);
     if (parentNode) {
-      const parentElement = graph.jsxByNode.get(parentNode as any);
+      const parentElement = graph.jsxByNode.get(parentNode);
       if (parentElement) {
         element.parent = parentElement;
         parentElement.childElements.push(element);
@@ -185,15 +185,15 @@ function analyzeTypeAssertions(graph: SolidGraph): void {
 
     // Check if the cast is unnecessary
     const isUnnecessary = typeResolver.isUnnecessaryCast(
-      assertion.expression as any,
-      assertion.typeAnnotation as any,
+      assertion.expression,
+      assertion.typeAnnotation,
     );
 
     assertion.isUnnecessary = isUnnecessary;
 
     // Get expression type for error messages if cast is unnecessary
     if (isUnnecessary) {
-      assertion.expressionType = typeResolver.getTypeString(assertion.expression as any);
+      assertion.expressionType = typeResolver.getTypeString(assertion.expression);
     }
   }
 }

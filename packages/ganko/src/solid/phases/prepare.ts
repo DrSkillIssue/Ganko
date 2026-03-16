@@ -17,7 +17,7 @@ import type { SolidInput } from "../input";
  */
 function validateParentLinks(sourceFile: ts.SourceFile): void {
   const firstStmt = sourceFile.statements[0];
-  if (firstStmt && !(firstStmt as any).parent) {
+  if (firstStmt && !firstStmt.parent) {
     throw new Error(
       "AST missing parent links. Use ts.createSourceFile with setParentNodes=true",
     );

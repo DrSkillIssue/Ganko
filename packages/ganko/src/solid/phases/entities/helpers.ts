@@ -67,9 +67,11 @@ export function getImportSpecifierKind(spec: ts.ImportSpecifier | ts.ImportClaus
   return "named";
 }
 
-export function getFunctionName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): string | null {
+export function getFunctionName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration): string | null {
   if (ts.isFunctionDeclaration(node) && node.name) return node.name.text;
   if (ts.isFunctionExpression(node) && node.name) return node.name.text;
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) return node.name.text;
+  if (ts.isConstructorDeclaration(node)) return "constructor";
 
   const parent = node.parent;
   if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
@@ -85,7 +87,7 @@ export function getFunctionName(node: ts.FunctionDeclaration | ts.FunctionExpres
   return null;
 }
 
-export function getFunctionVariableName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): string | null {
+export function getFunctionVariableName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration): string | null {
   const parent = node.parent;
   if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
     return parent.name.text;
@@ -99,7 +101,7 @@ export function getParameterName(param: ts.ParameterDeclaration): string | null 
   return null;
 }
 
-export function getDeclarationNode(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): ts.Node {
+export function getDeclarationNode(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration): ts.Node {
   const parent = node.parent;
   if (parent && ts.isVariableDeclaration(parent)) {
     const grandparent = parent.parent;
@@ -161,9 +163,9 @@ export function buildJSXAttribute(attr: ts.JsxAttributeLike, id: number): JSXAtt
   if (ts.isIdentifier(nameNode)) {
     name = nameNode.text;
   } else {
-    // JsxNamespacedName
-    name = `${(nameNode as any).namespace.text}:${(nameNode as any).name.text}`;
-    namespace = (nameNode as any).namespace.text;
+    // JsxNamespacedName — after isIdentifier check, nameNode is ts.JsxNamespacedName
+    name = `${nameNode.namespace.text}:${nameNode.name.text}`;
+    namespace = nameNode.namespace.text;
   }
   const kind = classifyAttribute(name);
 
@@ -196,7 +198,7 @@ export function buildJSXAttribute(attr: ts.JsxAttributeLike, id: number): JSXAtt
  * the scope chain. Variables declared within the function scope are excluded.
  */
 export function computeCaptures(
-  node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction,
+  node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration,
   fnScope: ScopeEntity,
   graph: SolidGraph,
 ): VariableEntity[] {

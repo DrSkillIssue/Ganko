@@ -221,7 +221,7 @@ function extractSingleSetterCall(
 
   // Arrow function with expression body: () => setSetter(expr)
   if (!ts.isBlock(body)) {
-    return extractSetterFromExpression(body as ts.Expression);
+    return extractSetterFromExpression(body);
   }
 
   // Block body - must contain exactly one statement

@@ -97,7 +97,7 @@ function findEnclosingFunction(scope: ScopeEntity, graph: SolidGraph): FunctionE
   let current: ScopeEntity | null = scope;
   while (current) {
     if (current.kind === "function" && current.node) {
-      const fn = graph.functionsByNode.get(current.node as any);
+      const fn = graph.functionsByNode.get(current.node);
       if (fn) return fn;
     }
     current = current.parent;

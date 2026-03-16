@@ -127,7 +127,7 @@ export function visitTypeNode(ctx: VisitorContext, node: ts.TypeNode): void {
 
   // Unsafe type keywords — collect for rule analysis
   if (node.kind === ts.SyntaxKind.AnyKeyword || node.kind === ts.SyntaxKind.UnknownKeyword) {
-    handleUnsafeTypeAnnotation(ctx, node as ts.KeywordTypeNode);
+    handleUnsafeTypeAnnotation(ctx, node);
     return;
   }
 

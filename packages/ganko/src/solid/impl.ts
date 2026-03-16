@@ -108,7 +108,7 @@ export class SolidGraph {
   readonly callsByPrimitive = new Map<string, CallEntity[]>();
   readonly callsByMethodName = new Map<string, CallEntity[]>();
   readonly callsByArgNode = new Map<ts.Node, ArgumentEntity>();
-  readonly jsxByNode = new Map<ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment, JSXElementEntity>();
+  readonly jsxByNode = new Map<ts.Node, JSXElementEntity>();
   readonly jsxByTag = new Map<string, JSXElementEntity[]>();
   readonly jsxAttributesByElementId = new Map<number, ReadonlyMap<string, JSXAttributeEntity>>();
   readonly jsxAttrsByKind = new Map<JSXAttributeKind, JSXAttributeWithElement[]>();

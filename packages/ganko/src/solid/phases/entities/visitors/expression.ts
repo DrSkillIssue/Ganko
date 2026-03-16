@@ -305,6 +305,6 @@ export function visitFunctionBody(ctx: VisitorContext, node: ts.Block | ts.Expre
   if (ts.isBlock(node)) {
     visitBlockStatement(ctx, node);
   } else {
-    visitExpression(ctx, node as ts.Expression);
+    visitExpression(ctx, node);
   }
 }

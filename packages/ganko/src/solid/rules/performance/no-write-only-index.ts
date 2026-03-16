@@ -181,9 +181,7 @@ function collectIndexUsage(variable: VariableEntity, kind: IndexKind): IndexUsag
         continue
       }
 
-      // Map property reads are only safe for size.
-      const propertyName = memberPropertyName(parent as unknown as ts.PropertyAccessExpression)
-      if (propertyName === "size") continue
+      // Element access on Map always counts as an escape
       escapes = true
       continue
     }

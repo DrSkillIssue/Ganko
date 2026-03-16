@@ -90,7 +90,7 @@ export function createFunction(args: CreateFunctionArgs): FunctionEntity {
     params: args.params,
     body: args.node.body,
     async: args.node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false,
-    generator: !!(args.node as ts.FunctionDeclaration | ts.FunctionExpression).asteriskToken,
+    generator: (ts.isFunctionDeclaration(args.node) || ts.isFunctionExpression(args.node)) && !!args.node.asteriskToken,
     scope: args.scope,
     captures: args.captures,
     callSites: [],

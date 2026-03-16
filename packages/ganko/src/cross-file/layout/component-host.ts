@@ -746,7 +746,7 @@ function resolveHostEntryFromJSXElement(graph: SolidGraph, node: ts.JsxElement |
   // that render children directly without adding DOM elements. When the root JSX
   // element is a provider, look through its children to find the actual host element.
   if (isContextProviderTag(element.tag)) {
-    const children = ts.isJsxElement(node) ? node.children : ([] as readonly ts.JsxChild[])
+    const children = ts.isJsxElement(node) ? node.children : []
     return resolveHostEntryFromJSXChildren(graph, children)
   }
 

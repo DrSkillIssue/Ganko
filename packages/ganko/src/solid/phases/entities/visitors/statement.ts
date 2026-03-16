@@ -379,7 +379,7 @@ export function visitClassBody(ctx: VisitorContext, node: ts.ClassDeclaration | 
     if (ts.isMethodDeclaration(member) || ts.isConstructorDeclaration(member)) {
       if (member.body) {
         // For methods, wrap in FunctionExpression-like handling
-        handleFunction(ctx, member as any);
+        handleFunction(ctx, member);
         const fn = ctx.functionStack[ctx.functionStack.length - 1];
         if (!fn) continue;
         if (ts.isConstructorDeclaration(member)) {

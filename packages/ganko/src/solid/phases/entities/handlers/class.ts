@@ -9,7 +9,7 @@ export function handleClass(ctx: VisitorContext, node: ts.ClassDeclaration | ts.
   const graph = ctx.graph;
   const file = ctx.file;
   const name = node.name?.text ?? null;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const classVariable = name ? getVariableByNameInScope(graph, name, scope) : null;
 
   const hasAbstractModifier = node.modifiers?.some(

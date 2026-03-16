@@ -255,7 +255,7 @@ export function isJSXAccessorPassthrough(graph: SolidGraph, node: ts.Node): bool
   const jsxElement = ts.isJsxOpeningElement(opening) ? opening.parent : opening;
   if (!jsxElement || (!ts.isJsxElement(jsxElement) && !ts.isJsxSelfClosingElement(jsxElement) && !ts.isJsxFragment(jsxElement))) return false;
 
-  const element = graph.jsxByNode.get(jsxElement as any);
+  const element = graph.jsxByNode.get(jsxElement);
   if (!element || element.isDomElement) return false;
 
   // With type info: verify the signal's type is callable (Accessor<T> or function)

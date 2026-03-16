@@ -73,7 +73,7 @@ function hasReadInEarlyReturnContext(
   for (let i = 0, len = earlyReturns.length; i < len; i++) {
     const ret = earlyReturns[i];
     if (!ret) continue;
-    const ifStmt = getContainingIfStatement(ret.node as ts.ReturnStatement)
+    const ifStmt = getContainingIfStatement(ret.node)
     if (ifStmt) {
       const range: readonly [number, number] = [ifStmt.pos, ifStmt.end]
       ifRanges.push(range)

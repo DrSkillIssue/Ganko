@@ -82,12 +82,12 @@ export function handleAssignmentExpression(ctx: VisitorContext, node: ts.BinaryE
   if (!ts.isPropertyAccessExpression(left) && !ts.isElementAccessExpression(left)) return;
 
   const graph = ctx.graph;
-  const scope = getScopeFor(graph, node as any);
+  const scope = getScopeFor(graph, node);
   const object = left.expression;
   const isComputed = ts.isElementAccessExpression(left);
-  const property = isComputed
-    ? (left as ts.ElementAccessExpression).argumentExpression
-    : (left as ts.PropertyAccessExpression).name;
+  const property = ts.isElementAccessExpression(left)
+    ? left.argumentExpression
+    : left.name;
 
   const isArrayIndex = isComputed && isLikelyArrayIndex(ctx, property);
   const hasDynamicProperty = isComputed && !ts.isStringLiteral(property) && !ts.isNumericLiteral(property);

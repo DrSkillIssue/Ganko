@@ -115,7 +115,7 @@ const REACTIVE_PRIMITIVE_NAME = /^(?:create[A-Z]|use[A-Z])/;
  * where the callee matches the create-/use- naming convention.
  */
 export function isFunctionInReactivePrimitiveConfig(
-  node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  node: ts.Node,
 ): boolean {
   const parent = node.parent;
   if (!parent || !ts.isPropertyAssignment(parent) || parent.initializer !== node) return false;

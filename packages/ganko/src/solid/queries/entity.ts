@@ -130,7 +130,7 @@ export function getContainingFunction(graph: SolidGraph, node: ts.Node): Functio
     if (ts.isFunctionDeclaration(current) ||
         ts.isFunctionExpression(current) ||
         ts.isArrowFunction(current)) {
-      return graph.functionsByNode.get(current as any) ?? null;
+      return graph.functionsByNode.get(current) ?? null;
     }
     current = current.parent;
   }
