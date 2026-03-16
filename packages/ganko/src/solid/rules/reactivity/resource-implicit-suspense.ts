@@ -26,7 +26,7 @@
  *   AND no ErrorBoundary between the component and the nearest Suspense boundary
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { CallEntity } from "../../entities";
 import type { FunctionEntity } from "../../entities/function";
@@ -79,17 +79,17 @@ const options = {};
  */
 function hasInitialValue(call: CallEntity): boolean {
   const args = call.node.arguments;
-  if (args.length === 0) return false;
+  if (!args || args.length === 0) return false;
 
   const lastArg = args[args.length - 1];
-  if (!lastArg || lastArg.type !== "ObjectExpression") return false;
+  if (!lastArg || !ts.isObjectLiteralExpression(lastArg)) return false;
 
   const properties = lastArg.properties;
   for (let i = 0, len = properties.length; i < len; i++) {
     const prop = properties[i];
     if (!prop) continue;
-    if (prop.type !== "Property") continue;
-    if (prop.key.type === "Identifier" && prop.key.name === "initialValue") {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    if (ts.isIdentifier(prop.name) && prop.name.text === "initialValue") {
       return true;
     }
   }
@@ -105,15 +105,15 @@ function hasInitialValue(call: CallEntity): boolean {
  */
 function getResourceVariableName(call: CallEntity): string | null {
   const parent = call.node.parent;
-  if (parent?.type !== "VariableDeclarator" || parent.init !== call.node) return null;
+  if (!parent || !ts.isVariableDeclaration(parent) || parent.initializer !== call.node) return null;
 
-  const pattern = parent.id;
-  if (pattern.type === "ArrayPattern") {
+  const pattern = parent.name;
+  if (ts.isArrayBindingPattern(pattern)) {
     const first = pattern.elements[0];
-    if (first && first.type === "Identifier") return first.name;
+    if (first && ts.isBindingElement(first) && ts.isIdentifier(first.name)) return first.name.text;
     return null;
   }
-  if (pattern.type === "Identifier") return pattern.name;
+  if (ts.isIdentifier(pattern)) return pattern.text;
   return null;
 }
 
@@ -127,11 +127,11 @@ function hasLoadingRead(resourceVariable: VariableEntity): boolean {
     if (!read) continue;
     const parent = read.node.parent;
     if (
-      parent?.type === "MemberExpression" &&
-      parent.object === read.node &&
-      !parent.computed &&
-      parent.property.type === "Identifier" &&
-      parent.property.name === "loading"
+      parent &&
+      ts.isPropertyAccessExpression(parent) &&
+      parent.expression === read.node &&
+      ts.isIdentifier(parent.name) &&
+      parent.name.text === "loading"
     ) {
       return true;
     }
@@ -153,15 +153,15 @@ function hasLoadingRead(resourceVariable: VariableEntity): boolean {
  */
 function resolveFetcherFunction(graph: SolidGraph, call: CallEntity): FunctionEntity | null {
   const args = call.node.arguments;
-  if (args.length === 0) return null;
+  if (!args || args.length === 0) return null;
 
-  let fetcherNode: T.Node | undefined;
+  let fetcherNode: ts.Node | undefined;
 
   if (args.length === 1) {
     fetcherNode = args[0];
   } else if (args.length === 2) {
     const lastArg = args[1];
-    fetcherNode = lastArg && lastArg.type === "ObjectExpression" ? args[0] : args[1];
+    fetcherNode = lastArg && ts.isObjectLiteralExpression(lastArg) ? args[0] : args[1];
   } else {
     fetcherNode = args[1];
   }
@@ -169,14 +169,14 @@ function resolveFetcherFunction(graph: SolidGraph, call: CallEntity): FunctionEn
   if (!fetcherNode) return null;
 
   if (
-    fetcherNode.type === "ArrowFunctionExpression" ||
-    fetcherNode.type === "FunctionExpression"
+    ts.isArrowFunction(fetcherNode) ||
+    ts.isFunctionExpression(fetcherNode)
   ) {
     return graph.functionsByNode.get(fetcherNode) ?? null;
   }
 
-  if (fetcherNode.type === "Identifier") {
-    const fns = graph.functionsByName.get(fetcherNode.name);
+  if (ts.isIdentifier(fetcherNode)) {
+    const fns = graph.functionsByName.get(fetcherNode.text);
     if (fns && fns.length > 0) {
       const fn = fns[0];
       if (fn) return fn;
@@ -357,8 +357,8 @@ function buildErrorBoundaryFix(
   if (!usage) return null;
 
   const jsxNode = usage.node;
-  const startPos = jsxNode.range[0];
-  const endPos = jsxNode.range[1];
+  const startPos = jsxNode.getStart(graph.sourceFile);
+  const endPos = jsxNode.end;
 
   const ops: FixOperation[] = [
     { range: [startPos, startPos], text: "<ErrorBoundary fallback={<div>Error</div>}>" },
@@ -411,6 +411,7 @@ export const resourceImplicitSuspense = defineSolidRule({
             createDiagnostic(
               graph.file,
               call.node,
+              graph.sourceFile,
               "resource-implicit-suspense",
               "loadingMismatch",
               resolveMessage(messages.loadingMismatch, { name: resourceName }),
@@ -439,6 +440,7 @@ export const resourceImplicitSuspense = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "resource-implicit-suspense",
             "conditionalSuspense",
             resolveMessage(messages.conditionalSuspense, {
@@ -463,6 +465,7 @@ export const resourceImplicitSuspense = defineSolidRule({
             createDiagnostic(
               graph.file,
               call.node,
+              graph.sourceFile,
               "resource-implicit-suspense",
               "missingErrorBoundary",
               resolveMessage(messages.missingErrorBoundary, { name: resourceName }),

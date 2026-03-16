@@ -15,13 +15,12 @@
  * - Multiple return paths in a component
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { FunctionEntity } from "../../entities/function";
 import { defineSolidRule } from "../../rule";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic";
 import { isJSXElementOrFragment } from "../../util";
-import { getSourceCode } from "../../queries/get";
 
 const messages = {
   noEarlyReturn:
@@ -34,8 +33,8 @@ const messages = {
  * Information about returns in a function body.
  */
 interface ReturnInfo {
-  lastReturn: T.ReturnStatement | null;
-  earlyReturns: readonly T.ReturnStatement[];
+  lastReturn: ts.ReturnStatement | null;
+  earlyReturns: readonly ts.ReturnStatement[];
 }
 
 const EMPTY_RETURN_INFO: ReturnInfo = Object.freeze({
@@ -46,13 +45,28 @@ const EMPTY_RETURN_INFO: ReturnInfo = Object.freeze({
 const returnInfoCache = new WeakMap<FunctionEntity, ReturnInfo>();
 
 /**
+ * Check if a statement is a declaration (TS SyntaxKind ending with "Declaration").
+ */
+function isDeclarationStatement(stmt: ts.Statement): boolean {
+  return ts.isFunctionDeclaration(stmt) ||
+    ts.isClassDeclaration(stmt) ||
+    ts.isInterfaceDeclaration(stmt) ||
+    ts.isTypeAliasDeclaration(stmt) ||
+    ts.isEnumDeclaration(stmt) ||
+    ts.isModuleDeclaration(stmt) ||
+    ts.isImportDeclaration(stmt) ||
+    ts.isExportDeclaration(stmt) ||
+    ts.isVariableStatement(stmt);
+}
+
+/**
  * Find the last non-declaration statement in a block using indexed reverse loop.
  */
-function findLastNonDeclaration(statements: readonly T.Statement[]): T.Statement | null {
+function findLastNonDeclaration(statements: ts.NodeArray<ts.Statement>): ts.Statement | null {
   for (let i = statements.length - 1; i >= 0; i--) {
     const stmt = statements[i];
     if (!stmt) continue;
-    if (stmt.type.indexOf("Declaration") !== stmt.type.length - 11) {
+    if (!isDeclarationStatement(stmt)) {
       return stmt;
     }
   }
@@ -63,59 +77,59 @@ function findLastNonDeclaration(statements: readonly T.Statement[]): T.Statement
  * Collect return statements from a block of statements.
  */
 function collectReturnsImpl(
-  statements: readonly T.Statement[],
-  lastReturn: T.ReturnStatement | null,
-  earlyReturns: T.ReturnStatement[],
+  statements: readonly ts.Statement[],
+  lastReturn: ts.ReturnStatement | null,
+  earlyReturns: ts.ReturnStatement[],
 ): void {
   const len = statements.length;
   for (let i = 0; i < len; i++) {
     const stmt = statements[i];
     if (!stmt) continue;
 
-    if (stmt.type === "ReturnStatement") {
+    if (ts.isReturnStatement(stmt)) {
       if (stmt !== lastReturn) {
         earlyReturns.push(stmt);
       }
-    } else if (stmt.type === "IfStatement") {
-      const consequent = stmt.consequent;
-      if (consequent.type === "BlockStatement") {
-        collectReturnsImpl(consequent.body, lastReturn, earlyReturns);
-      } else if (consequent.type === "ReturnStatement") {
+    } else if (ts.isIfStatement(stmt)) {
+      const consequent = stmt.thenStatement;
+      if (ts.isBlock(consequent)) {
+        collectReturnsImpl(Array.from(consequent.statements), lastReturn, earlyReturns);
+      } else if (ts.isReturnStatement(consequent)) {
         if (consequent !== lastReturn) {
           earlyReturns.push(consequent);
         }
       }
 
-      const alternate = stmt.alternate;
+      const alternate = stmt.elseStatement;
       if (alternate) {
-        if (alternate.type === "BlockStatement") {
-          collectReturnsImpl(alternate.body, lastReturn, earlyReturns);
-        } else if (alternate.type === "ReturnStatement") {
+        if (ts.isBlock(alternate)) {
+          collectReturnsImpl(Array.from(alternate.statements), lastReturn, earlyReturns);
+        } else if (ts.isReturnStatement(alternate)) {
           if (alternate !== lastReturn) {
             earlyReturns.push(alternate);
           }
-        } else if (alternate.type === "IfStatement") {
+        } else if (ts.isIfStatement(alternate)) {
           collectReturnsImpl([alternate], lastReturn, earlyReturns);
         }
       }
-    } else if (stmt.type === "SwitchStatement") {
-      const cases = stmt.cases;
-      const casesLen = cases.length;
-      for (let j = 0; j < casesLen; j++) {
-        const switchCase = cases[j];
-        if (!switchCase) continue;
-        collectReturnsImpl(switchCase.consequent, lastReturn, earlyReturns);
+    } else if (ts.isSwitchStatement(stmt)) {
+      const clauses = stmt.caseBlock.clauses;
+      const clausesLen = clauses.length;
+      for (let j = 0; j < clausesLen; j++) {
+        const switchClause = clauses[j];
+        if (!switchClause) continue;
+        collectReturnsImpl(Array.from(switchClause.statements), lastReturn, earlyReturns);
       }
-    } else if (stmt.type === "TryStatement") {
-      collectReturnsImpl(stmt.block.body, lastReturn, earlyReturns);
-      if (stmt.handler) {
-        collectReturnsImpl(stmt.handler.body.body, lastReturn, earlyReturns);
+    } else if (ts.isTryStatement(stmt)) {
+      collectReturnsImpl(Array.from(stmt.tryBlock.statements), lastReturn, earlyReturns);
+      if (stmt.catchClause) {
+        collectReturnsImpl(Array.from(stmt.catchClause.block.statements), lastReturn, earlyReturns);
       }
-      if (stmt.finalizer) {
-        collectReturnsImpl(stmt.finalizer.body, lastReturn, earlyReturns);
+      if (stmt.finallyBlock) {
+        collectReturnsImpl(Array.from(stmt.finallyBlock.statements), lastReturn, earlyReturns);
       }
-    } else if (stmt.type === "WithStatement" && stmt.body.type === "BlockStatement") {
-      collectReturnsImpl(stmt.body.body, lastReturn, earlyReturns);
+    } else if (ts.isWithStatement(stmt) && ts.isBlock(stmt.statement)) {
+      collectReturnsImpl(Array.from(stmt.statement.statements), lastReturn, earlyReturns);
     }
   }
 }
@@ -130,16 +144,16 @@ function analyzeReturns(fn: FunctionEntity): ReturnInfo {
 
   const body = fn.body;
 
-  if (body.type !== "BlockStatement") {
+  if (!body || !ts.isBlock(body)) {
     returnInfoCache.set(fn, EMPTY_RETURN_INFO);
     return EMPTY_RETURN_INFO;
   }
 
-  const lastStatement = findLastNonDeclaration(body.body);
-  const lastReturn = lastStatement?.type === "ReturnStatement" ? lastStatement : null;
+  const lastStatement = findLastNonDeclaration(body.statements);
+  const lastReturn = lastStatement && ts.isReturnStatement(lastStatement) ? lastStatement : null;
 
-  const earlyReturns: T.ReturnStatement[] = [];
-  collectReturnsImpl(body.body, lastReturn, earlyReturns);
+  const earlyReturns: ts.ReturnStatement[] = [];
+  collectReturnsImpl(Array.from(body.statements), lastReturn, earlyReturns);
 
   const result: ReturnInfo = {
     lastReturn,
@@ -152,69 +166,70 @@ function analyzeReturns(fn: FunctionEntity): ReturnInfo {
 /**
  * Check if a node represents a "nothing" value (null, undefined, false, empty string, empty fragment).
  */
-function isNothing(node: T.Node | undefined): boolean {
+function isNothing(node: ts.Node | undefined): boolean {
   if (!node) return true;
 
-  switch (node.type) {
-    case "Literal": {
-      const value = node.value;
-      return value === null || value === undefined || value === false || value === "";
+  if (node.kind === ts.SyntaxKind.NullKeyword) return true;
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return true;
+  if (ts.isStringLiteral(node) && node.text === "") return true;
+  if (ts.isNumericLiteral(node) && node.text === "0") return true;
+
+  if (ts.isJsxFragment(node)) {
+    const children = node.children;
+    const len = children.length;
+    for (let i = 0; i < len; i++) {
+      if (!isNothing(children[i])) return false;
     }
-    case "JSXFragment": {
-      if (!node.children) return true;
-      const children = node.children;
-      const len = children.length;
-      for (let i = 0; i < len; i++) {
-        if (!isNothing(children[i])) return false;
-      }
-      return true;
-    }
-    default:
-      return false;
+    return true;
   }
+
+  return false;
 }
 
 /**
  * Get the number of lines a source location spans.
  */
-function getLineLength(loc: T.SourceLocation): number {
-  return loc.end.line - loc.start.line + 1;
+function getLineLength(node: ts.Node, sourceFile: ts.SourceFile): number {
+  const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
+  const endLine = sourceFile.getLineAndCharacterOfPosition(node.end).line;
+  return endLine - startLine + 1;
 }
 
 /**
  * Convert a node to JSX string format.
  */
-function nodeToJSXString(node: T.Node, sourceText: string): string {
-  const text = sourceText.slice(node.range[0], node.range[1]);
+function nodeToJSXString(node: ts.Node, sourceFile: ts.SourceFile): string {
+  const text = node.getText(sourceFile);
   return isJSXElementOrFragment(node) ? text : `{${text}}`;
 }
 
 /**
  * Get source text from a node.
  */
-function getText(node: T.Node, sourceText: string): string {
-  return sourceText.slice(node.range[0], node.range[1]);
+function getText(node: ts.Node, sourceFile: ts.SourceFile): string {
+  return node.getText(sourceFile);
 }
 
 /**
  * Generate a fix for a conditional expression in a return statement.
  */
 function generateConditionalFix(
-  argument: T.ConditionalExpression,
-  sourceText: string,
+  argument: ts.ConditionalExpression,
+  sourceFile: ts.SourceFile,
 ): Fix | undefined {
-  const { test, consequent, alternate } = argument;
+  const { condition: test, whenTrue: consequent, whenFalse: alternate } = argument;
   const conditions = [{ test, consequent }];
-  let fallback = alternate;
+  let fallback: ts.Expression = alternate;
 
-  while (fallback.type === "ConditionalExpression") {
-    conditions.push({ test: fallback.test, consequent: fallback.consequent });
-    fallback = fallback.alternate;
+  while (ts.isConditionalExpression(fallback)) {
+    conditions.push({ test: fallback.condition, consequent: fallback.whenTrue });
+    fallback = fallback.whenFalse;
   }
 
   // Case 1: Nested ternary -> <Switch><Match /></Switch>
   if (conditions.length >= 2) {
-    const fallbackStr = !isNothing(fallback) ? ` fallback={${getText(fallback, sourceText)}}` : "";
+    const fallbackStr = !isNothing(fallback) ? ` fallback={${getText(fallback, sourceFile)}}` : "";
 
     const condLen = conditions.length;
     const matchParts: string[] = [];
@@ -223,11 +238,11 @@ function generateConditionalFix(
       if (!cond) continue;
       const { test: t, consequent: c } = cond;
       matchParts.push(
-        `<Match when={${getText(t, sourceText)}}>${nodeToJSXString(c, sourceText)}</Match>`);
+        `<Match when={${getText(t, sourceFile)}}>${nodeToJSXString(c, sourceFile)}</Match>`);
     }
 
     return [{
-      range: [argument.range[0], argument.range[1]],
+      range: [argument.getStart(sourceFile), argument.end],
       text: `<Switch${fallbackStr}>\n${matchParts.join("\n")}\n</Switch>`,
     }];
   }
@@ -235,28 +250,28 @@ function generateConditionalFix(
   // Case 2: Consequent is nothing -> negate condition and use <Show>
   if (isNothing(consequent)) {
     return [{
-      range: [argument.range[0], argument.range[1]],
-      text: `<Show when={!(${getText(test, sourceText)})}>${nodeToJSXString(alternate, sourceText)}</Show>`,
+      range: [argument.getStart(sourceFile), argument.end],
+      text: `<Show when={!(${getText(test, sourceFile)})}>${nodeToJSXString(alternate, sourceFile)}</Show>`,
     }];
   }
 
   // Case 3: Fallback is nothing or consequent is significantly longer -> <Show>
   if (
     isNothing(fallback) ||
-    getLineLength(consequent.loc) >= getLineLength(alternate.loc) * 1.5
+    getLineLength(consequent, sourceFile) >= getLineLength(alternate, sourceFile) * 1.5
   ) {
-    const fallbackStr = !isNothing(fallback) ? ` fallback={${getText(fallback, sourceText)}}` : "";
+    const fallbackStr = !isNothing(fallback) ? ` fallback={${getText(fallback, sourceFile)}}` : "";
 
     return [{
-      range: [argument.range[0], argument.range[1]],
-      text: `<Show when={${getText(test, sourceText)}}${fallbackStr}>${nodeToJSXString(consequent, sourceText)}</Show>`,
+      range: [argument.getStart(sourceFile), argument.end],
+      text: `<Show when={${getText(test, sourceFile)}}${fallbackStr}>${nodeToJSXString(consequent, sourceFile)}</Show>`,
     }];
   }
 
   // Case 4: Balanced ternary -> wrap in fragment
   return [{
-    range: [argument.range[0], argument.range[1]],
-    text: `<>${nodeToJSXString(argument, sourceText)}</>`,
+    range: [argument.getStart(sourceFile), argument.end],
+    text: `<>${nodeToJSXString(argument, sourceFile)}</>`,
   }];
 }
 
@@ -264,15 +279,16 @@ function generateConditionalFix(
  * Generate a fix for a logical expression in a return statement.
  */
 function generateLogicalFix(
-  argument: T.LogicalExpression,
-  sourceText: string,
+  argument: ts.BinaryExpression,
+  sourceFile: ts.SourceFile,
 ): Fix | undefined {
-  if (argument.operator !== "&&") return undefined;
+  if (argument.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) return undefined;
 
-  const { left: test, right: consequent } = argument;
+  const test = argument.left;
+  const consequent = argument.right;
   return [{
-    range: [argument.range[0], argument.range[1]],
-    text: `<Show when={${getText(test, sourceText)}}>${nodeToJSXString(consequent, sourceText)}</Show>`,
+    range: [argument.getStart(sourceFile), argument.end],
+    text: `<Show when={${getText(test, sourceFile)}}>${nodeToJSXString(consequent, sourceFile)}</Show>`,
   }];
 }
 
@@ -296,13 +312,13 @@ export const componentsReturnOnce = defineSolidRule({
       return;
     }
 
-    const sourceText = getSourceCode(graph).text;
+    const sourceFile = graph.sourceFile;
 
     for (let i = 0, len = componentFunctions.length; i < len; i++) {
       const fn = componentFunctions[i];
       if (!fn) continue;
 
-      if (fn.body.type !== "BlockStatement") {
+      if (!fn.body || !ts.isBlock(fn.body)) {
         continue;
       }
 
@@ -312,34 +328,36 @@ export const componentsReturnOnce = defineSolidRule({
       for (let j = 0; j < earlyLen; j++) {
         const earlyReturn = earlyReturns[j];
         if (!earlyReturn) continue;
-        emit(createDiagnostic(graph.file, earlyReturn, "components-return-once", "noEarlyReturn", messages.noEarlyReturn, "error"));
+        emit(createDiagnostic(graph.file, earlyReturn, graph.sourceFile, "components-return-once", "noEarlyReturn", messages.noEarlyReturn, "error"));
       }
 
-      const argument = lastReturn?.argument;
+      const argument = lastReturn?.expression;
       if (!argument) continue;
 
-      if (argument.type === "ConditionalExpression") {
+      if (ts.isConditionalExpression(argument)) {
         emit(
           createDiagnostic(
             graph.file,
             lastReturn,
+            graph.sourceFile,
             "components-return-once",
             "noConditionalReturn",
             messages.noConditionalReturn,
             "error",
-            generateConditionalFix(argument, sourceText),
+            generateConditionalFix(argument, sourceFile),
           ),
         );
-      } else if (argument.type === "LogicalExpression") {
+      } else if (ts.isBinaryExpression(argument) && (argument.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || argument.operatorToken.kind === ts.SyntaxKind.BarBarToken || argument.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
         emit(
           createDiagnostic(
             graph.file,
             argument,
+            graph.sourceFile,
             "components-return-once",
             "noConditionalReturn",
             messages.noConditionalReturn,
             "error",
-            generateLogicalFix(argument, sourceText),
+            generateLogicalFix(argument, sourceFile),
           ),
         );
       }

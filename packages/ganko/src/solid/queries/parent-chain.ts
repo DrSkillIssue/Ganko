@@ -5,7 +5,7 @@
  * extracting all commonly-needed information in one walk.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { SYNC_CALLBACK_METHODS } from "../util/call";
 import { isUpperAlpha } from "@drskillissue/ganko-shared";
 
@@ -13,17 +13,17 @@ import { isUpperAlpha } from "@drskillissue/ganko-shared";
  * Information extracted from walking up the parent chain from a node.
  */
 export interface ParentChainInfo {
-  enclosingFunction: T.Node | null;
+  enclosingFunction: ts.Node | null;
   functionName: string | null;
   componentName: string | null;
   isInJSXExpression: boolean;
   syncCallbackMethod: string | null;
-  syncCallbackFunction: T.Node | null;
-  syncCallbackCall: T.Node | null;
+  syncCallbackFunction: ts.Node | null;
+  syncCallbackCall: ts.Node | null;
 }
 
 /** Cache for parent chain analysis results */
-const parentChainCache = new WeakMap<T.Node, ParentChainInfo>();
+const parentChainCache = new WeakMap<ts.Node, ParentChainInfo>();
 
 /** Frozen empty info for reuse */
 const EMPTY_PARENT_CHAIN_INFO: ParentChainInfo = Object.freeze({
@@ -50,7 +50,7 @@ const EMPTY_PARENT_CHAIN_INFO: ParentChainInfo = Object.freeze({
  * @param node - The AST node to analyze
  * @returns ParentChainInfo with all extracted contextual information
  */
-export function analyzeParentChain(node: T.Node): ParentChainInfo {
+export function analyzeParentChain(node: ts.Node): ParentChainInfo {
   const cached = parentChainCache.get(node);
   if (cached) return cached;
 
@@ -71,19 +71,17 @@ export function analyzeParentChain(node: T.Node): ParentChainInfo {
  * @param fn - The function node
  * @returns The function name, or null if unnamed
  */
-function extractFunctionName(fn: T.Node): string | null {
-  switch (fn.type) {
-    case "FunctionDeclaration":
-      return fn.id?.name ?? null;
-
-    case "FunctionExpression":
-      if (fn.id) return fn.id.name;
-      break;
+function extractFunctionName(fn: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(fn)) {
+    return fn.name?.text ?? null;
+  }
+  if (ts.isFunctionExpression(fn) && fn.name) {
+    return fn.name.text;
   }
 
   const fnParent = fn.parent;
-  if (fnParent?.type === "VariableDeclarator" && fnParent.id.type === "Identifier") {
-    return fnParent.id.name;
+  if (fnParent && ts.isVariableDeclaration(fnParent) && ts.isIdentifier(fnParent.name)) {
+    return fnParent.name.text;
   }
 
   return null;
@@ -100,18 +98,17 @@ function extractFunctionName(fn: T.Node): string | null {
  * @param fn - The function node to check
  * @returns The method name if this is a sync callback, or null
  */
-function getSyncCallbackMethod(fn: T.Node): string | null {
-  if (fn.type === "FunctionDeclaration") return null;
+function getSyncCallbackMethod(fn: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(fn)) return null;
 
   const fnParent = fn.parent;
-  if (fnParent?.type !== "CallExpression") return null;
-  if (fnParent.callee === fn) return null;
+  if (!fnParent || !ts.isCallExpression(fnParent)) return null;
+  if (fnParent.expression === fn) return null;
 
-  const callee = fnParent.callee;
-  if (callee.type !== "MemberExpression") return null;
-  if (callee.property.type !== "Identifier") return null;
+  const callee = fnParent.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return null;
 
-  const methodName = callee.property.name;
+  const methodName = callee.name.text;
   return SYNC_CALLBACK_METHODS.has(methodName) ? methodName : null;
 }
 
@@ -124,62 +121,54 @@ function getSyncCallbackMethod(fn: T.Node): string | null {
  * @param node - The AST node to analyze
  * @returns ParentChainInfo with all extracted information
  */
-function computeParentChainInfo(node: T.Node): ParentChainInfo {
-  let enclosingFunction: T.Node | null = null;
+function computeParentChainInfo(node: ts.Node): ParentChainInfo {
+  let enclosingFunction: ts.Node | null = null;
   let functionName: string | null = null;
   let componentName: string | null = null;
   let isInJSXExpression = false;
   let syncCallbackMethod: string | null = null;
-  let syncCallbackFunction: T.Node | null = null;
-  let syncCallbackCall: T.Node | null = null;
+  let syncCallbackFunction: ts.Node | null = null;
+  let syncCallbackCall: ts.Node | null = null;
 
   let foundFirstFunction = false;
-  let current: T.Node | undefined = node.parent;
+  let current: ts.Node | undefined = node.parent;
 
   while (current) {
-    const type = current.type;
+    if (ts.isJsxExpression(current)) {
+      if (!foundFirstFunction) {
+        isInJSXExpression = true;
+      }
+    } else if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) || ts.isArrowFunction(current)) {
+      if (foundFirstFunction) {
+        // Already found first function - stop walking
+        return buildResult(
+          enclosingFunction,
+          functionName,
+          componentName,
+          isInJSXExpression,
+          syncCallbackMethod,
+          syncCallbackFunction,
+          syncCallbackCall,
+        );
+      }
 
-    switch (type) {
-      case "JSXExpressionContainer":
-        if (!foundFirstFunction) {
-          isInJSXExpression = true;
+      foundFirstFunction = true;
+      enclosingFunction = current;
+      functionName = extractFunctionName(current);
+
+      // Check if this is a component (PascalCase: first char is A-Z)
+      if (functionName) {
+        if (isUpperAlpha(functionName.charCodeAt(0))) {
+          componentName = functionName;
         }
-        break;
+      }
 
-      case "FunctionDeclaration":
-      case "FunctionExpression":
-      case "ArrowFunctionExpression":
-        if (foundFirstFunction) {
-          // Already found first function - stop walking
-          return buildResult(
-            enclosingFunction,
-            functionName,
-            componentName,
-            isInJSXExpression,
-            syncCallbackMethod,
-            syncCallbackFunction,
-            syncCallbackCall,
-          );
-        }
-
-        foundFirstFunction = true;
-        enclosingFunction = current;
-        functionName = extractFunctionName(current);
-
-        // Check if this is a component (PascalCase: first char is A-Z)
-        if (functionName) {
-          if (isUpperAlpha(functionName.charCodeAt(0))) {
-            componentName = functionName;
-          }
-        }
-
-        // Check if this function is a sync callback (map, filter, etc.)
-        syncCallbackMethod = getSyncCallbackMethod(current);
-        if (syncCallbackMethod) {
-          syncCallbackFunction = current;
-          syncCallbackCall = current.parent;
-        }
-        break;
+      // Check if this function is a sync callback (map, filter, etc.)
+      syncCallbackMethod = getSyncCallbackMethod(current);
+      if (syncCallbackMethod) {
+        syncCallbackFunction = current;
+        syncCallbackCall = current.parent ?? null;
+      }
     }
 
     current = current.parent;
@@ -212,13 +201,13 @@ function computeParentChainInfo(node: T.Node): ParentChainInfo {
  * @returns The built ParentChainInfo
  */
 function buildResult(
-  enclosingFunction: T.Node | null,
+  enclosingFunction: ts.Node | null,
   functionName: string | null,
   componentName: string | null,
   isInJSXExpression: boolean,
   syncCallbackMethod: string | null,
-  syncCallbackFunction: T.Node | null,
-  syncCallbackCall: T.Node | null,
+  syncCallbackFunction: ts.Node | null,
+  syncCallbackCall: ts.Node | null,
 ): ParentChainInfo {
   if (!enclosingFunction && !isInJSXExpression && !syncCallbackMethod) {
     return EMPTY_PARENT_CHAIN_INFO;
@@ -246,7 +235,7 @@ function buildResult(
  * @param node - The AST node to check
  * @returns True if the node is inside a JSX expression
  */
-export function isInsideJSXExpression(node: T.Node): boolean {
+export function isInsideJSXExpression(node: ts.Node): boolean {
   return analyzeParentChain(node).isInJSXExpression;
 }
 
@@ -259,7 +248,7 @@ export function isInsideJSXExpression(node: T.Node): boolean {
  * @param node - The AST node to find the enclosing function for
  * @returns The enclosing function node, or null if at module scope
  */
-export function findEnclosingFunction(node: T.Node): T.Node | null {
+export function findEnclosingFunction(node: ts.Node): ts.Node | null {
   return analyzeParentChain(node).enclosingFunction;
 }
 
@@ -272,7 +261,7 @@ export function findEnclosingFunction(node: T.Node): T.Node | null {
  * @param node - The AST node to get the enclosing function name for
  * @returns The function name, or null if unnamed or at module scope
  */
-export function getEnclosingFunctionName(node: T.Node): string | null {
+export function getEnclosingFunctionName(node: ts.Node): string | null {
   return analyzeParentChain(node).functionName;
 }
 
@@ -286,7 +275,7 @@ export function getEnclosingFunctionName(node: T.Node): string | null {
  * @param node - The AST node to check
  * @returns The method name (e.g., "map", "filter"), or null if not in a sync callback
  */
-export function getEnclosingSyncCallbackMethod(node: T.Node): string | null {
+export function getEnclosingSyncCallbackMethod(node: ts.Node): string | null {
   return analyzeParentChain(node).syncCallbackMethod;
 }
 
@@ -299,6 +288,6 @@ export function getEnclosingSyncCallbackMethod(node: T.Node): string | null {
  * @param node - The AST node to check
  * @returns The component name, or null if not inside a component
  */
-export function getEnclosingComponentName(node: T.Node): string | null {
+export function getEnclosingComponentName(node: ts.Node): string | null {
   return analyzeParentChain(node).componentName;
 }

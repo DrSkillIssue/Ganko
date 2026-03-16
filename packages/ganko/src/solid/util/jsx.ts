@@ -4,7 +4,7 @@
  * Helper functions for working with JSX elements and attributes.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { CHAR_O, CHAR_N, CHAR_COLON, CHAR_U, CHAR_S, CHAR_E, isUpperAlpha } from "@drskillissue/ganko-shared";
 
 /**
@@ -38,19 +38,19 @@ const SHORT_ATTR_KINDS = new Map<string, JSXAttributeKind>([
  * @param openingElement - The JSX opening element node
  * @returns The tag name as a string, or "unknown" if type is unrecognized
  */
-export function getJSXTagName(openingElement: T.JSXOpeningElement): string {
-  const name = openingElement.name;
+export function getJSXTagName(openingElement: ts.JsxOpeningElement | ts.JsxSelfClosingElement): string {
+  const name = openingElement.tagName;
 
-  switch (name.type) {
-    case "JSXIdentifier":
-      return name.name;
-    case "JSXMemberExpression":
-      return getJSXMemberExpressionName(name);
-    case "JSXNamespacedName":
-      return `${name.namespace.name}:${name.name.name}`;
-    default:
-      return "unknown";
+  if (ts.isIdentifier(name)) {
+    return name.text;
   }
+  if (ts.isPropertyAccessExpression(name)) {
+    return getJSXMemberExpressionName(name);
+  }
+  if (ts.isJsxNamespacedName(name)) {
+    return `${name.namespace.text}:${name.name.text}`;
+  }
+  return "unknown";
 }
 
 /**
@@ -62,17 +62,17 @@ export function getJSXTagName(openingElement: T.JSXOpeningElement): string {
  * @param node - The JSX member expression node to extract the name from
  * @returns The full dotted name string (e.g., "Foo.Bar.Baz")
  */
-function getJSXMemberExpressionName(node: T.JSXMemberExpression): string {
-  let result = node.property.name;
-  let current: T.JSXTagNameExpression = node.object;
+function getJSXMemberExpressionName(node: ts.PropertyAccessExpression): string {
+  let result = node.name.text;
+  let current: ts.Expression = node.expression;
 
-  while (current.type === "JSXMemberExpression") {
-    result = current.property.name + "." + result;
-    current = current.object;
+  while (ts.isPropertyAccessExpression(current)) {
+    result = current.name.text + "." + result;
+    current = current.expression;
   }
 
-  if (current.type === "JSXIdentifier") {
-    result = current.name + "." + result;
+  if (ts.isIdentifier(current)) {
+    result = current.text + "." + result;
   }
 
   return result;
@@ -92,15 +92,15 @@ function getJSXMemberExpressionName(node: T.JSXMemberExpression): string {
  * getJSXMemberExpressionRootIdentifier(<a.b />) // returns JSXIdentifier "a"
  */
 export function getJSXMemberExpressionRootIdentifier(
-  node: T.JSXMemberExpression,
-): T.JSXIdentifier | null {
-  let current: T.JSXTagNameExpression = node;
+  node: ts.PropertyAccessExpression,
+): ts.Identifier | null {
+  let current: ts.Expression = node;
 
-  while (current.type === "JSXMemberExpression") {
-    current = current.object;
+  while (ts.isPropertyAccessExpression(current)) {
+    current = current.expression;
   }
 
-  if (current.type === "JSXIdentifier") {
+  if (ts.isIdentifier(current)) {
     return current;
   }
 
@@ -121,9 +121,9 @@ export function getJSXMemberExpressionRootIdentifier(
  * getAttributeNamespace(attr) // "use" for use:tooltip
  * getAttributeNamespace(attr) // null for regular attributes like "class"
  */
-export function getAttributeNamespace(attr: T.JSXAttribute): string | null {
-  if (attr.name.type === "JSXNamespacedName") {
-    return attr.name.namespace.name;
+export function getAttributeNamespace(attr: ts.JsxAttribute): string | null {
+  if (ts.isJsxNamespacedName(attr.name)) {
+    return attr.name.namespace.text;
   }
   return null;
 }
@@ -137,12 +137,15 @@ export function getAttributeNamespace(attr: T.JSXAttribute): string | null {
  * @param attr - The JSX attribute node
  * @returns The attribute name, including namespace if present (e.g., "onClick" or "on:click")
  */
-export function getAttributeName(attr: T.JSXAttribute): string {
+export function getAttributeName(attr: ts.JsxAttribute): string {
   const name = attr.name;
-  if (name.type === "JSXIdentifier") {
-    return name.name;
+  if (ts.isIdentifier(name)) {
+    return name.text;
   }
-  return `${name.namespace.name}:${name.name.name}`;
+  if (ts.isJsxNamespacedName(name)) {
+    return `${name.namespace.text}:${name.name.text}`;
+  }
+  return "unknown";
 }
 
 /**
@@ -217,7 +220,7 @@ export function classifyAttribute(name: string): JSXAttributeKind {
  * @param attr - The JSX attribute node
  * @returns The attribute name, including namespace if present
  */
-export function getJSXAttributeName(attr: T.JSXAttribute): string {
+export function getJSXAttributeName(attr: ts.JsxAttribute): string {
   return getAttributeName(attr);
 }
 
@@ -233,17 +236,17 @@ export function getJSXAttributeName(attr: T.JSXAttribute): string {
  * @param value - The attribute value (JSXExpressionContainer, Literal, or null)
  * @returns The expression node, or null if there's no value or empty expression
  */
-export function getJSXAttributeValueExpression(value: T.JSXAttribute["value"]): T.Node | null {
+export function getJSXAttributeValueExpression(value: ts.JsxAttribute["initializer"]): ts.Node | null {
   if (!value) return null;
 
-  if (value.type === "JSXExpressionContainer") {
-    if (value.expression.type === "JSXEmptyExpression") {
+  if (ts.isJsxExpression(value)) {
+    if (!value.expression) {
       return null;
     }
     return value.expression;
   }
 
-  // Literal string value: href="javascript:..."
+  // String literal value: href="javascript:..."
   return value;
 }
 
@@ -253,8 +256,9 @@ export function getJSXAttributeValueExpression(value: T.JSXAttribute["value"]): 
  * @param node - The node to check
  * @returns True if the node is JSXElement or JSXFragment
  */
-export function isJSXElementOrFragment(node: T.Node | null | undefined): boolean {
-  return node?.type === "JSXElement" || node?.type === "JSXFragment";
+export function isJSXElementOrFragment(node: ts.Node | null | undefined): boolean {
+  if (!node) return false;
+  return ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node);
 }
 
 /**
@@ -270,15 +274,16 @@ export function isJSXElementOrFragment(node: T.Node | null | undefined): boolean
  * @returns The function expression node, or null if no function child found
  */
 export function findFunctionChildExpression(
-  children: readonly { kind: string; node: T.Node }[],
-): T.ArrowFunctionExpression | T.FunctionExpression | null {
+  children: readonly { kind: string; node: ts.Node }[],
+): ts.ArrowFunction | ts.FunctionExpression | null {
   for (let i = 0, len = children.length; i < len; i++) {
     const child = children[i];
     if (!child) continue;
     if (child.kind !== "expression") continue;
-    if (child.node.type !== "JSXExpressionContainer") continue;
+    if (!ts.isJsxExpression(child.node)) continue;
     const expr = child.node.expression;
-    if (expr.type === "ArrowFunctionExpression" || expr.type === "FunctionExpression") {
+    if (!expr) continue;
+    if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
       return expr;
     }
   }

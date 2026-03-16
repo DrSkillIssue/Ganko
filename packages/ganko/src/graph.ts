@@ -1,3 +1,4 @@
+import type ts from "typescript"
 import type { Diagnostic } from "./diagnostic"
 import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"
 
@@ -69,5 +70,5 @@ export interface Plugin<K extends string> {
   readonly kind: K
   readonly extensions: readonly string[]
   /** Analyze files and emit diagnostics via callback */
-  analyze(files: readonly string[], emit: Emit): void
+  analyze(files: readonly string[], emit: Emit, context?: { program: ts.Program }): void
 }

@@ -2,7 +2,7 @@
  * Flags [...iterable].sort().map().join() pipelines.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getCallsByMethodName, getMethodChain } from "../../queries"
@@ -51,6 +51,7 @@ export const avoidSpreadSortMapJoinPipeline = defineSolidRule({
         createDiagnostic(
           graph.file,
           join.node,
+          graph.sourceFile,
           "avoid-spread-sort-map-join-pipeline",
           "spreadSortMapJoin",
           messages.spreadSortMapJoin,
@@ -61,9 +62,9 @@ export const avoidSpreadSortMapJoinPipeline = defineSolidRule({
   },
 })
 
-function isSingleSpreadArray(root: T.Node | null): boolean {
-  if (!root || root.type !== "ArrayExpression") return false
+function isSingleSpreadArray(root: ts.Node | null): boolean {
+  if (!root || !ts.isArrayLiteralExpression(root)) return false
   if (root.elements.length !== 1) return false
   const first = root.elements[0]
-  return first?.type === "SpreadElement"
+  return first !== undefined && ts.isSpreadElement(first)
 }

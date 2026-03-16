@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import ts from "typescript";
 import { buildGraph } from "./test-utils";
 import { getNodeAtPosition, getNodeAtPositionInFile } from "../../src/solid/queries/get";
 
@@ -9,9 +10,9 @@ describe("getNodeAtPosition", () => {
     //            col: 6 = 'f'
     const graph = buildGraph(code);
     // Only Expression nodes are indexed - 'foo' is in VariableDeclarator, not indexed
-    // The Literal '1' at col 12 is indexed
+    // The NumericLiteral '1' at col 12 is indexed
     const node = getNodeAtPosition(graph, 1, 12);
-    expect(node?.type).toBe("Literal");
+    expect(node?.kind).toBe(ts.SyntaxKind.NumericLiteral);
   });
 
   it("returns smallest enclosing node for nested expressions", () => {
@@ -21,16 +22,16 @@ describe("getNodeAtPosition", () => {
     const graph = buildGraph(code);
 
     // Position on 'fn' should return Identifier 'fn'
-    expect(getNodeAtPosition(graph, 1, 0)?.type).toBe("Identifier");
+    expect(getNodeAtPosition(graph, 1, 0)?.kind).toBe(ts.SyntaxKind.Identifier);
 
-    // Position on 'a' should return Identifier 'a' (object of MemberExpression, visited)
-    expect(getNodeAtPosition(graph, 1, 3)?.type).toBe("Identifier");
+    // Position on 'a' should return Identifier 'a' (object of PropertyAccessExpression, visited)
+    expect(getNodeAtPosition(graph, 1, 3)?.kind).toBe(ts.SyntaxKind.Identifier);
 
-    // Position on '.' should return MemberExpression (dot is part of MemberExpression)
-    expect(getNodeAtPosition(graph, 1, 4)?.type).toBe("MemberExpression");
+    // Position on '.' should return PropertyAccessExpression (dot is part of PropertyAccessExpression)
+    expect(getNodeAtPosition(graph, 1, 4)?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
 
-    // Position on 'b' returns MemberExpression (non-computed property is NOT visited separately)
-    expect(getNodeAtPosition(graph, 1, 5)?.type).toBe("MemberExpression");
+    // Position on 'b' returns PropertyAccessExpression (non-computed property is NOT visited separately)
+    expect(getNodeAtPosition(graph, 1, 5)?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
   });
 
   it("returns null for position outside file bounds", () => {
@@ -53,9 +54,9 @@ describe("getNodeAtPosition", () => {
     const nodeB = getNodeAtPosition(graph, 2, 0);
     const nodeC = getNodeAtPosition(graph, 3, 0);
 
-    expect(nodeA?.type).toBe("Identifier");
-    expect(nodeB?.type).toBe("Identifier");
-    expect(nodeC?.type).toBe("Identifier");
+    expect(nodeA?.kind).toBe(ts.SyntaxKind.Identifier);
+    expect(nodeB?.kind).toBe(ts.SyntaxKind.Identifier);
+    expect(nodeC?.kind).toBe(ts.SyntaxKind.Identifier);
   });
 
   it("returns null for whitespace positions not covered by expression nodes", () => {
@@ -65,7 +66,7 @@ describe("getNodeAtPosition", () => {
     const graph = buildGraph(code);
 
     // Position on 'x' returns Identifier
-    expect(getNodeAtPosition(graph, 1, 2)?.type).toBe("Identifier");
+    expect(getNodeAtPosition(graph, 1, 2)?.kind).toBe(ts.SyntaxKind.Identifier);
 
     // Whitespace positions not covered by any indexed Expression
     expect(getNodeAtPosition(graph, 1, 1)).toBeNull();
@@ -82,21 +83,21 @@ describe("getNodeAtPosition", () => {
     //            0123456789...
     const graph = buildGraph(code);
 
-    // JSXElement is indexed as an Expression
-    // Position on 'd' (col 1) is inside JSXOpeningElement which is part of JSXElement
+    // JsxElement is indexed as an Expression
+    // Position on '<' (col 0) is inside JsxOpeningElement which is part of JsxElement
     const node = getNodeAtPosition(graph, 1, 0);
-    expect(node?.type).toBe("JSXElement");
+    expect(node?.kind).toBe(ts.SyntaxKind.JsxElement);
   });
 
   it("handles unicode characters", () => {
-    const code = "const x = 变量";
+    const code = "const x = \u53D8\u91CF";
     //            0123456789...
-    // '变量' starts at col 10
+    // '\u53D8\u91CF' starts at col 10
     const graph = buildGraph(code);
 
     // The identifier is an Expression
     const node = getNodeAtPosition(graph, 1, 10);
-    expect(node?.type).toBe("Identifier");
+    expect(node?.kind).toBe(ts.SyntaxKind.Identifier);
   });
 
   it("getNodeAtPositionInFile returns null for wrong path", () => {
@@ -109,10 +110,10 @@ describe("getNodeAtPosition", () => {
     const graph = buildGraph(code);
 
     // Position on 'foo' returns Identifier
-    expect(getNodeAtPosition(graph, 1, 0)?.type).toBe("Identifier");
+    expect(getNodeAtPosition(graph, 1, 0)?.kind).toBe(ts.SyntaxKind.Identifier);
 
     // Position on '(' returns CallExpression
-    expect(getNodeAtPosition(graph, 1, 3)?.type).toBe("CallExpression");
+    expect(getNodeAtPosition(graph, 1, 3)?.kind).toBe(ts.SyntaxKind.CallExpression);
   });
 
   describe("real-world Solid.js patterns", () => {
@@ -136,31 +137,31 @@ describe("getNodeAtPosition", () => {
 
       // Line 2: createSignal call - 'createSignal' starts at col 28
       const createSignalNode = getNodeAtPosition(graph, 2, 28);
-      expect(createSignalNode?.type).toBe("Identifier");
+      expect(createSignalNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(createSignalNode?.name).toBe("createSignal");
 
       // Line 2: literal 0 at col 41
       const zeroLiteral = getNodeAtPosition(graph, 2, 41);
-      expect(zeroLiteral?.type).toBe("Literal");
+      expect(zeroLiteral?.kind).toBe(ts.SyntaxKind.NumericLiteral);
 
       // Line 3: createEffect identifier at col 2
       const createEffectNode = getNodeAtPosition(graph, 3, 2);
-      expect(createEffectNode?.type).toBe("Identifier");
+      expect(createEffectNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(createEffectNode?.name).toBe("createEffect");
 
       // Line 4: console.log - 'console' at col 4
       const consoleNode = getNodeAtPosition(graph, 4, 4);
-      expect(consoleNode?.type).toBe("Identifier");
+      expect(consoleNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(consoleNode?.name).toBe("console");
 
       // Line 4: count() call - 'count' at col 26
       const countNode = getNodeAtPosition(graph, 4, 26);
-      expect(countNode?.type).toBe("Identifier");
+      expect(countNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(countNode?.name).toBe("count");
 
-      // Line 6: JSXElement at col 9 (the '<' of <button>)
+      // Line 6: JsxElement at col 9 (the '<' of <button>)
       const jsxNode = getNodeAtPosition(graph, 6, 9);
-      expect(jsxNode?.type).toBe("JSXElement");
+      expect(jsxNode?.kind).toBe(ts.SyntaxKind.JsxElement);
     });
 
     it("JSX with event handlers and dynamic expressions", () => {
@@ -185,37 +186,37 @@ describe("getNodeAtPosition", () => {
       // Line 7:   <Show when={visible()}>
       const graph = buildGraph(code);
 
-      // Line 2: MemberExpression styles.container - 'styles' at col 9
+      // Line 2: PropertyAccessExpression styles.container - 'styles' at col 9
       const stylesNode = getNodeAtPosition(graph, 2, 9);
-      expect(stylesNode?.type).toBe("Identifier");
+      expect(stylesNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(stylesNode?.name).toBe("styles");
 
-      // Line 3: Arrow function param 'e' at col 12 - params are part of ArrowFunctionExpression
+      // Line 3: Arrow function param 'e' at col 12 - params are part of ArrowFunction
       const paramE = getNodeAtPosition(graph, 3, 12);
-      expect(paramE?.type).toBe("ArrowFunctionExpression");
+      expect(paramE?.kind).toBe(ts.SyntaxKind.ArrowFunction);
 
       // Line 3: handleClick identifier at col 18
       const handleClickNode = getNodeAtPosition(graph, 3, 18);
-      expect(handleClickNode?.type).toBe("Identifier");
+      expect(handleClickNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(handleClickNode?.name).toBe("handleClick");
 
       // Line 4: isActive call - 'isActive' at col 15
       const isActiveNode = getNodeAtPosition(graph, 4, 15);
-      expect(isActiveNode?.type).toBe("Identifier");
+      expect(isActiveNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(isActiveNode?.name).toBe("isActive");
 
       // Line 6: message() call inside JSX - 'message' at col 9
       const messageNode = getNodeAtPosition(graph, 6, 9);
-      expect(messageNode?.type).toBe("Identifier");
+      expect(messageNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(messageNode?.name).toBe("message");
 
       // Line 7: Show component - entire element at col 2
       const showElement = getNodeAtPosition(graph, 7, 2);
-      expect(showElement?.type).toBe("JSXElement");
+      expect(showElement?.kind).toBe(ts.SyntaxKind.JsxElement);
 
       // Line 7: visible() call at col 14
       const visibleNode = getNodeAtPosition(graph, 7, 14);
-      expect(visibleNode?.type).toBe("Identifier");
+      expect(visibleNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(visibleNode?.name).toBe("visible");
     });
 
@@ -240,30 +241,30 @@ describe("getNodeAtPosition", () => {
 
       // Line 1: createMemo at col 0
       const createMemoNode = getNodeAtPosition(graph, 1, 0);
-      expect(createMemoNode?.type).toBe("Identifier");
+      expect(createMemoNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(createMemoNode?.name).toBe("createMemo");
 
       // Line 2: items identifier at col 2
       const itemsNode = getNodeAtPosition(graph, 2, 2);
-      expect(itemsNode?.type).toBe("Identifier");
+      expect(itemsNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(itemsNode?.name).toBe("items");
 
-      // Line 3: filter is part of MemberExpression at col 5
+      // Line 3: filter is part of PropertyAccessExpression at col 5
       const filterMember = getNodeAtPosition(graph, 3, 5);
-      expect(filterMember?.type).toBe("MemberExpression");
+      expect(filterMember?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
 
-      // Line 3: item param at col 13 - params are part of ArrowFunctionExpression
+      // Line 3: item param at col 13 - params are part of ArrowFunction
       const itemParam = getNodeAtPosition(graph, 3, 13);
-      expect(itemParam?.type).toBe("ArrowFunctionExpression");
+      expect(itemParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
 
       // Line 5: item.id - 'item' at col 10
       const itemIdObj = getNodeAtPosition(graph, 5, 10);
-      expect(itemIdObj?.type).toBe("Identifier");
+      expect(itemIdObj?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(itemIdObj?.name).toBe("item");
 
       // Line 6: transform call - 'transform' at col 13
       const transformNode = getNodeAtPosition(graph, 6, 13);
-      expect(transformNode?.type).toBe("Identifier");
+      expect(transformNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(transformNode?.name).toBe("transform");
     });
 
@@ -291,29 +292,29 @@ describe("getNodeAtPosition", () => {
 
       // Line 2: string literal at col 10
       const apiUrlString = getNodeAtPosition(graph, 2, 10);
-      expect(apiUrlString?.type).toBe("Literal");
+      expect(apiUrlString?.kind).toBe(ts.SyntaxKind.StringLiteral);
 
       // Line 3: number 5000 at col 11
       const timeoutNum = getNodeAtPosition(graph, 3, 11);
-      expect(timeoutNum?.type).toBe("Literal");
+      expect(timeoutNum?.kind).toBe(ts.SyntaxKind.NumericLiteral);
 
       // Line 5: contentType() call - 'contentType' at col 20
       const contentTypeNode = getNodeAtPosition(graph, 5, 20);
-      expect(contentTypeNode?.type).toBe("Identifier");
+      expect(contentTypeNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(contentTypeNode?.name).toBe("contentType");
 
       // Line 6: getAuthHeader() call at col 19
       const getAuthNode = getNodeAtPosition(graph, 6, 19);
-      expect(getAuthNode?.type).toBe("Identifier");
+      expect(getAuthNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(getAuthNode?.name).toBe("getAuthHeader");
 
-      // Line 8: data param at col 14 - params are part of ArrowFunctionExpression
+      // Line 8: data param at col 14 - params are part of ArrowFunction
       const dataParam = getNodeAtPosition(graph, 8, 14);
-      expect(dataParam?.type).toBe("ArrowFunctionExpression");
+      expect(dataParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
 
-      // Line 8: data.result MemberExpression - 'data' at col 23
+      // Line 8: data.result PropertyAccessExpression - 'data' at col 23
       const dataObj = getNodeAtPosition(graph, 8, 23);
-      expect(dataObj?.type).toBe("Identifier");
+      expect(dataObj?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(dataObj?.name).toBe("data");
     });
 
@@ -336,32 +337,32 @@ Status: \${
       // Line 7: }`;
       const graph = buildGraph(code);
 
-      // Line 1: TemplateLiteral at col 17
+      // Line 1: TemplateExpression at col 17
       const templateNode = getNodeAtPosition(graph, 1, 17);
-      expect(templateNode?.type).toBe("TemplateLiteral");
+      expect(templateNode?.kind).toBe(ts.SyntaxKind.TemplateExpression);
 
       // Line 1: name() call inside template - 'name' at col 27
       const nameNode = getNodeAtPosition(graph, 1, 27);
-      expect(nameNode?.type).toBe("Identifier");
+      expect(nameNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(nameNode?.name).toBe("name");
 
       // Line 2: score() call - 'score' at col 17
       const scoreNode = getNodeAtPosition(graph, 2, 17);
-      expect(scoreNode?.type).toBe("Identifier");
+      expect(scoreNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(scoreNode?.name).toBe("score");
 
       // Line 2: number 10 at col 28
       const tenLiteral = getNodeAtPosition(graph, 2, 28);
-      expect(tenLiteral?.type).toBe("Literal");
+      expect(tenLiteral?.kind).toBe(ts.SyntaxKind.NumericLiteral);
 
       // Line 4: isAdmin() call - 'isAdmin' at col 2
       const isAdminNode = getNodeAtPosition(graph, 4, 2);
-      expect(isAdminNode?.type).toBe("Identifier");
+      expect(isAdminNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(isAdminNode?.name).toBe("isAdmin");
 
       // Line 5: "Administrator" string at col 6
       const adminString = getNodeAtPosition(graph, 5, 6);
-      expect(adminString?.type).toBe("Literal");
+      expect(adminString?.kind).toBe(ts.SyntaxKind.StringLiteral);
     });
 
     it("complex component with stores and derived state", () => {
@@ -395,40 +396,40 @@ Status: \${
 
       // Line 2: createStore at col 28
       const createStoreNode = getNodeAtPosition(graph, 2, 28);
-      expect(createStoreNode?.type).toBe("Identifier");
+      expect(createStoreNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(createStoreNode?.name).toBe("createStore");
 
       // Line 3: createMemo at col 20
       const createMemoNode = getNodeAtPosition(graph, 3, 20);
-      expect(createMemoNode?.type).toBe("Identifier");
+      expect(createMemoNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(createMemoNode?.name).toBe("createMemo");
 
       // Line 4: todos.filter - 'todos' at col 4
       const todosNode = getNodeAtPosition(graph, 4, 4);
-      expect(todosNode?.type).toBe("Identifier");
+      expect(todosNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(todosNode?.name).toBe("todos");
 
       // Line 6: completed() call - 'completed' at col 42
       const completedNode = getNodeAtPosition(graph, 6, 42);
-      expect(completedNode?.type).toBe("Identifier");
+      expect(completedNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(completedNode?.name).toBe("completed");
 
       // Line 9: For element at col 4
       const forElement = getNodeAtPosition(graph, 9, 4);
-      expect(forElement?.type).toBe("JSXElement");
+      expect(forElement?.kind).toBe(ts.SyntaxKind.JsxElement);
 
       // Line 9: todos in JSX attr at col 15
       const todosAttr = getNodeAtPosition(graph, 9, 15);
-      expect(todosAttr?.type).toBe("Identifier");
+      expect(todosAttr?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(todosAttr?.name).toBe("todos");
 
-      // Line 10: arrow function param 'todo' at col 8 - params are part of ArrowFunctionExpression
+      // Line 10: arrow function param 'todo' at col 8 - params are part of ArrowFunction
       const todoParam = getNodeAtPosition(graph, 10, 8);
-      expect(todoParam?.type).toBe("ArrowFunctionExpression");
+      expect(todoParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
 
       // Line 11: conditional expression - todo.done at col 19
       const todoDoneObj = getNodeAtPosition(graph, 11, 19);
-      expect(todoDoneObj?.type).toBe("Identifier");
+      expect(todoDoneObj?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(todoDoneObj?.name).toBe("todo");
     });
   });

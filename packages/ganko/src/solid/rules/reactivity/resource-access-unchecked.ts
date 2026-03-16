@@ -29,7 +29,7 @@
  * Or use `<Suspense>` boundaries to handle async properly.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { VariableEntity, ScopeEntity, JSXElementEntity } from "../../entities";
 import { defineSolidRule } from "../../rule";
@@ -193,7 +193,7 @@ function buildShowGuardedResources(
  * @returns Set of resource names found in the condition
  */
 function extractGuardedResourceNames(
-  node: T.Node,
+  node: ts.Node,
   resourceNames: Set<string>,
 ): Set<string> {
   const result = new Set<string>();
@@ -213,55 +213,40 @@ function extractGuardedResourceNames(
  * @param result - Set to add found resource names to (mutated)
  */
 function extractResourceNamesFromCondition(
-  node: T.Node,
+  node: ts.Node,
   resourceNames: Set<string>,
   result: Set<string>,
 ): void {
-  switch (node.type) {
-    // resource.loading, resource.error
-    case "MemberExpression": {
-      const obj = node.object;
-      if (obj.type === "Identifier" && resourceNames.has(obj.name)) {
-        if (!node.computed && node.property.type === "Identifier") {
-          const propName = node.property.name;
-          if (propName === "loading" || propName === "error") {
-            result.add(obj.name);
-          }
+  // resource.loading, resource.error
+  if (ts.isPropertyAccessExpression(node)) {
+    const obj = node.expression;
+    if (ts.isIdentifier(obj) && resourceNames.has(obj.text)) {
+      if (ts.isIdentifier(node.name)) {
+        const propName = node.name.text;
+        if (propName === "loading" || propName === "error") {
+          result.add(obj.text);
         }
       }
-      break;
     }
-
-    // !resource.loading, !resource.error, !resource()
-    case "UnaryExpression":
-      if (node.operator === "!") {
-        extractResourceNamesFromCondition(node.argument, resourceNames, result);
-      }
-      break;
-
-    // resource.loading && !resource.error
-    case "LogicalExpression":
-      extractResourceNamesFromCondition(node.left, resourceNames, result);
-      extractResourceNamesFromCondition(node.right, resourceNames, result);
-      break;
-
-    // resource.loading === false
-    case "BinaryExpression":
-      extractResourceNamesFromCondition(node.left, resourceNames, result);
-      extractResourceNamesFromCondition(node.right, resourceNames, result);
-      break;
-
-    // resource() - truthy check
-    case "CallExpression":
-      if (node.callee.type === "Identifier" && resourceNames.has(node.callee.name)) {
-        result.add(node.callee.name);
-      }
-      break;
-
-    // resource()?.prop - optional chaining
-    case "ChainExpression":
-      extractResourceNamesFromCondition(node.expression, resourceNames, result);
-      break;
+  }
+  // !resource.loading, !resource.error, !resource()
+  else if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
+    extractResourceNamesFromCondition(node.operand, resourceNames, result);
+  }
+  // resource.loading && !resource.error (LogicalExpression → BinaryExpression in TS)
+  else if (ts.isBinaryExpression(node)) {
+    extractResourceNamesFromCondition(node.left, resourceNames, result);
+    extractResourceNamesFromCondition(node.right, resourceNames, result);
+  }
+  // resource() - truthy check
+  else if (ts.isCallExpression(node)) {
+    if (ts.isIdentifier(node.expression) && resourceNames.has(node.expression.text)) {
+      result.add(node.expression.text);
+    }
+  }
+  // resource()?.prop - optional chaining (TS doesn't have ChainExpression; optional chaining is on the node itself)
+  else if (ts.isNonNullExpression(node)) {
+    extractResourceNamesFromCondition(node.expression, resourceNames, result);
   }
 }
 
@@ -279,7 +264,7 @@ function extractResourceNamesFromCondition(
  */
 function isInsideShowGuard(
   graph: SolidGraph,
-  readNode: T.Node,
+  readNode: ts.Node,
   resourceName: string,
   showGuards: Map<JSXElementEntity, Set<string>>,
 ): boolean {
@@ -313,45 +298,40 @@ function isInsideShowGuard(
  * @param readNode - The AST node of the resource variable read
  * @returns True if this is an unsafe resource data access
  */
-function isUncheckedResourceCall(readNode: T.Node): boolean {
+function isUncheckedResourceCall(readNode: ts.Node): boolean {
   const parent = readNode.parent;
   if (!parent) return false;
 
   // resource() - calling the accessor
-  if (parent.type === "CallExpression" && parent.callee === readNode) {
+  if (ts.isCallExpression(parent) && parent.expression === readNode) {
     // Check if this is just a truthy check (no property access after)
     const grandparent = parent.parent;
 
     // resource() in a Show when condition is not an error
-    if (grandparent?.type === "JSXExpressionContainer") {
+    if (grandparent && ts.isJsxExpression(grandparent)) {
       const greatGrandparent = grandparent.parent;
-      if (greatGrandparent?.type === "JSXAttribute") {
+      if (greatGrandparent && ts.isJsxAttribute(greatGrandparent)) {
         return false; // Allow in JSX attribute expressions
       }
     }
 
-    // resource() with optional chaining is safe
-    if (grandparent?.type === "ChainExpression") {
-      return false;
-    }
-
     // resource()! - non-null assertion indicates developer awareness
-    if (grandparent?.type === "TSNonNullExpression") {
+    if (grandparent && ts.isNonNullExpression(grandparent)) {
       return false;
     }
 
     // resource()?.prop - optional chaining is safe
-    if (grandparent?.type === "MemberExpression" && grandparent.optional) {
+    if (grandparent && ts.isPropertyAccessExpression(grandparent) && grandparent.questionDotToken) {
       return false;
     }
 
     // resource().prop - direct property access without check is unsafe
-    if (grandparent?.type === "MemberExpression" && !grandparent.optional) {
+    if (grandparent && ts.isPropertyAccessExpression(grandparent) && !grandparent.questionDotToken) {
       return true;
     }
 
     // resource()[index] - array access is unsafe without check
-    if (grandparent?.type === "MemberExpression" && grandparent.computed) {
+    if (grandparent && ts.isElementAccessExpression(grandparent)) {
       return true;
     }
 
@@ -359,9 +339,9 @@ function isUncheckedResourceCall(readNode: T.Node): boolean {
   }
 
   // resource.loading, resource.error - accessing metadata is fine
-  if (parent.type === "MemberExpression" && parent.object === readNode) {
-    if (!parent.computed && parent.property.type === "Identifier") {
-      const propName = parent.property.name;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === readNode) {
+    if (ts.isIdentifier(parent.name)) {
+      const propName = parent.name.text;
 
       if (RESOURCE_METADATA_PROPS.has(propName)) {
         return false;
@@ -378,7 +358,7 @@ function isUncheckedResourceCall(readNode: T.Node): boolean {
  * Structure: Map<BlockNode, Map<resourceName, guardEndPosition>>
  * If a read's position is after guardEndPosition, it's guarded.
  */
-type BlockGuardCache = Map<T.Node, Map<string, number>>;
+type BlockGuardCache = Map<ts.Node, Map<string, number>>;
 
 /**
  * Build a cache of guard positions for resource variables.
@@ -438,30 +418,30 @@ function buildBlockGuardCache(
  * @returns Object with block and guard end position, or null if not a guard
  */
 function findGuardPatternFromRead(
-  readNode: T.Node,
-): { block: T.Node; guardEndPosition: number } | null {
+  readNode: ts.Node,
+): { block: ts.Node; guardEndPosition: number } | null {
   // Check if this is a resource.loading or resource.error access
   const parent = readNode.parent;
-  if (parent?.type !== "MemberExpression" || parent.object !== readNode) {
+  if (!parent || !ts.isPropertyAccessExpression(parent) || parent.expression !== readNode) {
     return null;
   }
 
-  if (parent.computed || parent.property.type !== "Identifier") {
+  if (!ts.isIdentifier(parent.name)) {
     return null;
   }
 
-  const propName = parent.property.name;
+  const propName = parent.name.text;
   if (propName !== "loading" && propName !== "error") {
     return null;
   }
 
-  let current: T.Node | undefined = parent;
-  let ifStatement: T.IfStatement | null = null;
+  let current: ts.Node | undefined = parent;
+  let ifStatement: ts.IfStatement | null = null;
 
   while (current) {
-    if (current.type === "IfStatement") {
+    if (ts.isIfStatement(current)) {
       // Check if we were in the test (condition) part
-      if (isDescendantOf(parent, current.test)) {
+      if (isDescendantOf(parent, current.expression)) {
         ifStatement = current;
       }
       break;
@@ -471,12 +451,12 @@ function findGuardPatternFromRead(
 
   if (!ifStatement) return null;
 
-  if (!hasEarlyExit(ifStatement.consequent)) {
+  if (!hasEarlyExit(ifStatement.thenStatement)) {
     return null;
   }
 
-  let block: T.Node | undefined = ifStatement.parent;
-  while (block && block.type !== "BlockStatement" && block.type !== "Program") {
+  let block: ts.Node | undefined = ifStatement.parent;
+  while (block && !ts.isBlock(block) && !ts.isSourceFile(block)) {
     block = block.parent;
   }
 
@@ -484,7 +464,7 @@ function findGuardPatternFromRead(
 
   return {
     block,
-    guardEndPosition: ifStatement.range?.[1] ?? 0,
+    guardEndPosition: ifStatement.end,
   };
 }
 
@@ -497,8 +477,8 @@ function findGuardPatternFromRead(
  * @param ancestor - The potential ancestor node
  * @returns True if child is a descendant of ancestor
  */
-function isDescendantOf(child: T.Node, ancestor: T.Node): boolean {
-  let current: T.Node | undefined = child;
+function isDescendantOf(child: ts.Node, ancestor: ts.Node): boolean {
+  let current: ts.Node | undefined = child;
   while (current) {
     if (current === ancestor) return true;
     current = current.parent;
@@ -518,14 +498,14 @@ function isDescendantOf(child: T.Node, ancestor: T.Node): boolean {
  * @returns True if there's a guard check before this read
  */
 function hasLoadingErrorCheckBefore(
-  readNode: T.Node,
+  readNode: ts.Node,
   resourceName: string,
   guardCache: BlockGuardCache,
 ): boolean {
 
-  let block: T.Node | undefined = readNode.parent;
-  while (block && block.type !== "BlockStatement" && block.type !== "Program") {
-    if (block.type === "ArrowFunctionExpression" && block.body.type !== "BlockStatement") {
+  let block: ts.Node | undefined = readNode.parent;
+  while (block && !ts.isBlock(block) && !ts.isSourceFile(block)) {
+    if (ts.isArrowFunction(block) && !ts.isBlock(block.body)) {
       // Arrow function with expression body - no statements to check
       return false;
     }
@@ -541,7 +521,7 @@ function hasLoadingErrorCheckBefore(
   const guardEndPosition = blockMap.get(resourceName);
   if (guardEndPosition === undefined) return false;
 
-  const readPosition = readNode.range?.[0] ?? 0;
+  const readPosition = readNode.pos;
   return readPosition > guardEndPosition;
 }
 
@@ -554,12 +534,12 @@ function hasLoadingErrorCheckBefore(
  * @param node - The statement to check
  * @returns True if the statement contains a return or throw
  */
-function hasEarlyExit(node: T.Statement): boolean {
-  if (node.type === "ReturnStatement" || node.type === "ThrowStatement") {
+function hasEarlyExit(node: ts.Statement): boolean {
+  if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
     return true;
   }
-  if (node.type === "BlockStatement") {
-    const body = node.body;
+  if (ts.isBlock(node)) {
+    const body = node.statements;
     for (let i = 0, len = body.length; i < len; i++) {
       const stmt = body[i];
       if (!stmt) continue;
@@ -632,12 +612,13 @@ export const resourceAccessUnchecked = defineSolidRule({
 
         // Report on the call expression, not just the identifier
         const parent = readNode.parent;
-        const reportNode = parent?.type === "CallExpression" ? parent : readNode;
+        const reportNode = parent && ts.isCallExpression(parent) ? parent : readNode;
 
         emit(
           createDiagnostic(
             graph.file,
             reportNode,
+            graph.sourceFile,
             "resource-access-unchecked",
             "resourceUnchecked",
             resolveMessage(messages.resourceUnchecked, { name }),

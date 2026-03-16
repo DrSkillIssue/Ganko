@@ -29,7 +29,7 @@
  * ```
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic } from "../../../diagnostic";
 import type { FunctionEntity } from "../../entities/function";
@@ -121,7 +121,7 @@ export const inlineComponent = defineSolidRule({
       const reportNode = getReportNode(fn);
       const message = messages.inlineComponent.replace("{{name}}", componentName);
       emit(
-        createDiagnostic(graph.file, reportNode, "inline-component", "inlineComponent", message, "error"),
+        createDiagnostic(graph.file, reportNode, graph.sourceFile, "inline-component", "inlineComponent", message, "error"),
       );
     }
   },
@@ -138,30 +138,30 @@ export const inlineComponent = defineSolidRule({
  * @param node - The function node to check
  * @returns True if the node is a render prop, false otherwise
  */
-function isRenderProp(node: T.Node): boolean {
+function isRenderProp(node: ts.Node): boolean {
   const parent = node.parent;
   if (!parent) {
     return false;
   }
 
-  if (parent.type === "JSXExpressionContainer") {
+  if (ts.isJsxExpression(parent)) {
     const grandparent = parent.parent;
 
     // Child expression: <Component>{() => <div />}</Component>
-    if (grandparent?.type === "JSXElement" || grandparent?.type === "JSXFragment") {
+    if (grandparent && (ts.isJsxElement(grandparent) || ts.isJsxSelfClosingElement(grandparent) || ts.isJsxFragment(grandparent))) {
       return true;
     }
 
     // Attribute value: <Component render={() => <div />} />
-    if (grandparent?.type === "JSXAttribute") {
+    if (grandparent && ts.isJsxAttribute(grandparent)) {
       return true;
     }
   }
 
   // e.g., createComponent(Component, { render: () => <div /> })
-  if (parent.type === "Property" && parent.parent?.type === "ObjectExpression") {
+  if (ts.isPropertyAssignment(parent) && parent.parent && ts.isObjectLiteralExpression(parent.parent)) {
     const objParent = parent.parent.parent;
-    if (objParent?.type === "CallExpression") {
+    if (objParent && ts.isCallExpression(objParent)) {
       return true;
     }
   }
@@ -178,16 +178,16 @@ function isRenderProp(node: T.Node): boolean {
  * @param fn - The function entity to get the report node for
  * @returns The AST node to attach the error diagnostic to
  */
-function getReportNode(fn: FunctionEntity): T.Node {
+function getReportNode(fn: FunctionEntity): ts.Node {
   const node = fn.node;
   const parent = node.parent;
 
-  if (parent?.type === "VariableDeclarator") {
+  if (parent && ts.isVariableDeclaration(parent)) {
     return parent;
   }
 
-  if (node.type === "FunctionDeclaration" && node.id) {
-    return node.id;
+  if (ts.isFunctionDeclaration(node) && node.name) {
+    return node.name;
   }
 
   return node;

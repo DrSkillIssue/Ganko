@@ -4,7 +4,7 @@
  * Suggests grouping by key first.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -22,36 +22,35 @@ const options = {}
  * Extracts the index variable name from a for-loop's init clause.
  * Recognizes: for (let i = 0; ...)
  */
-function forLoopIndex(node: T.ForStatement): string | null {
-  const init = node.init
+function forLoopIndex(node: ts.ForStatement): string | null {
+  const init = node.initializer
   if (!init) return null
-  if (init.type !== "VariableDeclaration") return null
+  if (!ts.isVariableDeclarationList(init)) return null
   if (init.declarations.length !== 1) return null
   const decl = init.declarations[0]
   if (!decl) return null
-  if (decl.id.type !== "Identifier") return null
-  return decl.id.name
+  if (!ts.isIdentifier(decl.name)) return null
+  return decl.name.text
 }
 
 /**
  * Checks if a for-loop's test bounds against the outer's index variable
  * (j < i pattern) or the same collection's .length.
  */
-function boundsAgainst(inner: T.ForStatement, outerIndex: string, collection: string): boolean {
-  const test = inner.test
+function boundsAgainst(inner: ts.ForStatement, outerIndex: string, collection: string): boolean {
+  const test = inner.condition
   if (!test) return false
-  if (test.type !== "BinaryExpression") return false
-  if (test.operator !== "<" && test.operator !== "<=") return false
+  if (!ts.isBinaryExpression(test)) return false
+  if (test.operatorToken.kind !== ts.SyntaxKind.LessThanToken && test.operatorToken.kind !== ts.SyntaxKind.LessThanEqualsToken) return false
 
   const right = test.right
-  if (right.type === "Identifier" && right.name === outerIndex) return true
+  if (ts.isIdentifier(right) && right.text === outerIndex) return true
 
   if (
-    right.type === "MemberExpression" &&
-    right.property.type === "Identifier" &&
-    right.property.name === "length" &&
-    right.object.type === "Identifier" &&
-    right.object.name === collection
+    ts.isPropertyAccessExpression(right) &&
+    right.name.text === "length" &&
+    ts.isIdentifier(right.expression) &&
+    right.expression.text === collection
   ) {
     return true
   }
@@ -60,10 +59,10 @@ function boundsAgainst(inner: T.ForStatement, outerIndex: string, collection: st
 }
 
 interface IndexedRead {
-  readonly forLoop: T.ForStatement
+  readonly forLoop: ts.ForStatement
   readonly indexName: string
-  readonly readNode: T.MemberExpression
-  readonly comparison: T.BinaryExpression
+  readonly readNode: ts.ElementAccessExpression
+  readonly comparison: ts.BinaryExpression
   readonly functionId: number
   readonly isInConditional: boolean
 }
@@ -94,14 +93,14 @@ export const avoidQuadraticPairComparison = defineSolidRule({
         const readNode = asIndexedRead(read.node)
         if (!readNode) continue
 
-        const index = readNode.property
-        if (index.type !== "Identifier") continue
+        const index = readNode.argumentExpression
+        if (!ts.isIdentifier(index)) continue
 
         const forLoop = loopForIndexReference(graph, index)
         if (!forLoop) continue
 
         const loopIndex = forLoopIndex(forLoop)
-        if (!loopIndex || loopIndex !== index.name) continue
+        if (!loopIndex || loopIndex !== index.text) continue
 
         const comparison = comparisonForIndexedRead(readNode)
         if (!comparison) continue
@@ -109,7 +108,7 @@ export const avoidQuadraticPairComparison = defineSolidRule({
         const fn = getContainingFunction(graph, forLoop)
         indexed.push({
           forLoop,
-          indexName: index.name,
+          indexName: index.text,
           readNode,
           comparison,
           functionId: fn?.id ?? -1,
@@ -132,10 +131,15 @@ export const avoidQuadraticPairComparison = defineSolidRule({
           let outer: IndexedRead
           let inner: IndexedRead
 
-          if (isRangeInside(rb.forLoop.range, ra.forLoop.range)) {
+          const raStart = ra.forLoop.getStart()
+          const raEnd = ra.forLoop.end
+          const rbStart = rb.forLoop.getStart()
+          const rbEnd = rb.forLoop.end
+
+          if (rbStart >= raStart && rbEnd <= raEnd) {
             outer = ra
             inner = rb
-          } else if (isRangeInside(ra.forLoop.range, rb.forLoop.range)) {
+          } else if (raStart >= rbStart && raEnd <= rbEnd) {
             outer = rb
             inner = ra
           } else {
@@ -146,7 +150,9 @@ export const avoidQuadraticPairComparison = defineSolidRule({
           if (!outer.isInConditional || !inner.isInConditional) continue
           if (outer.comparison !== inner.comparison) continue
 
-          const key = `${outer.forLoop.range[0]}:${inner.forLoop.range[0]}:${variable.id}`
+          const outerStart = outer.forLoop.getStart()
+          const innerStart = inner.forLoop.getStart()
+          const key = `${outerStart}:${innerStart}:${variable.id}`
           if (reported.has(key)) continue
           reported.add(key)
 
@@ -154,6 +160,7 @@ export const avoidQuadraticPairComparison = defineSolidRule({
             createDiagnostic(
               graph.file,
               inner.forLoop,
+              graph.sourceFile,
               "avoid-quadratic-pair-comparison",
               "quadraticPair",
               resolveMessage(messages.quadraticPair, { collection: variable.name }),
@@ -166,73 +173,68 @@ export const avoidQuadraticPairComparison = defineSolidRule({
   },
 })
 
-function asIndexedRead(node: T.Node): T.MemberExpression | null {
+function asIndexedRead(node: ts.Node): ts.ElementAccessExpression | null {
   const parent = node.parent
-  if (!parent || parent.type !== "MemberExpression") return null
-  if (!parent.computed) return null
-  if (parent.object !== node) return null
+  if (!parent || !ts.isElementAccessExpression(parent)) return null
+  if (parent.expression !== node) return null
   return parent
 }
 
 function loopForIndexReference(
   graph: SolidGraph,
-  index: T.Identifier,
-): T.ForStatement | null {
+  index: ts.Identifier,
+): ts.ForStatement | null {
   const scope = getScopeFor(graph, index)
-  const variable = getVariableByNameInScope(graph, index.name, scope)
+  const variable = getVariableByNameInScope(graph, index.text, scope)
   if (!variable) return null
 
   for (let i = 0; i < variable.declarations.length; i++) {
     const declaration = variable.declarations[i]
     if (!declaration) continue;
-    if (declaration.type !== "Identifier") continue
+    if (!ts.isIdentifier(declaration)) continue
     const declarator = declaration.parent
-    if (!declarator || declarator.type !== "VariableDeclarator") continue
-    const variableDeclaration = declarator.parent
-    if (!variableDeclaration || variableDeclaration.type !== "VariableDeclaration") continue
-    const maybeFor = variableDeclaration.parent
-    if (!maybeFor || maybeFor.type !== "ForStatement") continue
-    if (maybeFor.init !== variableDeclaration) continue
+    if (!declarator || !ts.isVariableDeclaration(declarator)) continue
+    const variableDeclarationList = declarator.parent
+    if (!variableDeclarationList || !ts.isVariableDeclarationList(variableDeclarationList)) continue
+    const maybeFor = variableDeclarationList.parent
+    if (!maybeFor || !ts.isForStatement(maybeFor)) continue
+    if (maybeFor.initializer !== variableDeclarationList) continue
     return maybeFor
   }
 
   return null
 }
 
-function comparisonForIndexedRead(node: T.MemberExpression): T.BinaryExpression | null {
+function comparisonForIndexedRead(node: ts.ElementAccessExpression): ts.BinaryExpression | null {
   const parent = node.parent
   if (!parent) return null
 
   const direct = asComparison(parent)
   if (direct) return direct
 
-  if (parent.type !== "MemberExpression" || parent.object !== node) return null
+  if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node) return null
   const wrapped = skipTransparentWrappers(parent.parent, 3)
   if (!wrapped) return null
   return asComparison(wrapped)
 }
 
-function skipTransparentWrappers(node: T.Node | undefined, remaining: number): T.Node | null {
+function skipTransparentWrappers(node: ts.Node | undefined, remaining: number): ts.Node | null {
   if (!node) return null
   if (remaining <= 0) return node
   if (!isTypeWrapper(node)) return node
   return skipTransparentWrappers(node.parent, remaining - 1)
 }
 
-function isTypeWrapper(node: T.Node): boolean {
+function isTypeWrapper(node: ts.Node): boolean {
   return (
-    node.type === "TSAsExpression" ||
-    node.type === "TSTypeAssertion" ||
-    node.type === "TSNonNullExpression"
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
   )
 }
 
-function asComparison(node: T.Node): T.BinaryExpression | null {
-  if (node.type !== "BinaryExpression") return null
-  if (!COMPARISON_OPERATORS.has(node.operator)) return null
+function asComparison(node: ts.Node): ts.BinaryExpression | null {
+  if (!ts.isBinaryExpression(node)) return null
+  if (!COMPARISON_OPERATORS.has(node.operatorToken.getText())) return null
   return node
-}
-
-function isRangeInside(inner: readonly [number, number], outer: readonly [number, number]): boolean {
-  return inner[0] >= outer[0] && inner[1] <= outer[1]
 }

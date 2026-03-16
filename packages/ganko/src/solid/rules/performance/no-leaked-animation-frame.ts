@@ -69,6 +69,7 @@ export const noLeakedAnimationFrame = defineSolidRule({
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-leaked-animation-frame",
           "leakedRaf",
           messages.leakedRaf,

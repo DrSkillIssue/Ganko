@@ -1,7 +1,8 @@
 /**
  * Collection getters and map/ID-based lookups
  */
-import type { TSESTree as T, TSESLint } from "@typescript-eslint/utils";
+import type ts from "typescript";
+import typescript from "typescript";
 import type { SolidGraph } from "../impl";
 import type { ScopeEntity } from "../entities/scope";
 import type { VariableEntity } from "../entities/variable";
@@ -23,22 +24,25 @@ import { getMethodName, getMethodObject } from "../util/call";
  * Information about a node found at a specific position.
  */
 export interface NodeAtPositionInfo {
-  /** The AST node type */
-  readonly type: string;
+  /** The AST node kind */
+  readonly kind: ts.SyntaxKind;
   /** The node name (for identifiers) */
   readonly name: string | null;
   /** The AST node */
-  readonly node: T.Node;
-  /** Source location */
-  readonly loc: T.SourceLocation | null;
+  readonly node: ts.Node;
 }
 
-export function getSourceCode(graph: SolidGraph): TSESLint.SourceCode {
-  return graph.sourceCode;
+export function getSourceFile(graph: SolidGraph): ts.SourceFile {
+  return graph.sourceFile;
 }
 
-export function getAST(graph: SolidGraph): T.Program {
-  return graph.sourceCode.ast;
+/** @deprecated Use getSourceFile instead */
+export function getSourceCode(graph: SolidGraph): ts.SourceFile {
+  return graph.sourceFile;
+}
+
+export function getAST(graph: SolidGraph): ts.SourceFile {
+  return graph.sourceFile;
 }
 
 export function getFunctions(graph: SolidGraph): readonly FunctionEntity[] {
@@ -141,7 +145,7 @@ export function getFiles(graph: SolidGraph): readonly FileEntity[] {
   return [graph.fileEntity];
 }
 
-export function getSpreadElements(graph: SolidGraph): readonly T.SpreadElement[] {
+export function getSpreadElements(graph: SolidGraph): readonly (ts.SpreadElement | ts.SpreadAssignment)[] {
   return graph.spreadElements;
 }
 
@@ -153,7 +157,7 @@ export function getCallsByMethodName(graph: SolidGraph, name: string): readonly 
   return graph.callsByMethodName.get(name) ?? [];
 }
 
-export function getFunctionByNode(graph: SolidGraph, node: T.Node): FunctionEntity | null {
+export function getFunctionByNode(graph: SolidGraph, node: ts.Node): FunctionEntity | null {
   return graph.functionsByNode.get(node) ?? null;
 }
 
@@ -165,7 +169,7 @@ export function getVariablesByName(graph: SolidGraph, name: string): readonly Va
   return graph.variablesByName.get(name) ?? [];
 }
 
-export function getJSXElementByNode(graph: SolidGraph, node: T.JSXElement | T.JSXFragment): JSXElementEntity | null {
+export function getJSXElementByNode(graph: SolidGraph, node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment): JSXElementEntity | null {
   return graph.jsxByNode.get(node) ?? null;
 }
 
@@ -199,11 +203,11 @@ export function hasImportSpecifier(graph: SolidGraph, source: string, specifier:
   return false;
 }
 
-export function getArgumentByNode(graph: SolidGraph, node: T.Node): ArgumentEntity | null {
+export function getArgumentByNode(graph: SolidGraph, node: ts.Node): ArgumentEntity | null {
   return graph.callsByArgNode.get(node) ?? null;
 }
 
-export function getCallForArgument(graph: SolidGraph, node: T.Node): CallEntity | null {
+export function getCallForArgument(graph: SolidGraph, node: ts.Node): CallEntity | null {
   const arg = graph.callsByArgNode.get(node);
   if (!arg) return null;
   for (let i = 0, len = graph.calls.length; i < len; i++) {
@@ -217,11 +221,11 @@ export function getCallForArgument(graph: SolidGraph, node: T.Node): CallEntity 
   return null;
 }
 
-export function getCallByNode(graph: SolidGraph, node: T.CallExpression | T.NewExpression): CallEntity | null {
+export function getCallByNode(graph: SolidGraph, node: ts.CallExpression | ts.NewExpression): CallEntity | null {
   return graph.callsByNode.get(node) ?? null;
 }
 
-export function getFunctionByDeclarationNode(graph: SolidGraph, node: T.Node): FunctionEntity | null {
+export function getFunctionByDeclarationNode(graph: SolidGraph, node: ts.Node): FunctionEntity | null {
   return graph.functionsByDeclarationNode.get(node) ?? null;
 }
 
@@ -257,15 +261,15 @@ export function getScopeById(graph: SolidGraph, id: number): ScopeEntity | null 
   return graph.scopes[id] ?? null;
 }
 
-export function getUnaryExpressionsByOperator(graph: SolidGraph, op: "delete" | "typeof" | "void" | "!" | "~" | "+" | "-"): readonly T.UnaryExpression[] {
+export function getUnaryExpressionsByOperator(graph: SolidGraph, op: ts.SyntaxKind): readonly ts.PrefixUnaryExpression[] {
   return graph.unaryExpressionsByOperator.get(op) ?? [];
 }
 
-export function getNewExpressionsByCallee(graph: SolidGraph, name: string): readonly T.NewExpression[] {
+export function getNewExpressionsByCallee(graph: SolidGraph, name: string): readonly ts.NewExpression[] {
   return graph.newExpressionsByCallee.get(name) ?? [];
 }
 
-export function getIdentifierReferences(graph: SolidGraph, name: string): readonly T.Identifier[] {
+export function getIdentifierReferences(graph: SolidGraph, name: string): readonly ts.Identifier[] {
   return graph.identifiersByName.get(name) ?? [];
 }
 
@@ -279,10 +283,9 @@ export function getNodeAtPosition(graph: SolidGraph, line: number, column: numbe
   const node = nodeAtOffset[offset];
   if (!node) return null;
   return {
-    type: node.type,
-    name: node.type === "Identifier" ? node.name : null,
+    kind: node.kind,
+    name: typescript.isIdentifier(node) ? node.text : null,
     node,
-    loc: node.loc ?? null,
   };
 }
 
@@ -301,7 +304,7 @@ export interface MethodChain {
   /** Method names corresponding to each call */
   readonly methods: readonly string[];
   /** The root object the chain is called on (null if chain starts with bare call) */
-  readonly root: T.Node | null;
+  readonly root: ts.Node | null;
 }
 
 /**
@@ -315,7 +318,7 @@ export interface MethodChain {
 export function getMethodChain(graph: SolidGraph, call: CallEntity): MethodChain {
   const calls: CallEntity[] = [];
   const methods: string[] = [];
-  let root: T.Node | null = null;
+  let root: ts.Node | null = null;
   let current: CallEntity | null = call;
 
   while (current) {
@@ -328,7 +331,7 @@ export function getMethodChain(graph: SolidGraph, call: CallEntity): MethodChain
     const obj = getMethodObject(current.node);
     if (!obj) break;
 
-    if (obj.type !== "CallExpression") {
+    if (!typescript.isCallExpression(obj)) {
       root = obj;
       break;
     }

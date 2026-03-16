@@ -7,6 +7,7 @@
  * policy template.
  */
 
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { forEachStylePropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
@@ -50,18 +51,18 @@ export const jsxStylePolicy = defineCrossRule({
     const name = getActivePolicyName()
 
     forEachStylePropertyAcross(solids, (solid, p) => {
-      if (p.type !== "Property") return
-      const key = objectKeyName(p.key)
+      if (!ts.isPropertyAssignment(p)) return
+      const key = objectKeyName(p.name)
       if (!key) return
       const normalizedKey = normalizeStylePropertyKey(key)
 
       if (normalizedKey === "font-size") {
-        const strVal = getStaticStringValue(p.value)
+        const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const px = parsePxValue(strVal)
         if (px === null || px >= policy.minBodyFontSize) return
         emit(createDiagnostic(
-          solid.file, p.value, jsxStylePolicy.id, "fontTooSmall",
+          solid.file, p.initializer, solid.sourceFile, jsxStylePolicy.id, "fontTooSmall",
           resolveMessage(messages.fontTooSmall, {
             prop: key, value: strVal, resolved: formatRounded(px),
             min: String(policy.minBodyFontSize), policy: name,
@@ -71,12 +72,12 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (normalizedKey === "line-height") {
-        const strVal = getStaticStringValue(p.value)
-        const numVal = getStaticNumericValue(p.value)
+        const strVal = getStaticStringValue(p.initializer)
+        const numVal = getStaticNumericValue(p.initializer)
         const lh = numVal ?? (strVal ? parseUnitlessValue(strVal) : null)
         if (lh === null || lh >= policy.minLineHeight) return
         emit(createDiagnostic(
-          solid.file, p.value, jsxStylePolicy.id, "lineHeightTooSmall",
+          solid.file, p.initializer, solid.sourceFile, jsxStylePolicy.id, "lineHeightTooSmall",
           resolveMessage(messages.lineHeightTooSmall, {
             value: String(lh), min: String(policy.minLineHeight), policy: name,
           }), "warn",
@@ -85,14 +86,14 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (INLINE_TOUCH_TARGET_KEYS.has(normalizedKey)) {
-        const strVal = getStaticStringValue(p.value)
+        const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const px = parsePxValue(strVal)
         if (px === null) return
         const min = policy.minButtonHeight
         if (px >= min) return
         emit(createDiagnostic(
-          solid.file, p.value, jsxStylePolicy.id, "heightTooSmall",
+          solid.file, p.initializer, solid.sourceFile, jsxStylePolicy.id, "heightTooSmall",
           resolveMessage(messages.heightTooSmall, {
             prop: key, value: strVal, resolved: formatRounded(px),
             min: String(min), policy: name,
@@ -102,12 +103,12 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (normalizedKey === "letter-spacing") {
-        const strVal = getStaticStringValue(p.value)
+        const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const em = parseEmValue(strVal)
         if (em === null || em >= policy.minLetterSpacing) return
         emit(createDiagnostic(
-          solid.file, p.value, jsxStylePolicy.id, "letterSpacingTooSmall",
+          solid.file, p.initializer, solid.sourceFile, jsxStylePolicy.id, "letterSpacingTooSmall",
           resolveMessage(messages.letterSpacingTooSmall, {
             value: strVal, resolved: String(em), min: String(policy.minLetterSpacing), policy: name,
           }), "warn",
@@ -116,12 +117,12 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (normalizedKey === "word-spacing") {
-        const strVal = getStaticStringValue(p.value)
+        const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const em = parseEmValue(strVal)
         if (em === null || em >= policy.minWordSpacing) return
         emit(createDiagnostic(
-          solid.file, p.value, jsxStylePolicy.id, "wordSpacingTooSmall",
+          solid.file, p.initializer, solid.sourceFile, jsxStylePolicy.id, "wordSpacingTooSmall",
           resolveMessage(messages.wordSpacingTooSmall, {
             value: strVal, resolved: String(em), min: String(policy.minWordSpacing), policy: name,
           }), "warn",

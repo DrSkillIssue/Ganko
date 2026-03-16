@@ -2,6 +2,7 @@
  * Flags spreading accumulator in reduce callbacks which creates O(n²) complexity.
  */
 
+import ts from "typescript";
 import { defineSolidRule } from "../../rule";
 import { getCallsByMethodName, getScopeFor, getVariableByNameInScope } from "../../queries";
 import { createDiagnostic } from "../../../diagnostic";
@@ -37,32 +38,32 @@ export const avoidQuadraticSpread = defineSolidRule({
       const call = reduceCalls[i];
       if (!call) continue;
       const args = call.node.arguments;
-      if (args.length === 0) continue;
+      if (!args || args.length === 0) continue;
 
       const callback = args[0];
       if (!callback) continue;
-      if (callback.type !== "ArrowFunctionExpression" &&
-          callback.type !== "FunctionExpression") continue;
+      if (!ts.isArrowFunction(callback) &&
+          !ts.isFunctionExpression(callback)) continue;
 
-      const params = callback.params;
+      const params = callback.parameters;
       if (params.length === 0) continue;
 
       const accParam = params[0];
       if (!accParam) continue;
-      if (accParam.type !== "Identifier") continue;
+      if (!ts.isIdentifier(accParam.name)) continue;
       const callbackScope = getScopeFor(graph, callback);
-      const accVar = getVariableByNameInScope(graph, accParam.name, callbackScope);
+      const accVar = getVariableByNameInScope(graph, accParam.name.text, callbackScope);
       if (!accVar) continue;
 
       for (let j = 0, rlen2 = accVar.reads.length; j < rlen2; j++) {
         const read = accVar.reads[j];
         if (!read) continue;
         const parent = read.node.parent;
-        if (!parent || parent.type !== "SpreadElement") continue;
-        if (parent.argument !== read.node) continue;
+        if (!parent || !ts.isSpreadElement(parent)) continue;
+        if (parent.expression !== read.node) continue;
 
         emit(
-          createDiagnostic(graph.file, parent, "avoid-quadratic-spread", "quadraticSpread", messages.quadraticSpread, "error"),
+          createDiagnostic(graph.file, parent, graph.sourceFile, "avoid-quadratic-spread", "quadraticSpread", messages.quadraticSpread, "error"),
         );
         break;
       }

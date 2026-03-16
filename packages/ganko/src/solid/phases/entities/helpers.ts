@@ -1,28 +1,33 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { ScopeEntity } from "../../entities/scope";
 import type { VariableEntity } from "../../entities/variable";
 import type { JSXAttributeEntity, StyleComplexityInfo } from "../../entities/jsx";
 import { classifyAttribute } from "../../util/jsx";
 import { getVariableByNameInScope } from "../../queries/scope";
+import { unwrapParenthesized } from "../../util/expression";
 
-export function isEmptyObject(node: T.Expression): boolean {
-  return node.type === "ObjectExpression" && node.properties.length === 0;
+export function isEmptyObject(node: ts.Expression): boolean {
+  const unwrapped = unwrapParenthesized(node);
+  return ts.isObjectLiteralExpression(unwrapped) && unwrapped.properties.length === 0;
 }
 
-export function countConditionals(node: T.Node): number {
+export function countConditionals(node: ts.Node): number {
   let count = 0;
 
-  if (node.type === "ConditionalExpression") {
-    count = 1 + countConditionals(node.consequent) + countConditionals(node.alternate);
-  } else if (node.type === "LogicalExpression") {
+  if (ts.isConditionalExpression(node)) {
+    count = 1 + countConditionals(node.whenTrue) + countConditionals(node.whenFalse);
+  } else if (ts.isBinaryExpression(node) && (
+    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+  )) {
     count = countConditionals(node.left) + countConditionals(node.right);
   }
 
   return count;
 }
 
-export function analyzeStyleComplexity(obj: T.ObjectExpression): StyleComplexityInfo {
+export function analyzeStyleComplexity(obj: ts.ObjectLiteralExpression): StyleComplexityInfo {
   let conditionalCount = 0;
   let hasConditionalSpread = false;
 
@@ -30,111 +35,112 @@ export function analyzeStyleComplexity(obj: T.ObjectExpression): StyleComplexity
     const prop = obj.properties[i];
     if (!prop) continue;
 
-    if (prop.type === "SpreadElement") {
-      const arg = prop.argument;
-      if (arg.type === "ConditionalExpression" || (arg.type === "LogicalExpression" && arg.operator === "&&")) {
+    if (ts.isSpreadAssignment(prop)) {
+      const arg = unwrapParenthesized(prop.expression);
+      if (ts.isConditionalExpression(arg) || (ts.isBinaryExpression(arg) && arg.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)) {
         hasConditionalSpread = true;
       }
-    } else if (prop.type === "Property") {
-      conditionalCount += countConditionals(prop.value);
+    } else if (ts.isPropertyAssignment(prop)) {
+      conditionalCount += countConditionals(prop.initializer);
     }
   }
 
   return { conditionalCount, hasConditionalSpread };
 }
 
-export function getJSXChildKind(child: T.Node): "element" | "expression" | "text" {
-  if (child.type === "JSXElement" || child.type === "JSXFragment") return "element";
-  if (child.type === "JSXExpressionContainer" || child.type === "JSXSpreadChild") return "expression";
+export function getJSXChildKind(child: ts.Node): "element" | "expression" | "text" {
+  if (ts.isJsxElement(child) || ts.isJsxFragment(child)) return "element";
+  if (ts.isJsxExpression(child) || ts.isJsxText(child) === false && child.kind === ts.SyntaxKind.JsxExpression) return "expression";
   return "text";
 }
 
-export function getImportedName(spec: T.ImportSpecifier | T.ImportDefaultSpecifier | T.ImportNamespaceSpecifier): string | null {
-  if (spec.type === "ImportSpecifier") {
-    return spec.imported.type === "Identifier" ? spec.imported.name : spec.imported.value;
+export function getImportedName(spec: ts.ImportSpecifier | ts.ImportClause | ts.NamespaceImport): string | null {
+  if (ts.isImportSpecifier(spec)) {
+    return spec.propertyName ? spec.propertyName.text : spec.name.text;
   }
   return null;
 }
 
-export function getImportSpecifierKind(spec: T.ImportSpecifier | T.ImportDefaultSpecifier | T.ImportNamespaceSpecifier): "named" | "default" | "namespace" {
-  if (spec.type === "ImportDefaultSpecifier") return "default";
-  if (spec.type === "ImportNamespaceSpecifier") return "namespace";
+export function getImportSpecifierKind(spec: ts.ImportSpecifier | ts.ImportClause | ts.NamespaceImport): "named" | "default" | "namespace" {
+  if (ts.isImportClause(spec)) return "default";
+  if (ts.isNamespaceImport(spec)) return "namespace";
   return "named";
 }
 
-export function getFunctionName(node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression): string | null {
-  if (node.type === "FunctionDeclaration" && node.id) return node.id.name;
-  if (node.type === "FunctionExpression" && node.id) return node.id.name;
+export function getFunctionName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): string | null {
+  if (ts.isFunctionDeclaration(node) && node.name) return node.name.text;
+  if (ts.isFunctionExpression(node) && node.name) return node.name.text;
 
   const parent = node.parent;
-  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") {
-    return parent.id.name;
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
-  if (parent?.type === "Property" && parent.key.type === "Identifier") {
-    return parent.key.name;
+  if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
-  if (parent?.type === "MethodDefinition" && parent.key.type === "Identifier") {
-    return parent.key.name;
+  if (parent && ts.isMethodDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
 
   return null;
 }
 
-export function getFunctionVariableName(node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression): string | null {
+export function getFunctionVariableName(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): string | null {
   const parent = node.parent;
-  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") {
-    return parent.id.name;
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
   return null;
 }
 
-export function getParameterName(param: T.Parameter): string | null {
-  if (param.type === "Identifier") return param.name;
-  if (param.type === "AssignmentPattern" && param.left.type === "Identifier") return param.left.name;
-  if (param.type === "RestElement" && param.argument.type === "Identifier") return param.argument.name;
+export function getParameterName(param: ts.ParameterDeclaration): string | null {
+  if (ts.isIdentifier(param.name)) return param.name.text;
+  if (ts.isObjectBindingPattern(param.name) || ts.isArrayBindingPattern(param.name)) return null;
   return null;
 }
 
-export function getDeclarationNode(node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression): T.Node {
+export function getDeclarationNode(node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): ts.Node {
   const parent = node.parent;
-  if (parent?.type === "VariableDeclarator") {
+  if (parent && ts.isVariableDeclaration(parent)) {
     const grandparent = parent.parent;
-    if (grandparent?.type === "VariableDeclaration") {
+    if (grandparent && ts.isVariableDeclarationList(grandparent)) {
       const greatGrandparent = grandparent.parent;
-      if (greatGrandparent?.type === "ExportNamedDeclaration" || greatGrandparent?.type === "ExportDefaultDeclaration") {
+      if (greatGrandparent && ts.isVariableStatement(greatGrandparent)) {
+        // Check if the variable statement has export modifier
+        if (greatGrandparent.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
+          return greatGrandparent;
+        }
         return greatGrandparent;
       }
-      return grandparent;
     }
   }
-  if (parent?.type === "ExportNamedDeclaration" || parent?.type === "ExportDefaultDeclaration") {
-    return parent;
+  if (parent && ts.isFunctionDeclaration(node) && node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
+    return node;
   }
   return node;
 }
 
-export function getJSXElementTag(node: T.JSXElement): string | null {
-  const name = node.openingElement.name;
-  if (name.type === "JSXIdentifier") return name.name;
-  if (name.type === "JSXNamespacedName") return `${name.namespace.name}:${name.name.name}`;
-  if (name.type === "JSXMemberExpression") {
+export function getJSXElementTag(node: ts.JsxElement | ts.JsxSelfClosingElement): string | null {
+  const name = ts.isJsxElement(node) ? node.openingElement.tagName : node.tagName;
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isPropertyAccessExpression(name)) {
     const parts: string[] = [];
-    let current: T.JSXMemberExpression["object"] = name;
-    while (current.type === "JSXMemberExpression") {
-      parts.unshift(current.property.name);
-      current = current.object;
+    let current: ts.Expression = name;
+    while (ts.isPropertyAccessExpression(current)) {
+      parts.unshift(current.name.text);
+      current = current.expression;
     }
-    // current is now JSXIdentifier (after exhausting JSXMemberExpression)
-    if (current.type === "JSXIdentifier") {
-      parts.unshift(current.name);
+    // current is now Identifier (after exhausting PropertyAccessExpression)
+    if (ts.isIdentifier(current)) {
+      parts.unshift(current.text);
     }
     return parts.join(".");
   }
   return null;
 }
 
-export function buildJSXAttribute(attr: T.JSXAttribute | T.JSXSpreadAttribute, id: number): JSXAttributeEntity {
-  if (attr.type === "JSXSpreadAttribute") {
+export function buildJSXAttribute(attr: ts.JsxAttributeLike, id: number): JSXAttributeEntity {
+  if (ts.isJsxSpreadAttribute(attr)) {
     return {
       id,
       node: attr,
@@ -142,22 +148,29 @@ export function buildJSXAttribute(attr: T.JSXAttribute | T.JSXSpreadAttribute, i
       kind: "spread",
       namespace: null,
       spreadProps: [],
-      valueNode: attr.argument,
+      valueNode: attr.expression,
       styleComplexity: null,
       spreadInfo: null,
     };
   }
 
-  const name = attr.name.type === "JSXIdentifier"
-    ? attr.name.name
-    : `${attr.name.namespace.name}:${attr.name.name.name}`;
-  const namespace = attr.name.type === "JSXNamespacedName" ? attr.name.namespace.name : null;
+  const nameNode = attr.name;
+  let name: string;
+  let namespace: string | null = null;
+
+  if (ts.isIdentifier(nameNode)) {
+    name = nameNode.text;
+  } else {
+    // JsxNamespacedName
+    name = `${(nameNode as any).namespace.text}:${(nameNode as any).name.text}`;
+    namespace = (nameNode as any).namespace.text;
+  }
   const kind = classifyAttribute(name);
 
   let styleComplexity: StyleComplexityInfo | null = null;
-  if (kind === "style" && attr.value?.type === "JSXExpressionContainer") {
-    const expr = attr.value.expression;
-    if (expr.type === "ObjectExpression") {
+  if (kind === "style" && attr.initializer && ts.isJsxExpression(attr.initializer)) {
+    const expr = attr.initializer.expression;
+    if (expr && ts.isObjectLiteralExpression(expr)) {
       styleComplexity = analyzeStyleComplexity(expr);
     }
   }
@@ -169,38 +182,82 @@ export function buildJSXAttribute(attr: T.JSXAttribute | T.JSXSpreadAttribute, i
     kind,
     namespace,
     spreadProps: [],
-    valueNode: attr.value,
+    valueNode: attr.initializer ?? null,
     styleComplexity,
     spreadInfo: null,
   };
 }
 
+/**
+ * Computes captured variables for a function by collecting identifiers
+ * in the function body that resolve to variables in an enclosing scope.
+ *
+ * Walks the TypeScript AST to find Identifier nodes and checks them against
+ * the scope chain. Variables declared within the function scope are excluded.
+ */
 export function computeCaptures(
-  node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression,
+  node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction,
   fnScope: ScopeEntity,
   graph: SolidGraph,
 ): VariableEntity[] {
   const captures: VariableEntity[] = [];
   const seen = new Set<number>();
 
-  // Get all references in the function body
-  const scopeManager = graph.sourceCode.scopeManager;
-  const eslintScope = scopeManager?.acquire(node);
-  if (!eslintScope) return captures;
+  // Collect all variable names declared within this function's scope
+  const ownNames = new Set<string>();
+  collectOwnNames(fnScope, ownNames);
 
-  const through = eslintScope.through;
-  if (through.length === 0) return captures;
+  // Walk the function body to find identifier references
+  const body = node.body;
+  if (!body) return captures;
 
-  for (let i = 0, len = through.length; i < len; i++) {
-    const ref = through[i];
-    if (!ref) continue;
-    const name = ref.identifier.name;
-    const variable = getVariableByNameInScope(graph, name, fnScope.parent ?? fnScope);
-    if (variable && !seen.has(variable.id)) {
-      seen.add(variable.id);
-      captures.push(variable);
-    }
-  }
+  collectIdentifierCaptures(body, ownNames, fnScope, graph, seen, captures);
 
   return captures;
+}
+
+function collectOwnNames(scope: ScopeEntity, names: Set<string>): void {
+  const vars = scope.variables;
+  for (let i = 0, len = vars.length; i < len; i++) {
+    const v = vars[i];
+    if (v) names.add(v.name);
+  }
+  const children = scope.children;
+  for (let i = 0, len = children.length; i < len; i++) {
+    const child = children[i];
+    if (child) collectOwnNames(child, names);
+  }
+}
+
+function collectIdentifierCaptures(
+  node: ts.Node,
+  ownNames: Set<string>,
+  fnScope: ScopeEntity,
+  graph: SolidGraph,
+  seen: Set<number>,
+  captures: VariableEntity[],
+): void {
+  if (ts.isIdentifier(node)) {
+    const name = node.text;
+    if (!ownNames.has(name)) {
+      const variable = getVariableByNameInScope(graph, name, fnScope.parent ?? fnScope);
+      if (variable && !seen.has(variable.id)) {
+        seen.add(variable.id);
+        captures.push(variable);
+      }
+    }
+    return;
+  }
+
+  // Don't descend into nested function declarations/expressions
+  if (ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node)) {
+    return;
+  }
+
+  // Walk children using ts.forEachChild
+  ts.forEachChild(node, (child) => {
+    collectIdentifierCaptures(child, ownNames, fnScope, graph, seen, captures);
+  });
 }

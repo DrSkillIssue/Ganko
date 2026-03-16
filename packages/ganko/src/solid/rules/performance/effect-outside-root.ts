@@ -19,6 +19,7 @@
  *   }
  */
 
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { CallEntity, ScopeEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
@@ -64,6 +65,7 @@ export const effectOutsideRoot = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "effect-outside-root",
             "orphanedEffect",
             resolveMessage(messages.orphanedEffect, { primitive }),
@@ -105,16 +107,15 @@ function hasOwner(graph: SolidGraph, call: CallEntity): boolean {
     const node = ancestor.node
     if (node === null) continue
 
-    const nodeType = node.type
     if (
-      nodeType !== "ArrowFunctionExpression" &&
-      nodeType !== "FunctionExpression" &&
-      nodeType !== "FunctionDeclaration"
+      !ts.isArrowFunction(node) &&
+      !ts.isFunctionExpression(node) &&
+      !ts.isFunctionDeclaration(node)
     ) continue
 
     // Check if this function is a callback to createRoot or runWithOwner
     const parent = node.parent
-    if (parent?.type === "CallExpression") {
+    if (parent && ts.isCallExpression(parent)) {
       const parentCall = getCallByNode(graph, parent)
       if (parentCall?.primitive) {
         const name = parentCall.primitive.name
@@ -148,16 +149,17 @@ function hasOwner(graph: SolidGraph, call: CallEntity): boolean {
  * a function that happens to start with "create" or "use".
  */
 function containsSolidPrimitive(graph: SolidGraph, scope: ScopeEntity): boolean {
-  const scopeRange = scope.node?.range
-  if (!scopeRange) return false
+  if (!scope.node) return false
+  const scopeStart = scope.node.getStart()
+  const scopeEnd = scope.node.end
 
   const calls = graph.calls
   for (let i = 0, len = calls.length; i < len; i++) {
     const call = calls[i]
     if (!call) continue;
     if (!call.primitive) continue
-    const callRange = call.node.range
-    if (callRange[0] >= scopeRange[0] && callRange[1] <= scopeRange[1]) {
+    const callStart = call.node.getStart()
+    if (callStart >= scopeStart && call.node.end <= scopeEnd) {
       return true
     }
   }

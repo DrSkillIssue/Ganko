@@ -35,7 +35,7 @@
  * This rule is a style preference - disabled by default.
  */
 
-import type { TSESTree as T, TSESLint } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { Diagnostic, Fix, FixOperation } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic";
@@ -46,7 +46,12 @@ import { buildSolidImportFix } from "../util";
 
 
 
-const EXPENSIVE_TYPES = new Set(["JSXElement", "JSXFragment", "Identifier"]);
+const EXPENSIVE_TYPES = new Set([
+  ts.SyntaxKind.JsxElement,
+  ts.SyntaxKind.JsxSelfClosingElement,
+  ts.SyntaxKind.JsxFragment,
+  ts.SyntaxKind.Identifier,
+]);
 
 /**
  * Check if char code is valid JS identifier char (letter, digit, underscore, dollar).
@@ -59,11 +64,16 @@ function isJsIdentChar(code: number): boolean {
  * Info about a type guard: the condition and the expression being narrowed.
  */
 /** Equality/inequality operators used in typeof narrowing checks. */
-const EQUALITY_OPERATORS = new Set(["===", "==", "!==", "!="]);
+const EQUALITY_OPERATORS = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+]);
 
 interface TypeGuardInfo {
   /** The narrowed expression (e.g., `x` in `typeof x === "number"`) */
-  narrowedExpr: T.Expression;
+  narrowedExpr: ts.Expression;
 }
 
 /**
@@ -74,48 +84,47 @@ interface TypeGuardInfo {
  * @param expr - The expression to check for type guard patterns
  * @returns Type guard info or null if not a type guard
  */
-function extractTypeGuard(expr: T.Expression): TypeGuardInfo | null {
-  switch (expr.type) {
-    case "BinaryExpression": {
-      const { left, right, operator } = expr;
+function extractTypeGuard(expr: ts.Expression): TypeGuardInfo | null {
+  if (ts.isBinaryExpression(expr)) {
+    const { left, right, operatorToken } = expr;
 
-      // x instanceof Class -> narrows x
-      if (operator === "instanceof") {
-        return { narrowedExpr: left };
-      }
-
-      // "prop" in obj -> narrows obj
-      if (operator === "in") {
-        return { narrowedExpr: right };
-      }
-
-      // typeof x === "string" or "string" === typeof x
-      if (EQUALITY_OPERATORS.has(operator)) {
-        if (left.type === "UnaryExpression" && left.operator === "typeof") {
-          return { narrowedExpr: left.argument };
-        }
-        if (right.type === "UnaryExpression" && right.operator === "typeof") {
-          return { narrowedExpr: right.argument };
-        }
-      }
-
-      return null;
+    // x instanceof Class -> narrows x
+    if (operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword) {
+      return { narrowedExpr: left };
     }
-    case "CallExpression": {
-      // Array.isArray(x) -> narrows x
-      const c = expr.callee;
-      if (c.type !== "MemberExpression") return null;
-      if (c.object.type !== "Identifier" || c.object.name !== "Array") return null;
-      if (c.property.type !== "Identifier" || c.property.name !== "isArray") return null;
-      if (expr.arguments.length === 0) return null;
-      const arg = expr.arguments[0];
-      if (!arg) return null;
-      if (arg.type === "SpreadElement") return null;
-      return { narrowedExpr: arg };
+
+    // "prop" in obj -> narrows obj
+    if (operatorToken.kind === ts.SyntaxKind.InKeyword) {
+      return { narrowedExpr: right };
     }
-    default:
-      return null;
+
+    // typeof x === "string" or "string" === typeof x
+    if (EQUALITY_OPERATORS.has(operatorToken.kind)) {
+      if (ts.isTypeOfExpression(left)) {
+        return { narrowedExpr: left.expression };
+      }
+      if (ts.isTypeOfExpression(right)) {
+        return { narrowedExpr: right.expression };
+      }
+    }
+
+    return null;
   }
+
+  if (ts.isCallExpression(expr)) {
+    // Array.isArray(x) -> narrows x
+    const c = expr.expression;
+    if (!ts.isPropertyAccessExpression(c)) return null;
+    if (!ts.isIdentifier(c.expression) || c.expression.text !== "Array") return null;
+    if (c.name.text !== "isArray") return null;
+    if (expr.arguments.length === 0) return null;
+    const arg = expr.arguments[0];
+    if (!arg) return null;
+    if (ts.isSpreadElement(arg)) return null;
+    return { narrowedExpr: arg };
+  }
+
+  return null;
 }
 
 /**
@@ -126,16 +135,16 @@ function extractTypeGuard(expr: T.Expression): TypeGuardInfo | null {
  *
  * @param expr - The expression to search within
  * @param target - The target expression to find
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns Array of [start, end] ranges relative to expr's start position
  */
 function findMatchPositions(
-  expr: T.Node,
-  target: T.Node,
-  sourceCode: TSESLint.SourceCode,
+  expr: ts.Node,
+  target: ts.Node,
+  sourceFile: ts.SourceFile,
 ): Array<[number, number]> {
-  const exprText = sourceCode.getText(expr);
-  const targetText = sourceCode.getText(target);
+  const exprText = expr.getText(sourceFile);
+  const targetText = target.getText(sourceFile);
   const matches: Array<[number, number]> = [];
 
   let pos = 0;
@@ -155,11 +164,11 @@ function findMatchPositions(
  *
  * @param node - The AST node to check for identifier usage
  * @param name - The identifier name to search for
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns True if the name appears as an identifier
  */
-function isNameUsedInSource(node: T.Node, name: string, sourceCode: TSESLint.SourceCode): boolean {
-  const text = sourceCode.getText(node);
+function isNameUsedInSource(node: ts.Node, name: string, sourceFile: ts.SourceFile): boolean {
+  const text = node.getText(sourceFile);
   const len = text.length;
   const nameLen = name.length;
 
@@ -180,15 +189,15 @@ function isNameUsedInSource(node: T.Node, name: string, sourceCode: TSESLint.Sou
  * Generate a callback parameter name that doesn't conflict with the expression.
  *
  * @param expr - The expression to check for name conflicts
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns A parameter name that doesn't conflict with identifiers in expr
  */
-function generateParamName(expr: T.Expression, sourceCode: TSESLint.SourceCode): string {
+function generateParamName(expr: ts.Expression, sourceFile: ts.SourceFile): string {
   const candidates = ["value", "v", "item", "data", "result"];
   for (let i = 0, len = candidates.length; i < len; i++) {
     const name = candidates[i];
     if (!name) continue;
-    if (!isNameUsedInSource(expr, name, sourceCode)) return name;
+    if (!isNameUsedInSource(expr, name, sourceFile)) return name;
   }
   return "_value";
 }
@@ -199,17 +208,17 @@ function generateParamName(expr: T.Expression, sourceCode: TSESLint.SourceCode):
  * @param expr - The expression containing occurrences to replace
  * @param target - The target expression to find and replace
  * @param replacement - The replacement string
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns The expression text with all matches replaced
  */
 function replaceMatches(
-  expr: T.Expression,
-  target: T.Node,
+  expr: ts.Expression,
+  target: ts.Node,
   replacement: string,
-  sourceCode: TSESLint.SourceCode,
+  sourceFile: ts.SourceFile,
 ): string {
-  const positions = findMatchPositions(expr, target, sourceCode);
-  const text = sourceCode.getText(expr);
+  const positions = findMatchPositions(expr, target, sourceFile);
+  const text = expr.getText(sourceFile);
 
   if (positions.length === 0) return text;
 
@@ -239,8 +248,8 @@ function replaceMatches(
  * @param node - The expression to check
  * @returns True if the expression is expensive
  */
-function hasExpensiveContent(node: T.Expression): boolean {
-  return EXPENSIVE_TYPES.has(node.type);
+function hasExpensiveContent(node: ts.Expression): boolean {
+  return EXPENSIVE_TYPES.has(node.kind);
 }
 
 /**
@@ -250,14 +259,14 @@ function hasExpensiveContent(node: T.Expression): boolean {
  * JSX elements are returned as-is, other expressions are wrapped in curly braces.
  *
  * @param node - The node to convert
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns String representation suitable for JSX
  */
-function nodeToJSXString(node: T.Node, sourceCode: TSESLint.SourceCode): string {
-  const text = sourceCode.getText(node);
+function nodeToJSXString(node: ts.Node, sourceFile: ts.SourceFile): string {
+  const text = node.getText(sourceFile);
 
   // If it's a JSX element/fragment, use as-is
-  if (node.type === "JSXElement" || node.type === "JSXFragment") {
+  if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
     return text;
   }
 
@@ -276,12 +285,12 @@ function isMultiline(text: string): boolean {
 /**
  * Detect the base indentation of a node from the source.
  * @param node - The AST node to detect indentation for
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @returns The detected indentation string
  */
-function detectIndentation(node: T.Node, sourceCode: TSESLint.SourceCode): string {
-  const text = sourceCode.getText();
-  const start = node.range[0];
+function detectIndentation(node: ts.Node, sourceFile: ts.SourceFile): string {
+  const text = sourceFile.text;
+  const start = node.getStart(sourceFile);
 
   let lineStart = start;
   while (lineStart > 0 && text.charCodeAt(lineStart - 1) !== CHAR_NEWLINE) {
@@ -355,7 +364,7 @@ function reindentText(text: string, newIndent: string): string {
  * @param container - The JSX expression container, or null if nested
  * @returns The node to replace in the fix
  */
-function getNodeToReplace(node: T.Expression, container: T.JSXExpressionContainer | null): T.Node {
+function getNodeToReplace(node: ts.Expression, container: ts.JsxExpression | null): ts.Node {
 
   if (container) {
     return container;
@@ -365,21 +374,22 @@ function getNodeToReplace(node: T.Expression, container: T.JSXExpressionContaine
 }
 
 /**
- * Analyze a LogicalExpression to see if it should use <Show />.
+ * Analyze a LogicalExpression (BinaryExpression with &&) to see if it should use <Show />.
  *
- * @param expr - The logical expression to analyze
- * @param sourceCode - ESLint source code for text extraction
+ * @param expr - The binary expression to analyze
+ * @param sourceFile - The source file for text extraction
  * @param container - The JSX expression container (from graph's JSXContext)
+ * @param graph - The solid graph
  * @returns A diagnostic or null if no issue
  */
 function analyzeLogicalExpression(
-  expr: T.LogicalExpression,
-  sourceCode: TSESLint.SourceCode,
-  container: T.JSXExpressionContainer | null,
+  expr: ts.BinaryExpression,
+  sourceFile: ts.SourceFile,
+  container: ts.JsxExpression | null,
   graph: SolidGraph,
 ): Diagnostic | null {
   // Only handle && operator
-  if (expr.operator !== "&&") {
+  if (expr.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) {
     return null;
   }
 
@@ -389,19 +399,19 @@ function analyzeLogicalExpression(
   }
 
   const nodeToReplace = getNodeToReplace(expr, container);
-  const indent = detectIndentation(nodeToReplace, sourceCode);
+  const indent = detectIndentation(nodeToReplace, sourceFile);
   const guard = extractTypeGuard(expr.left);
 
   // Type guard: use keyed callback form with ternary in when
   // e.g., typeof x === "number" && <Foo x={x} />
   // becomes: <Show when={typeof x === "number" ? x : null} keyed>{(v) => <Foo x={v} />}</Show>
   if (guard) {
-    const conditionText = sourceCode.getText(expr.left);
-    const narrowedText = sourceCode.getText(guard.narrowedExpr);
-    const param = generateParamName(expr.right, sourceCode);
-    const replacedConsequent = replaceMatches(expr.right, guard.narrowedExpr, param, sourceCode);
+    const conditionText = expr.left.getText(sourceFile);
+    const narrowedText = guard.narrowedExpr.getText(sourceFile);
+    const param = generateParamName(expr.right, sourceFile);
+    const replacedConsequent = replaceMatches(expr.right, guard.narrowedExpr, param, sourceFile);
 
-    const jsxContent = expr.right.type === "JSXElement" || expr.right.type === "JSXFragment"
+    const jsxContent = ts.isJsxElement(expr.right) || ts.isJsxSelfClosingElement(expr.right) || ts.isJsxFragment(expr.right)
       ? replacedConsequent
       : `{${replacedConsequent}}`;
 
@@ -413,10 +423,11 @@ function analyzeLogicalExpression(
       jsxContent,
       param,
     );
-    const replacementOp: FixOperation = { range: [nodeToReplace.range[0], nodeToReplace.range[1]], text: replacement };
+    const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
     return createDiagnostic(
       graph.file,
       expr,
+      graph.sourceFile,
       "prefer-show",
       "preferShowAnd",
       messages.preferShowAnd,
@@ -425,8 +436,8 @@ function analyzeLogicalExpression(
     );
   }
 
-  const conditionText = sourceCode.getText(expr.left);
-  const consequentText = nodeToJSXString(expr.right, sourceCode);
+  const conditionText = expr.left.getText(sourceFile);
+  const consequentText = nodeToJSXString(expr.right, sourceFile);
   const replacement = buildShowReplacement(
     indent,
     conditionText,
@@ -435,10 +446,11 @@ function analyzeLogicalExpression(
     consequentText,
     null,
   );
-  const replacementOp: FixOperation = { range: [nodeToReplace.range[0], nodeToReplace.range[1]], text: replacement };
+  const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
   return createDiagnostic(
     graph.file,
     expr,
+    graph.sourceFile,
     "prefer-show",
     "preferShowAnd",
     messages.preferShowAnd,
@@ -493,38 +505,39 @@ function buildShowReplacement(
  * Analyze a ConditionalExpression (ternary) to see if it should use <Show />.
  *
  * @param expr - The conditional expression to analyze
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @param container - The JSX expression container (from graph's JSXContext)
+ * @param graph - The solid graph
  * @returns A diagnostic or null if no issue
  */
 function analyzeConditionalExpression(
-  expr: T.ConditionalExpression,
-  sourceCode: TSESLint.SourceCode,
-  container: T.JSXExpressionContainer | null,
+  expr: ts.ConditionalExpression,
+  sourceFile: ts.SourceFile,
+  container: ts.JsxExpression | null,
   graph: SolidGraph,
 ): Diagnostic | null {
-  const consequentExpensive = hasExpensiveContent(expr.consequent);
-  const alternateExpensive = hasExpensiveContent(expr.alternate);
+  const consequentExpensive = hasExpensiveContent(expr.whenTrue);
+  const alternateExpensive = hasExpensiveContent(expr.whenFalse);
 
   if (!consequentExpensive && !alternateExpensive) {
     return null;
   }
 
   const nodeToReplace = getNodeToReplace(expr, container);
-  const indent = detectIndentation(nodeToReplace, sourceCode);
-  const guard = extractTypeGuard(expr.test);
+  const indent = detectIndentation(nodeToReplace, sourceFile);
+  const guard = extractTypeGuard(expr.condition);
 
   // Type guard: use keyed callback form with ternary in when
   // e.g., typeof x === "number" ? <Foo x={x} /> : <Bar />
   // becomes: <Show when={typeof x === "number" ? x : null} keyed fallback={<Bar />}>{(v) => <Foo x={v} />}</Show>
   if (guard) {
-    const conditionText = sourceCode.getText(expr.test);
-    const narrowedText = sourceCode.getText(guard.narrowedExpr);
-    const fallbackText = sourceCode.getText(expr.alternate);
-    const param = generateParamName(expr.consequent, sourceCode);
-    const replacedConsequent = replaceMatches(expr.consequent, guard.narrowedExpr, param, sourceCode);
+    const conditionText = expr.condition.getText(sourceFile);
+    const narrowedText = guard.narrowedExpr.getText(sourceFile);
+    const fallbackText = expr.whenFalse.getText(sourceFile);
+    const param = generateParamName(expr.whenTrue, sourceFile);
+    const replacedConsequent = replaceMatches(expr.whenTrue, guard.narrowedExpr, param, sourceFile);
 
-    const jsxContent = expr.consequent.type === "JSXElement" || expr.consequent.type === "JSXFragment"
+    const jsxContent = ts.isJsxElement(expr.whenTrue) || ts.isJsxSelfClosingElement(expr.whenTrue) || ts.isJsxFragment(expr.whenTrue)
       ? replacedConsequent
       : `{${replacedConsequent}}`;
 
@@ -536,10 +549,11 @@ function analyzeConditionalExpression(
       jsxContent,
       param,
     );
-    const replacementOp: FixOperation = { range: [nodeToReplace.range[0], nodeToReplace.range[1]], text: replacement };
+    const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
     return createDiagnostic(
       graph.file,
       expr,
+      graph.sourceFile,
       "prefer-show",
       "preferShowTernary",
       messages.preferShowTernary,
@@ -548,9 +562,9 @@ function analyzeConditionalExpression(
     );
   }
 
-  const conditionText = sourceCode.getText(expr.test);
-  const consequentText = nodeToJSXString(expr.consequent, sourceCode);
-  const fallbackText = sourceCode.getText(expr.alternate);
+  const conditionText = expr.condition.getText(sourceFile);
+  const consequentText = nodeToJSXString(expr.whenTrue, sourceFile);
+  const fallbackText = expr.whenFalse.getText(sourceFile);
   const replacement = buildShowReplacement(
     indent,
     conditionText,
@@ -559,10 +573,11 @@ function analyzeConditionalExpression(
     consequentText,
     null,
   );
-  const replacementOp: FixOperation = { range: [nodeToReplace.range[0], nodeToReplace.range[1]], text: replacement };
+  const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
   return createDiagnostic(
     graph.file,
     expr,
+    graph.sourceFile,
     "prefer-show",
     "preferShowTernary",
     messages.preferShowTernary,
@@ -575,22 +590,23 @@ function analyzeConditionalExpression(
  * Analyze an expression and return a diagnostic if it should use <Show />.
  *
  * @param expr - The expression to analyze
- * @param sourceCode - ESLint source code for text extraction
+ * @param sourceFile - The source file for text extraction
  * @param container - The JSX expression container (from graph's JSXContext)
+ * @param graph - The solid graph
  * @returns A diagnostic or null if no issue
  */
 function analyzeExpression(
-  expr: T.Expression,
-  sourceCode: TSESLint.SourceCode,
-  container: T.JSXExpressionContainer | null,
+  expr: ts.Expression,
+  sourceFile: ts.SourceFile,
+  container: ts.JsxExpression | null,
   graph: SolidGraph,
 ): Diagnostic | null {
-  if (expr.type === "LogicalExpression") {
-    return analyzeLogicalExpression(expr, sourceCode, container, graph);
+  if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+    return analyzeLogicalExpression(expr, sourceFile, container, graph);
   }
 
-  if (expr.type === "ConditionalExpression") {
-    return analyzeConditionalExpression(expr, sourceCode, container, graph);
+  if (ts.isConditionalExpression(expr)) {
+    return analyzeConditionalExpression(expr, sourceFile, container, graph);
   }
 
   return null;
@@ -634,7 +650,7 @@ export const preferShow = defineSolidRule({
     const elements = getJSXElements(graph);
     if (elements.length === 0) return;
 
-    const sourceCode = graph.sourceCode;
+    const sourceFile = graph.sourceFile;
 
     for (let i = 0, len = elements.length; i < len; i++) {
       const element = elements[i];
@@ -645,14 +661,22 @@ export const preferShow = defineSolidRule({
         if (!child) continue;
 
         if (child.kind !== "expression") continue;
-        if (child.node.type !== "JSXExpressionContainer") continue;
+        if (!ts.isJsxExpression(child.node)) continue;
 
         const container = child.node;
         const expr = container.expression;
-        if (expr.type === "JSXEmptyExpression") continue;
+        if (!expr) continue;
 
-        if (expr.type === "LogicalExpression" || expr.type === "ConditionalExpression") {
-          const issue = analyzeExpression(expr, sourceCode, container, graph);
+        if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+          const issue = analyzeExpression(expr, sourceFile, container, graph);
+          if (issue) {
+            emit(issue);
+          }
+          continue;
+        }
+
+        if (ts.isConditionalExpression(expr)) {
+          const issue = analyzeExpression(expr, sourceFile, container, graph);
           if (issue) {
             emit(issue);
           }
@@ -661,12 +685,17 @@ export const preferShow = defineSolidRule({
 
         // Handle arrow function bodies (common in control flow component children)
         // Example: <For each={list}>{(item) => item.visible && <Item />}</For>
-        if (expr.type === "ArrowFunctionExpression") {
+        if (ts.isArrowFunction(expr)) {
           const body = expr.body;
-          if (body.type === "LogicalExpression" || body.type === "ConditionalExpression") {
+          if (ts.isBinaryExpression(body) && body.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
             // For arrow function bodies, pass null as container since the expression
             // is nested and the fix should target just the body expression
-            const issue = analyzeExpression(body, sourceCode, null, graph);
+            const issue = analyzeExpression(body, sourceFile, null, graph);
+            if (issue) {
+              emit(issue);
+            }
+          } else if (ts.isConditionalExpression(body)) {
+            const issue = analyzeExpression(body, sourceFile, null, graph);
             if (issue) {
               emit(issue);
             }

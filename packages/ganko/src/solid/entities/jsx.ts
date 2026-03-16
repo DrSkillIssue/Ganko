@@ -4,7 +4,7 @@
  * Represents JSX elements in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 import type { ScopeEntity } from "./scope";
 import type { JSXAttributeKind } from "../util/jsx";
@@ -14,7 +14,7 @@ import type { JSXAttributeKind } from "../util/jsx";
  */
 export interface JSXElementEntity {
   id: number;
-  node: T.JSXElement | T.JSXFragment;
+  node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
   file: FileEntity;
   tag: string | null;
   tagName: string | null;
@@ -33,8 +33,8 @@ export interface JSXElementEntity {
  */
 export interface SpreadProp {
   name: string;
-  keyNode: T.Node;
-  valueNode: T.Node | null;
+  keyNode: ts.Node;
+  valueNode: ts.Node | null;
 }
 
 /**
@@ -50,9 +50,9 @@ export interface StyleComplexityInfo {
  */
 export interface SpreadInfo {
   hasCallExpression: boolean;
-  callExpressionNode: T.CallExpression | null;
+  callExpressionNode: ts.CallExpression | null;
   hasMemberExpression: boolean;
-  memberExpressionNode: T.MemberExpression | null;
+  memberExpressionNode: ts.PropertyAccessExpression | ts.ElementAccessExpression | null;
   isConditionalSpread: boolean;
   conditionalSpreadType: "ternary" | "logical-and" | null;
 }
@@ -62,12 +62,12 @@ export interface SpreadInfo {
  */
 export interface JSXAttributeEntity {
   id: number;
-  node: T.JSXAttribute | T.JSXSpreadAttribute;
+  node: ts.JsxAttribute | ts.JsxSpreadAttribute;
   name: string | null;
   kind: JSXAttributeKind;
   namespace: string | null;
   spreadProps: SpreadProp[];
-  valueNode: T.Node | null;
+  valueNode: ts.Node | null;
   styleComplexity: StyleComplexityInfo | null;
   spreadInfo: SpreadInfo | null;
 }
@@ -77,7 +77,7 @@ export interface JSXAttributeEntity {
  */
 export interface JSXChildEntity {
   id: number;
-  node: T.Node;
+  node: ts.Node;
   kind: "element" | "expression" | "text";
 }
 
@@ -90,12 +90,12 @@ export interface JSXContext {
   element: JSXElementEntity;
   attribute: JSXAttributeEntity | null;
   kind: "expression" | "attribute" | "child";
-  containerNode: T.JSXExpressionContainer | null;
+  containerNode: ts.JsxExpression | null;
 }
 
 export interface CreateJSXElementArgs {
   id: number;
-  node: T.JSXElement | T.JSXFragment;
+  node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
   file: FileEntity;
   tag: string | null;
   isDomElement: boolean;

@@ -4,10 +4,10 @@
  * Main entry point for the LSP server. Sets up the connection,
  * routes requests to handlers, and coordinates components.
  *
- * HandlerContext is constructed from Project using the oracle's B+ pattern:
- * - getAST uses parseContent from ganko + sf.version cache
+ * HandlerContext is constructed from Project:
+ * - getAST returns ts.SourceFile from project.getSourceFile()
  * - getDiagnostics delegates to project.run([path])
- * - getLanguageService/getSourceFile delegate to project → ts.LanguageService
+ * - getLanguageService/getSourceFile delegate to project
  *
  * Cache invalidation and dependent re-diagnosis are centralised in three
  * methods on ServerContext:
@@ -25,9 +25,7 @@ import {
   type PublishDiagnosticsParams,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import type { TSESTree as T } from "@typescript-eslint/utils";
-
-import { parseContent, GraphCache } from "@drskillissue/ganko";
+import { GraphCache } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
@@ -89,28 +87,20 @@ import { getOpenDocumentPaths } from "./handlers/document";
 /** Debounce delay for document changes in milliseconds. */
 const DEBOUNCE_MS = 150;
 
-/** Cached ESTree AST entry keyed by script version from project service */
-interface CachedAST {
-  readonly version: string
-  readonly ast: T.Program
-}
-
 /**
  * Create a HandlerContext from a Project.
  *
- * Implements the oracle's B+ pattern: getAST uses parseContent from ganko
- * with sf.version as cache key. getDiagnostics delegates to project.run().
+ * getAST returns the TypeScript SourceFile directly from the project.
+ * getDiagnostics delegates to project.run().
  *
  * @param project - The ganko Project instance
  * @param graphCache - Versioned graph cache for cross-file analysis
- * @param astCache - Shared AST cache managed by the server
  * @param diagCache - Shared diagnostic cache managed by the server
  * @returns HandlerContext for handlers
  */
 function createHandlerContext(
   project: Project,
   graphCache: GraphCache,
-  astCache: Map<string, CachedAST>,
   diagCache: Map<string, readonly Diagnostic[]>,
   handlerLog: Logger,
 ): HandlerContext {
@@ -119,40 +109,24 @@ function createHandlerContext(
   return {
     log: handlerLog,
 
-    getLanguageService(path) {
-      return project.getLanguageService(path);
+    getLanguageService(_path) {
+      return project.getLanguageService();
     },
 
     getSourceFile(path) {
-      const ls = project.getLanguageService(path);
-      return ls?.getProgram()?.getSourceFile(path) ?? null;
+      return project.getSourceFile(path) ?? null;
     },
 
     getTSFileInfo(path) {
-      const ls = project.getLanguageService(path);
+      const ls = project.getLanguageService();
       if (!ls) return null;
-      const sf = ls.getProgram()?.getSourceFile(path);
+      const sf = project.getSourceFile(path);
       if (!sf) return null;
       return { ls, sf };
     },
 
     getAST(path) {
-      const ls = project.getLanguageService(path);
-      if (!ls) return null;
-
-      const sf = ls.getProgram()?.getSourceFile(path);
-      if (!sf) return null;
-
-      const version = project.getScriptVersion(path);
-      if (!version) return null;
-
-      const cached = astCache.get(path);
-      if (cached && cached.version === version) return cached.ast;
-
-      const input = parseContent(path, sf.text, graphCache.logger);
-      const ast = input.sourceCode.ast;
-      astCache.set(path, { version, ast });
-      return ast;
+      return project.getSourceFile(path) ?? null;
     },
 
     getDiagnostics(path) {
@@ -160,14 +134,12 @@ function createHandlerContext(
     },
 
     getContent(path) {
-      const ls = project.getLanguageService(path);
-      return ls?.getProgram()?.getSourceFile(path)?.text ?? null;
+      return project.getSourceFile(path)?.text ?? null;
     },
 
     getSolidGraph(path) {
       if (classifyFile(path) !== "solid") return null;
-      const version = project.getScriptVersion(path);
-      if (!version) return null;
+      const version = "0";
       return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
     },
   };
@@ -438,7 +410,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     return supportedExtensions.has(uri.slice(dotIdx));
   });
 
-  const astCache = new Map<string, CachedAST>();
   const diagCache = new Map<string, readonly Diagnostic[]>();
   const graphCache = new GraphCache(prefixLogger(log, "cache"));
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
@@ -466,7 +437,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
     setProject(project) {
       context.project = project;
-      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache, prefixLogger(log, "handler"));
+      context.handlerCtx = createHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
@@ -485,7 +456,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     evictFileCache(path) {
       const key = canonicalPath(path);
       if (log.enabled) log.debug(`evictFileCache: ${key}`);
-      astCache.delete(key);
       diagCache.delete(key);
       graphCache.invalidate(key);
     },
@@ -512,7 +482,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
       graphCache.invalidateAll();
       diagCache.clear();
-      astCache.clear();
       const paths = getOpenDocumentPaths(context.documentState);
       if (log.enabled) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files`);
       for (let i = 0, len = paths.length; i < len; i++) {

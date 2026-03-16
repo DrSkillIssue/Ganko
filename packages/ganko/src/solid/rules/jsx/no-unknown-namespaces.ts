@@ -7,7 +7,7 @@
  * either a typo or misunderstanding of how to use Solid features.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 
@@ -42,8 +42,8 @@ function categorizeNamespace(namespace: string, allowedNamespaces: Set<string>):
  * @param node - The JSX namespaced name node
  * @returns The full attribute name as "namespace:name"
  */
-function getFullAttributeName(node: T.JSXNamespacedName): string {
-  return `${node.namespace.name}:${node.name.name}`;
+function getFullAttributeName(node: ts.JsxNamespacedName): string {
+  return `${node.namespace.text}:${node.name.text}`;
 }
 
 
@@ -93,13 +93,13 @@ export const noUnknownNamespaces = defineSolidRule({
         const attr = attributes[j];
         if (!attr) continue;
         if (attr.namespace === null) continue;
-        if (attr.node.type !== "JSXAttribute") continue;
+        if (!ts.isJsxAttribute(attr.node)) continue;
         const attrNode = attr.node;
-        if (attrNode.name.type !== "JSXNamespacedName") continue;
+        if (!ts.isJsxNamespacedName(attrNode.name)) continue;
 
         const attrNameNode = attrNode.name;
-        const namespace = attrNameNode.namespace.name;
-        const attrName = attrNameNode.name.name;
+        const namespace = attrNameNode.namespace.text;
+        const attrName = attrNameNode.name.text;
         const fullName = getFullAttributeName(attrNameNode);
         const isComponent = !element.isDomElement;
 
@@ -108,6 +108,7 @@ export const noUnknownNamespaces = defineSolidRule({
             createDiagnostic(
               graph.file,
               attrNameNode,
+              graph.sourceFile,
               "no-unknown-namespaces",
               "componentNamespace",
               resolveMessage(messages.componentNamespace, { namespace, fullName }),
@@ -125,6 +126,7 @@ export const noUnknownNamespaces = defineSolidRule({
             createDiagnostic(
               graph.file,
               attrNameNode,
+              graph.sourceFile,
               "no-unknown-namespaces",
               "styleNamespace",
               resolveMessage(messages.styleNamespace, { property: attrName }),
@@ -139,6 +141,7 @@ export const noUnknownNamespaces = defineSolidRule({
             createDiagnostic(
               graph.file,
               attrNameNode,
+              graph.sourceFile,
               "no-unknown-namespaces",
               "classNamespace",
               resolveMessage(messages.classNamespace, { className: attrName }),
@@ -152,6 +155,7 @@ export const noUnknownNamespaces = defineSolidRule({
           createDiagnostic(
             graph.file,
             attrNameNode,
+            graph.sourceFile,
             "no-unknown-namespaces",
             "unknownNamespace",
             resolveMessage(messages.unknownNamespace, { namespace, fullName, validNamespaces: VALID_NAMESPACES_LIST }),

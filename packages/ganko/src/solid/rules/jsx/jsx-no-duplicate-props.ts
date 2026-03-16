@@ -15,12 +15,11 @@
  * - Children conflicts: children prop vs JSX children vs innerHTML vs textContent
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { JSXElementEntity, JSXAttributeEntity } from "../../impl";
 import { defineSolidRule } from "../../rule";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
-import { getSourceCode } from "../../queries/get";
 import { isWhitespace } from "@drskillissue/ganko-shared";
 
 const ON_PREFIX = /^on(?:capture)?:/
@@ -39,7 +38,7 @@ const messages = {
  * Represents a detected duplicate prop issue.
  */
 interface DuplicatePropIssue {
-  node: T.Node;
+  node: ts.Node;
   messageKey: "noDuplicateProps" | "noDuplicateClass" | "noDuplicateChildren";
   message: string;
   fix?: Fix;
@@ -56,6 +55,7 @@ interface PropAnalysisContext {
   hasInnerHTML: boolean;
   hasTextContent: boolean;
   sourceText: string;
+  sourceFile: ts.SourceFile;
 }
 
 /**
@@ -81,8 +81,8 @@ function getMessageKeyForDuplicateProp(normalizedName: string): "noDuplicateClas
 /**
  * Find token before node by scanning source text backwards.
  */
-function findTokenEndBefore(node: T.Node, sourceText: string): number {
-  let pos = node.range[0] - 1;
+function findTokenEndBefore(node: ts.Node, sourceText: string, sourceFile: ts.SourceFile): number {
+  let pos = node.getStart(sourceFile) - 1;
   while (pos >= 0 && isWhitespace(sourceText.charCodeAt(pos))) {
     pos--;
   }
@@ -92,13 +92,13 @@ function findTokenEndBefore(node: T.Node, sourceText: string): number {
 /**
  * Check a single prop for duplication against already-seen props.
  */
-function checkPropForDuplication(ctx: PropAnalysisContext, name: string, propNode: T.Node, canFix: boolean): void {
+function checkPropForDuplication(ctx: PropAnalysisContext, name: string, propNode: ts.Node, canFix: boolean): void {
   const normalizedName = normalizePropName(name, ctx.ignoreCase);
 
   if (ctx.seenProps.has(normalizedName)) {
     const fix: Fix | undefined = canFix
       ? [{
-          range: [findTokenEndBefore(propNode, ctx.sourceText), propNode.range[1]],
+          range: [findTokenEndBefore(propNode, ctx.sourceText, ctx.sourceFile), propNode.end],
           text: "",
         }]
       : undefined;
@@ -132,7 +132,7 @@ function checkPropForDuplication(ctx: PropAnalysisContext, name: string, propNod
 function checkChildrenConflicts(
   ctx: PropAnalysisContext,
   element: JSXElementEntity,
-  openingElementNode: T.Node,
+  openingElementNode: ts.Node,
 ): void {
   const elementHasChildren = element.children.length > 0;
 
@@ -176,6 +176,7 @@ function analyzeElementProps(
   element: JSXElementEntity,
   ignoreCase: boolean,
   sourceText: string,
+  sourceFile: ts.SourceFile,
 ): DuplicatePropIssue[] {
   const ctx: PropAnalysisContext = {
     seenProps: new Set(),
@@ -185,6 +186,7 @@ function analyzeElementProps(
     hasInnerHTML: false,
     hasTextContent: false,
     sourceText,
+    sourceFile,
   };
 
   const attributes = element.attributes;
@@ -198,7 +200,7 @@ function analyzeElementProps(
     }
   }
 
-  if (element.node.type === "JSXElement") {
+  if (ts.isJsxElement(element.node)) {
     checkChildrenConflicts(ctx, element, element.node.openingElement);
   }
 
@@ -222,22 +224,23 @@ export const jsxNoDuplicateProps = defineSolidRule({
     if (elements.length === 0) return;
 
     const ignoreCase = false;
-    const sourceText = getSourceCode(graph).text;
+    const sourceFile = graph.sourceFile;
+    const sourceText = sourceFile.text;
 
     for (let i = 0, len = elements.length; i < len; i++) {
       const element = elements[i];
       if (!element) continue;
 
-      if (element.node.type === "JSXFragment") {
+      if (ts.isJsxFragment(element.node)) {
         continue;
       }
 
-      const issues = analyzeElementProps(element, ignoreCase, sourceText);
+      const issues = analyzeElementProps(element, ignoreCase, sourceText, sourceFile);
 
       for (let j = 0, issuesLen = issues.length; j < issuesLen; j++) {
         const issue = issues[j];
         if (!issue) continue;
-        emit(createDiagnostic(graph.file, issue.node, "jsx-no-duplicate-props", issue.messageKey, issue.message, "error", issue.fix));
+        emit(createDiagnostic(graph.file, issue.node, graph.sourceFile, "jsx-no-duplicate-props", issue.messageKey, issue.message, "error", issue.fix));
       }
     }
   },

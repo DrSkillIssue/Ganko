@@ -11,7 +11,7 @@
  * Does NOT flag pattern-match/mapping patterns where each branch has different logic.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getContainingFunction, iterateVariables } from "../../queries"
@@ -43,36 +43,37 @@ type GuardOutcome = string | null
  * @param node - The read's identifier node
  * @returns The outcome key, or null if not a guard pattern
  */
-function getGuardOutcome(node: T.Node): GuardOutcome {
+function getGuardOutcome(node: ts.Node): GuardOutcome {
   const parent = node.parent
   if (!parent) return null
-  if (parent.type !== "BinaryExpression") return null
-  if (parent.operator !== "===" && parent.operator !== "!==") return null
+  if (!ts.isBinaryExpression(parent)) return null
+  if (parent.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken && parent.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken) return null
 
   const other = parent.left === node ? parent.right : parent.left
-  if (other.type !== "Literal") return null
-  if (typeof other.value !== "string") return null
+  if (!ts.isStringLiteral(other)) return null
 
   // Walk up to find the if-statement this check controls
   const ifStmt = findGuardIf(parent)
   if (!ifStmt) return null
 
   // The if body must be a single statement
-  const body = ifStmt.consequent
-  const stmt = body.type === "BlockStatement"
-    ? (body.body.length === 1 ? body.body[0] : null)
+  const body = ifStmt.thenStatement
+  const stmt = ts.isBlock(body)
+    ? (body.statements.length === 1 ? body.statements[0] : null)
     : body
   if (!stmt) return null
 
   // Classify the outcome
-  if (stmt.type === "ReturnStatement") {
-    const arg = stmt.argument
+  if (ts.isReturnStatement(stmt)) {
+    const arg = stmt.expression
     if (!arg) return "return:void"
-    if (arg.type === "Literal") return `return:${String(arg.value)}`
+    if (ts.isStringLiteral(arg) || ts.isNumericLiteral(arg)) return `return:${arg.text}`
+    if (arg.kind === ts.SyntaxKind.TrueKeyword) return "return:true"
+    if (arg.kind === ts.SyntaxKind.FalseKeyword) return "return:false"
     return "return:expr"
   }
-  if (stmt.type === "ContinueStatement") return "continue"
-  if (stmt.type === "BreakStatement") return "break"
+  if (ts.isContinueStatement(stmt)) return "continue"
+  if (ts.isBreakStatement(stmt)) return "break"
 
   return null
 }
@@ -83,14 +84,14 @@ function getGuardOutcome(node: T.Node): GuardOutcome {
  * on the same variable — but we keep it strict: the BinaryExpression must
  * be the sole test of the if-statement).
  */
-function findGuardIf(expr: T.BinaryExpression): T.IfStatement | null {
+function findGuardIf(expr: ts.BinaryExpression): ts.IfStatement | null {
   const parent = expr.parent
   if (!parent) return null
-  if (parent.type === "IfStatement" && parent.test === expr) return parent
+  if (ts.isIfStatement(parent) && parent.expression === expr) return parent
 
-  if (parent.type === "UnaryExpression" && parent.operator === "!") {
+  if (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken) {
     const maybeIf = parent.parent
-    if (maybeIf && maybeIf.type === "IfStatement" && isDirectUnaryTest(maybeIf.test, expr)) {
+    if (maybeIf && ts.isIfStatement(maybeIf) && isDirectUnaryTest(maybeIf.expression, expr)) {
       return maybeIf
     }
   }
@@ -101,8 +102,8 @@ function findGuardIf(expr: T.BinaryExpression): T.IfStatement | null {
 /**
  * Checks if the if-test is `!expr` where expr is our binary expression.
  */
-function isDirectUnaryTest(test: T.Expression, expr: T.BinaryExpression): boolean {
-  return test.type === "UnaryExpression" && test.operator === "!" && test.argument === expr
+function isDirectUnaryTest(test: ts.Expression, expr: ts.BinaryExpression): boolean {
+  return ts.isPrefixUnaryExpression(test) && test.operator === ts.SyntaxKind.ExclamationToken && (test.operand as ts.Node) === (expr as ts.Node)
 }
 
 export const preferSetHasOverEqualityChain = defineSolidRule({
@@ -124,7 +125,7 @@ export const preferSetHasOverEqualityChain = defineSolidRule({
       if (reads.length < THRESHOLD) continue
 
       // Group guard-pattern reads by enclosing function AND outcome
-      const byFunction = new Map<string, Map<string, T.Node[]>>()
+      const byFunction = new Map<string, Map<string, ts.Node[]>>()
 
       for (let i = 0, len = reads.length; i < len; i++) {
         const read = reads[i]
@@ -166,6 +167,7 @@ export const preferSetHasOverEqualityChain = defineSolidRule({
             createDiagnostic(
               graph.file,
               firstNode,
+              graph.sourceFile,
               "prefer-set-has-over-equality-chain",
               "equalityChain",
               resolveMessage(messages.equalityChain, {

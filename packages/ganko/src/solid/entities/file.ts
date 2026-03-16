@@ -4,7 +4,7 @@
  * Represents a parsed TypeScript/TSX file in the graph.
  */
 
-import type { TSESLint } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FunctionEntity } from "./function";
 import type { CallEntity } from "./call";
 import type { VariableEntity } from "./variable";
@@ -22,7 +22,7 @@ import type { ConditionalSpreadEntity } from "./spread";
 export interface FileEntity {
   id: number;
   path: string;
-  sourceCode: TSESLint.SourceCode | null;
+  sourceFile: ts.SourceFile | null;
   functions: FunctionEntity[];
   calls: CallEntity[];
   variables: VariableEntity[];

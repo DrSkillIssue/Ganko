@@ -5,9 +5,7 @@
  * command can run single-file and cross-file diagnostics without duplication.
  */
 import {
-  parseContent,
-  parseContentWithProgram,
-  parseFile,
+  createSolidInput,
   analyzeInput,
   buildSolidGraph,
   buildCSSGraph,
@@ -16,8 +14,7 @@ import {
   GraphCache,
   createOverrideEmit,
 } from "@drskillissue/ganko";
-import type { CSSInput, Diagnostic, SolidGraph, SolidInput, TailwindValidator } from "@drskillissue/ganko";
-import type ts from "typescript";
+import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";
 import { readFileSync } from "node:fs";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
@@ -42,30 +39,6 @@ export function readCSSFilesFromDisk(
   return result;
 }
 
-/**
- * Parse file content, optionally enriching with TypeScript type info.
- *
- * @param path - Canonical file path
- * @param content - Source text
- * @param program - TypeScript program (null for type-free parse)
- * @param logger - Logger for debug output
- * @returns Parsed SolidInput ready for graph building or analysis
- */
-export function parseWithOptionalProgram(
-  path: string,
-  content: string,
-  program: ts.Program | null,
-  logger?: Logger,
-): SolidInput {
-  if (logger?.enabled) logger.trace(`parseWithOptionalProgram: ${path} program=${program !== null ? "yes" : "NO"} content=${content.length} chars`);
-  const t0 = performance.now();
-  const result = program
-    ? parseContentWithProgram(path, content, program, logger)
-    : parseContent(path, content, logger);
-  if (logger?.enabled) logger.trace(`parseWithOptionalProgram: ${path} parsed in ${(performance.now() - t0).toFixed(1)}ms`);
-  return result;
-}
-
 export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; emit: (d: Diagnostic) => void } {
   const results: Diagnostic[] = [];
   const raw = (d: Diagnostic) => results.push(d);
@@ -79,23 +52,21 @@ export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; 
  *
  * @param project - The ganko Project instance
  * @param path - Canonical file path
+ * @param logger - Logger for debug output
  * @returns Builder function that produces a SolidGraph
  */
 export function buildSolidGraphForPath(project: Project, path: string, logger?: Logger): () => SolidGraph {
   return () => {
-    const program = project.getProgram(path);
-    const sf = program?.getSourceFile(path);
-    if (sf) {
-      return buildSolidGraph(parseWithOptionalProgram(path, sf.text, program, logger));
-    }
-    return buildSolidGraph(parseFile(path, logger));
+    const program = project.getProgram();
+    const input = createSolidInput(path, program, logger);
+    return buildSolidGraph(input);
   };
 }
 
 /**
  * Run single-file diagnostics.
  *
- * When content is provided (unsaved buffer), uses parseContent + analyzeInput
+ * When content is provided (unsaved buffer), uses createSolidInput + analyzeInput
  * to analyze in-memory content rather than reading from disk.
  *
  * @param project - The ganko Project
@@ -123,9 +94,10 @@ export function runSingleFileDiagnostics(
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
-    const program = project.getProgram(key);
-    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics: ${key} program=${program !== null ? "yes" : "NO"}`);
-    analyzeInput(parseWithOptionalProgram(key, content, program, logger), emit);
+    const program = project.getProgram();
+    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics: ${key} program=yes`);
+    const input = createSolidInput(key, program, logger);
+    analyzeInput(input, emit);
     if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
     return results;
   }
@@ -219,7 +191,7 @@ function rebuildGraphsAndRunCrossFileRules(
 
   let rebuilt = 0;
   for (const solidPath of fileIndex.solidFiles) {
-    const version = project.getScriptVersion(solidPath) ?? "0";
+    const version = "0";
     if (!cache.hasSolidGraph(solidPath, version)) {
       if (log.enabled) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
       cache.getSolidGraph(solidPath, version, buildSolidGraphForPath(project, solidPath, log));

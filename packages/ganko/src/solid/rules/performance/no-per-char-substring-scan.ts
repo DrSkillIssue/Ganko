@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName } from "../../queries"
@@ -34,13 +34,13 @@ export const noPerCharSubstringScan = defineSolidRule({
       for (let j = 0; j < calls.length; j++) {
         const call = calls[j]
         if (!call) continue;
-        if (call.node.type !== "CallExpression") continue
+        if (!ts.isCallExpression(call.node)) continue
         if (!getEnclosingLoop(call.node)) continue
 
-        const callee = call.node.callee
-        if (callee.type !== "MemberExpression") continue
-        if (callee.object.type !== "Identifier") continue
-        if (!isStringLikeReceiver(graph, callee.object, call.calleeRootVariable)) continue
+        const callee = call.node.expression
+        if (!ts.isPropertyAccessExpression(callee)) continue
+        if (!ts.isIdentifier(callee.expression)) continue
+        if (!isStringLikeReceiver(graph, callee.expression, call.calleeRootVariable)) continue
 
         if (!method) return;
         if (!isPerCharacterPattern(call.node, method)) continue
@@ -49,6 +49,7 @@ export const noPerCharSubstringScan = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "no-per-char-substring-scan",
             "perCharSubstring",
             resolveMessage(messages.perCharSubstring, { method }),
@@ -60,7 +61,7 @@ export const noPerCharSubstringScan = defineSolidRule({
   },
 })
 
-function isPerCharacterPattern(node: T.CallExpression, method: "charAt" | "slice" | "substring"): boolean {
+function isPerCharacterPattern(node: ts.CallExpression, method: "charAt" | "slice" | "substring"): boolean {
   if (method === "charAt") {
     const first = node.arguments[0]
     return first !== undefined && isIndexExpression(first)
@@ -72,21 +73,21 @@ function isPerCharacterPattern(node: T.CallExpression, method: "charAt" | "slice
   if (!first) return false
   if (!isIndexExpression(first)) return false
 
-  if (first.type === "Identifier") {
+  if (ts.isIdentifier(first)) {
     if (!second) return false
-    return isIndexPlusOne(second, first.name)
+    return isIndexPlusOne(second, first.text)
   }
 
   return false
 }
 
-function isIndexExpression(node: T.Node): boolean {
-  return node.type === "Identifier"
+function isIndexExpression(node: ts.Node): boolean {
+  return ts.isIdentifier(node)
 }
 
-function isIndexPlusOne(node: T.Node, indexName: string): boolean {
-  if (node.type !== "BinaryExpression") return false
-  if (node.operator !== "+") return false
-  if (node.left.type !== "Identifier" || node.left.name !== indexName) return false
-  return node.right.type === "Literal" && node.right.value === 1
+function isIndexPlusOne(node: ts.Node, indexName: string): boolean {
+  if (!ts.isBinaryExpression(node)) return false
+  if (node.operatorToken.kind !== ts.SyntaxKind.PlusToken) return false
+  if (!ts.isIdentifier(node.left) || node.left.text !== indexName) return false
+  return ts.isNumericLiteral(node.right) && node.right.text === "1"
 }

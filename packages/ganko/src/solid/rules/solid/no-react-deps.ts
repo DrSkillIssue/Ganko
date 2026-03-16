@@ -17,12 +17,12 @@
  * - `createEffect(() => console.log(signal()), [signal()]);` - React pattern
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript";
 import type { SolidGraph } from "../../impl"
 import type { Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
-import { traceToValue, getSourceCode } from "../../queries"
+import { traceToValue } from "../../queries"
 
 const messages = {
   noUselessDep:
@@ -45,15 +45,15 @@ const AUTO_TRACKING_PRIMITIVES = ["createEffect", "createMemo", "createRenderEff
  * @param node - The call expression to check
  * @returns True if the call has exactly 2 non-spread arguments
  */
-function hasReactStyleDeps(node: T.CallExpression): boolean {
+function hasReactStyleDeps(node: ts.CallExpression): boolean {
   const args = node.arguments
   if (args.length !== 2) return false
   const firstArg = args[0];
   if (!firstArg) return false
-  if (firstArg.type === "SpreadElement") return false
+  if (ts.isSpreadElement(firstArg)) return false
   const secondArg = args[1];
   if (!secondArg) return false
-  if (secondArg.type === "SpreadElement") return false
+  if (ts.isSpreadElement(secondArg)) return false
   return true
 }
 
@@ -68,13 +68,12 @@ function hasReactStyleDeps(node: T.CallExpression): boolean {
  * @param tracedArg1 - The traced second argument (should be an array)
  * @returns True if the pattern matches React-style dependency arrays
  */
-function isReactDepsPattern(tracedArg0: T.Node, tracedArg1: T.Node): boolean {
-  const type0 = tracedArg0.type
-  if (type0 !== "FunctionExpression" && type0 !== "ArrowFunctionExpression" && type0 !== "FunctionDeclaration") {
+function isReactDepsPattern(tracedArg0: ts.Node, tracedArg1: ts.Node): boolean {
+  if (!ts.isFunctionExpression(tracedArg0) && !ts.isArrowFunction(tracedArg0) && !ts.isFunctionDeclaration(tracedArg0)) {
     return false
   }
-  if (tracedArg0.params.length !== 0) return false
-  if (tracedArg1.type !== "ArrayExpression") return false
+  if (tracedArg0.parameters.length !== 0) return false
+  if (!ts.isArrayLiteralExpression(tracedArg1)) return false
   return true
 }
 
@@ -84,16 +83,21 @@ function isReactDepsPattern(tracedArg0: T.Node, tracedArg1: T.Node): boolean {
  */
 function createRemoveArgFix(
   graph: SolidGraph,
-  arg: T.Expression | T.SpreadElement,
+  arg: ts.Expression | ts.SpreadElement,
 ): Fix {
-  const sourceCode = getSourceCode(graph)
-  const commaBefore = sourceCode.getTokenBefore(arg)
-
-  if (commaBefore?.value === ",") {
-    return [{ range: [commaBefore.range[0], arg.range[1]], text: "" }]
+  const sourceText = graph.sourceFile.text;
+  // Find the comma before the arg by scanning backwards
+  const argStart = arg.getStart(graph.sourceFile);
+  let commaPos = argStart - 1;
+  while (commaPos >= 0 && sourceText[commaPos] !== ',') {
+    commaPos--;
   }
 
-  return [{ range: [arg.range[0], arg.range[1]], text: "" }]
+  if (commaPos >= 0 && sourceText[commaPos] === ',') {
+    return [{ range: [commaPos, arg.end], text: "" }]
+  }
+
+  return [{ range: [argStart, arg.end], text: "" }]
 }
 
 const options = {}
@@ -122,7 +126,7 @@ export const noReactDeps = defineSolidRule({
         const node = call.node
 
         // Only check CallExpressions (not NewExpressions)
-        if (node.type !== "CallExpression") continue
+        if (!ts.isCallExpression(node)) continue
 
         // Check if it has React-style deps pattern (exactly 2 non-spread args)
         if (!hasReactStyleDeps(node)) continue
@@ -134,12 +138,12 @@ export const noReactDeps = defineSolidRule({
 
         // Skip spread elements (already checked in hasReactStyleDeps, but needed for type narrowing)
         if (!arg0) return;
-        if (arg0.type === "SpreadElement" || arg1.type === "SpreadElement") continue
+        if (ts.isSpreadElement(arg0) || ts.isSpreadElement(arg1)) continue
 
         // Trace arguments to their actual values using graph.traceToValue()
         if (!arg0) return;
-        const tracedArg0 = traceToValue(graph, arg0, call.scope)
-        const tracedArg1 = traceToValue(graph, arg1, call.scope)
+        const tracedArg0 = traceToValue(graph, arg0 as ts.Expression, call.scope)
+        const tracedArg1 = traceToValue(graph, arg1 as ts.Expression, call.scope)
 
         if (!isReactDepsPattern(tracedArg0, tracedArg1)) continue
 
@@ -150,11 +154,12 @@ export const noReactDeps = defineSolidRule({
           createDiagnostic(
             graph.file,
             arg1,
+            graph.sourceFile,
             "no-react-deps",
             "noUselessDep",
             resolveMessage(messages.noUselessDep, { name: primitiveName }),
             "error",
-            isInlineArray ? createRemoveArgFix(graph, arg1) : undefined,
+            isInlineArray ? createRemoveArgFix(graph, arg1 as ts.Expression) : undefined,
           ),
         )
       }

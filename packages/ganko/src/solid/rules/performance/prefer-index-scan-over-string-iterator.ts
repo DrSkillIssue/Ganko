@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { iterateVariables } from "../../queries"
@@ -32,12 +32,12 @@ export const preferIndexScanOverStringIterator = defineSolidRule({
         const read = variable.reads[i]
         if (!read) continue;
         const parent = read.node.parent
-        if (!parent || parent.type !== "ForOfStatement") continue
-        if (parent.right !== read.node) continue
+        if (!parent || !ts.isForOfStatement(parent)) continue
+        if (parent.expression !== read.node) continue
         if (!isAsciiParsingContext(graph, parent)) continue
         if (isUnicodeAwareLoop(parent)) continue
 
-        const key = `${parent.range[0]}:${parent.range[1]}`
+        const key = `${parent.pos}:${parent.end}`
         if (reported.has(key)) continue
         reported.add(key)
 
@@ -45,6 +45,7 @@ export const preferIndexScanOverStringIterator = defineSolidRule({
           createDiagnostic(
             graph.file,
             parent,
+            graph.sourceFile,
             "prefer-index-scan-over-string-iterator",
             "preferIndexScan",
             messages.preferIndexScan,
@@ -56,22 +57,22 @@ export const preferIndexScanOverStringIterator = defineSolidRule({
   },
 })
 
-function isUnicodeAwareLoop(node: T.ForOfStatement): boolean {
-  const body = node.body
-  if (body.type !== "BlockStatement") return false
+function isUnicodeAwareLoop(node: ts.ForOfStatement): boolean {
+  const body = node.statement
+  if (!ts.isBlock(body)) return false
 
-  const statements = body.body
+  const statements = body.statements
   for (let i = 0; i < statements.length; i++) {
     const statement = statements[i]
     if (!statement) continue;
-    if (statement.type !== "ExpressionStatement") continue
+    if (!ts.isExpressionStatement(statement)) continue
     const expression = statement.expression
-    if (expression.type !== "CallExpression") continue
-    const callee = expression.callee
-    if (callee.type !== "MemberExpression") continue
-    const property = callee.property
-    if (property.type !== "Identifier") continue
-    if (property.name === "codePointAt" || property.name === "normalize") return true
+    if (!ts.isCallExpression(expression)) continue
+    const callee = expression.expression
+    if (!ts.isPropertyAccessExpression(callee)) continue
+    const property = callee.name
+    if (!ts.isIdentifier(property)) continue
+    if (property.text === "codePointAt" || property.text === "normalize") return true
   }
 
   return false

@@ -18,7 +18,7 @@
  * - GOOD: <Show when={Boolean(name())}>Name: {name()}</Show>
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { Diagnostic, Fix } from "../../../diagnostic"
 import type { SolidGraph } from "../../impl";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -41,7 +41,7 @@ const TS_STRING_LIKE = 402653316; // String | StringLiteral | TemplateLiteral
  */
 function getProblematicType(
    graph: SolidGraph,
-   node: T.Node,
+   node: ts.Node,
  ): "number" | "string" | null {
   const typeInfo = graph.typeResolver.getType(node);
   if (!typeInfo) return null;
@@ -67,9 +67,9 @@ const messages = {
 /**
  * Create fix to wrap expression with != null check.
  */
-function createNullCheckFix(node: T.Node, sourceCode: { getText(node: T.Node): string }): Fix {
-  const text = sourceCode.getText(node);
-  return [{ range: [node.range[0], node.range[1]], text: `${text} != null` }];
+function createNullCheckFix(node: ts.Node, sourceFile: ts.SourceFile): Fix {
+  const text = node.getText(sourceFile);
+  return [{ range: [node.getStart(sourceFile), node.end], text: `${text} != null` }];
 }
 
 /**
@@ -89,14 +89,15 @@ function analyzeShowElement(
   const problematicType = getProblematicType(graph, whenNode);
   if (!problematicType) return null;
 
-  const exprText = whenNode.type === "JSXEmptyExpression" ? "expression" : getExpressionName(whenNode);
-  if (element.node.type !== "JSXElement") return null;
+  const exprText = getExpressionName(whenNode);
+  if (!ts.isJsxElement(element.node)) return null;
 
-  const fix = createNullCheckFix(whenNode, graph.sourceCode);
+  const fix = createNullCheckFix(whenNode, graph.sourceFile);
 
   return createDiagnostic(
     file,
     element.node.openingElement,
+    graph.sourceFile,
     "show-truthy-conversion",
     "showNonBoolean",
     resolveMessage(messages.showNonBoolean, { expr: exprText }),

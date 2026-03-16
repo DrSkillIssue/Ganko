@@ -10,7 +10,7 @@ import type {
   LinkedEditingRanges,
 } from "vscode-languageserver";
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { HandlerContext } from "./handler-context";
 import { uriToPath } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
@@ -28,14 +28,14 @@ export function handleLinkedEditingRanges(
 ): LinkedEditingRanges | null {
   const { log } = ctx;
   const filePath = uriToPath(params.textDocument.uri);
-  const ast = ctx.getAST(filePath);
-  if (!ast) return null;
+  const sf = ctx.getAST(filePath);
+  if (!sf) return null;
 
   const line = params.position.line + 1;
   const col = params.position.character;
   const targetPos = packPos(line, col);
 
-  const result = findJSXElementWithTagAtPosition(ast, targetPos);
+  const result = findJSXElementWithTagAtPosition(sf, targetPos);
   if (!result) return null;
 
   const { element, tagName } = result;
@@ -46,24 +46,23 @@ export function handleLinkedEditingRanges(
   }
   if (log.enabled) log.trace(`linkedEditing: <${tagName}> at ${filePath}:${params.position.line}:${params.position.character}`);
 
-  const openName = element.openingElement.name;
-  const closeName = element.closingElement.name;
-  const openLoc = openName.loc;
-  const closeLoc = closeName.loc;
+  const openTagName = element.openingElement.tagName;
+  const closeTagName = element.closingElement.tagName;
 
-  if (!openLoc || !closeLoc) return null;
+  const openStart = sf.getLineAndCharacterOfPosition(openTagName.getStart(sf));
+  const closeStart = sf.getLineAndCharacterOfPosition(closeTagName.getStart(sf));
 
   const tagLen = tagName.length;
 
   return {
     ranges: [
       {
-        start: { line: openLoc.start.line - 1, character: openLoc.start.column },
-        end: { line: openLoc.start.line - 1, character: openLoc.start.column + tagLen },
+        start: { line: openStart.line, character: openStart.character },
+        end: { line: openStart.line, character: openStart.character + tagLen },
       },
       {
-        start: { line: closeLoc.start.line - 1, character: closeLoc.start.column },
-        end: { line: closeLoc.start.line - 1, character: closeLoc.start.column + tagLen },
+        start: { line: closeStart.line, character: closeStart.character },
+        end: { line: closeStart.line, character: closeStart.character + tagLen },
       },
     ],
     wordPattern: "[a-zA-Z][a-zA-Z0-9.]*",
@@ -71,100 +70,98 @@ export function handleLinkedEditingRanges(
 }
 
 interface JSXMatchResult {
-  element: T.JSXElement;
+  element: ts.JsxElement;
   tagName: string;
   isOnClosing: boolean;
 }
 
 /**
- * Find JSXElement with tag name at the given packed position.
+ * Find JsxElement with tag name at the given packed position.
  *
- * @param ast - Program AST to search
+ * @param sf - Source file to search
  * @param targetPos - Packed position (line << 16 | col)
  * @returns Match result with element and tag name, or null
  */
 function findJSXElementWithTagAtPosition(
-  ast: T.Program,
+  sf: ts.SourceFile,
   targetPos: number,
 ): JSXMatchResult | null {
-  const stack: T.Node[] = new Array(256);
+  const stack: ts.Node[] = new Array(256);
   let stackTop = 0;
 
-  // Push program body in reverse for correct traversal order
-  const body = ast.body;
-  for (let i = body.length - 1; i >= 0; i--) {
-    const item = body[i];
+  // Push source file statements in reverse for correct traversal order
+  const stmts = sf.statements;
+  for (let i = stmts.length - 1; i >= 0; i--) {
+    const item = stmts[i];
     if (item) stack[stackTop++] = item;
   }
 
   while (stackTop > 0) {
     const node = stack[--stackTop];
     if (!node) continue;
-    const loc = node.loc;
-    if (!loc) continue;
 
-    const nodeStart = packPos(loc.start.line, loc.start.column);
-    const nodeEnd = packPos(loc.end.line, loc.end.column);
+    const nodeStartPos = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    const nodeEndPos = sf.getLineAndCharacterOfPosition(node.end);
+    const nodeStart = packPos(nodeStartPos.line + 1, nodeStartPos.character);
+    const nodeEnd = packPos(nodeEndPos.line + 1, nodeEndPos.character);
 
     // Skip nodes that don't contain target position
     if (targetPos < nodeStart || targetPos > nodeEnd) continue;
 
-    // Check if this is a JSXElement with matching tag position
-    if (node.type === "JSXElement") {
-      const match = checkJSXElementTags(node, targetPos);
+    // Check if this is a JsxElement with matching tag position
+    if (ts.isJsxElement(node)) {
+      const match = checkJSXElementTags(node, targetPos, sf);
       if (match) return match;
     }
 
     // Push children for further exploration
-    stackTop = pushJSXRelevantChildren(node, stack, stackTop);
+    stackTop = pushJSXRelevantChildren(node, stack, stackTop, sf);
   }
 
   return null;
 }
 
 /**
- * Check if target position is on open or close tag name of a JSXElement.
+ * Check if target position is on open or close tag name of a JsxElement.
  *
- * @param element - JSXElement to check
+ * @param element - JsxElement to check
  * @param targetPos - Packed position (line << 16 | col)
+ * @param sf - Source file for position resolution
  * @returns Match result if position is on a tag name, or null
  */
 function checkJSXElementTags(
-  element: T.JSXElement,
+  element: ts.JsxElement,
   targetPos: number,
+  sf: ts.SourceFile,
 ): JSXMatchResult | null {
-  const openingName = element.openingElement.name;
-  const openLoc = openingName.loc;
+  const openingTagName = element.openingElement.tagName;
+  const openStartPos = sf.getLineAndCharacterOfPosition(openingTagName.getStart(sf));
+  const openEndPos = sf.getLineAndCharacterOfPosition(openingTagName.end);
+  const openStart = packPos(openStartPos.line + 1, openStartPos.character);
+  const openEnd = packPos(openEndPos.line + 1, openEndPos.character);
 
-  if (openLoc) {
-    const openStart = packPos(openLoc.start.line, openLoc.start.column);
-    const openEnd = packPos(openLoc.end.line, openLoc.end.column);
-
-    if (targetPos >= openStart && targetPos <= openEnd) {
-      return {
-        element,
-        tagName: extractTagName(openingName),
-        isOnClosing: false,
-      };
-    }
+  if (targetPos >= openStart && targetPos <= openEnd) {
+    return {
+      element,
+      tagName: extractTagName(openingTagName),
+      isOnClosing: false,
+    };
   }
 
   const closingElement = element.closingElement;
   if (closingElement) {
-    const closingName = closingElement.name;
-    const closeLoc = closingName.loc;
+    const closingTagName = closingElement.tagName;
+    const closeStartPos = sf.getLineAndCharacterOfPosition(closingTagName.getStart(sf));
+    const closeEndPos = sf.getLineAndCharacterOfPosition(closingTagName.end);
+    const closeStart = packPos(closeStartPos.line + 1, closeStartPos.character);
+    const closeEnd = packPos(closeEndPos.line + 1, closeEndPos.character);
 
-    if (closeLoc) {
-      const closeStart = packPos(closeLoc.start.line, closeLoc.start.column);
-      const closeEnd = packPos(closeLoc.end.line, closeLoc.end.column);
-
-      if (targetPos >= closeStart && targetPos <= closeEnd) {
-        return {
-          element,
-          tagName: extractTagName(openingName),
-          isOnClosing: true,
-        };
-      }
+    if (targetPos >= closeStart && targetPos <= closeEnd) {
+      return {
+        element,
+        tagName: extractTagName(openingTagName),
+        isOnClosing: true,
+      };
     }
   }
 
@@ -172,248 +169,260 @@ function checkJSXElementTags(
 }
 
 /**
- * Extract tag name string from JSX name node.
+ * Extract tag name string from JSX tag name node.
  *
- * @param name - JSX name node (identifier, member expr, or namespaced)
+ * @param tagName - JSX tag name node (identifier, property access, or qualified name)
  * @returns Tag name string (e.g., "div", "Foo.Bar", "svg:path")
  */
 function extractTagName(
-  name: T.JSXIdentifier | T.JSXMemberExpression | T.JSXNamespacedName,
+  tagName: ts.JsxTagNameExpression,
 ): string {
-  if (name.type === "JSXIdentifier") {
-    return name.name;
+  if (ts.isIdentifier(tagName)) {
+    return tagName.text;
   }
-  if (name.type === "JSXNamespacedName") {
-    return `${name.namespace.name}:${name.name.name}`;
+  if (ts.isPropertyAccessExpression(tagName)) {
+    return extractPropertyAccessName(tagName);
   }
-  // JSXMemberExpression
-  return extractMemberExpressionName(name);
+  if (ts.isJsxNamespacedName(tagName)) {
+    return `${tagName.namespace.text}:${tagName.name.text}`;
+  }
+  // Fallback — shouldn't normally reach here
+  return tagName.getText();
 }
 
 /**
- * Build full name from JSXMemberExpression.
+ * Build full name from property access expression (JSX member expression).
  *
- * @param node - JSXMemberExpression node
+ * @param node - PropertyAccessExpression node
  * @returns Dot-separated name (e.g., "Foo.Bar.Baz")
  */
-function extractMemberExpressionName(node: T.JSXMemberExpression): string {
-  let result = node.property.name;
-  let current: T.JSXMemberExpression | T.JSXIdentifier | T.JSXNamespacedName = node.object;
+function extractPropertyAccessName(node: ts.PropertyAccessExpression): string {
+  let result = node.name.text;
+  let current: ts.Expression = node.expression;
 
-  while (current.type === "JSXMemberExpression") {
-    result = current.property.name + "." + result;
-    current = current.object;
+  while (ts.isPropertyAccessExpression(current)) {
+    result = current.name.text + "." + result;
+    current = current.expression;
   }
 
-  if (current.type === "JSXIdentifier") {
-    return current.name + "." + result;
+  if (ts.isIdentifier(current)) {
+    return current.text + "." + result;
   }
-  // JSXNamespacedName
-  return current.namespace.name + ":" + current.name.name + "." + result;
+  // Fallback for unusual cases
+  return current.getText() + "." + result;
 }
 
 /**
- * Push children that may contain JSXElements onto traversal stack.
+ * Push children that may contain JsxElements onto traversal stack.
  *
  * @param node - Current node to get children from
  * @param stack - Traversal stack
  * @param stackTop - Current stack top index
+ * @param sf - Source file for position info
  * @returns New stack top index after pushing children
  */
 function pushJSXRelevantChildren(
-  node: T.Node,
-  stack: T.Node[],
+  node: ts.Node,
+  stack: ts.Node[],
   stackTop: number,
+  _sf: ts.SourceFile,
 ): number {
-  switch (node.type) {
-    case "Program":
-    case "BlockStatement": {
-      const len = node.body.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.body[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
+  if (ts.isSourceFile(node) || ts.isBlock(node)) {
+    const stmts = node.statements;
+    const len = stmts.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = stmts[i];
+      if (item) stack[stackTop++] = item;
     }
-
-    case "JSXElement":
-    case "JSXFragment": {
-      const len = node.children.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.children[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "JSXExpressionContainer":
-      if (node.expression.type !== "JSXEmptyExpression") {
-        stack[stackTop++] = node.expression;
-      }
-      return stackTop;
-
-    case "FunctionDeclaration":
-    case "FunctionExpression":
-    case "ArrowFunctionExpression":
-      if (node.body) {
-        stack[stackTop++] = node.body;
-      }
-      return stackTop;
-
-    case "ReturnStatement":
-      if (node.argument) {
-        stack[stackTop++] = node.argument;
-      }
-      return stackTop;
-
-    case "VariableDeclaration": {
-      const len = node.declarations.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.declarations[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "VariableDeclarator":
-      if (node.init) {
-        stack[stackTop++] = node.init;
-      }
-      return stackTop;
-
-    case "ExpressionStatement":
-      stack[stackTop++] = node.expression;
-      return stackTop;
-
-    case "CallExpression": {
-      const len = node.arguments.length;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.arguments[i];
-        if (item) stack[stackTop++] = item;
-      }
-      stack[stackTop++] = node.callee;
-      return stackTop;
-    }
-
-    case "ConditionalExpression":
-      stack[stackTop++] = node.alternate;
-      stack[stackTop++] = node.consequent;
-      stack[stackTop++] = node.test;
-      return stackTop;
-
-    case "LogicalExpression":
-    case "BinaryExpression":
-      stack[stackTop++] = node.right;
-      stack[stackTop++] = node.left;
-      return stackTop;
-
-    case "SequenceExpression": {
-      const len = node.expressions.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.expressions[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "ArrayExpression": {
-      const len = node.elements.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const el = node.elements[i];
-        if (el) stack[stackTop++] = el;
-      }
-      return stackTop;
-    }
-
-    case "ObjectExpression": {
-      const len = node.properties.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.properties[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "Property":
-      stack[stackTop++] = node.value;
-      return stackTop;
-
-    case "SpreadElement":
-      stack[stackTop++] = node.argument;
-      return stackTop;
-
-    case "IfStatement":
-      if (node.alternate) stack[stackTop++] = node.alternate;
-      stack[stackTop++] = node.consequent;
-      stack[stackTop++] = node.test;
-      return stackTop;
-
-    case "SwitchStatement": {
-      const len = node.cases.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.cases[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "SwitchCase": {
-      const len = node.consequent.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.consequent[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "ForStatement":
-    case "ForInStatement":
-    case "ForOfStatement":
-    case "WhileStatement":
-    case "DoWhileStatement":
-    case "ClassDeclaration":
-    case "ClassExpression":
-      stack[stackTop++] = node.body;
-      return stackTop;
-
-    case "TryStatement":
-      if (node.finalizer) stack[stackTop++] = node.finalizer;
-      if (node.handler) stack[stackTop++] = node.handler.body;
-      stack[stackTop++] = node.block;
-      return stackTop;
-
-    case "ClassBody": {
-      const len = node.body.length;
-      if (len === 0) return stackTop;
-      for (let i = len - 1; i >= 0; i--) {
-        const item = node.body[i];
-        if (item) stack[stackTop++] = item;
-      }
-      return stackTop;
-    }
-
-    case "MethodDefinition":
-    case "PropertyDefinition":
-      if (node.value) stack[stackTop++] = node.value;
-      return stackTop;
-
-    case "ExportDefaultDeclaration":
-      stack[stackTop++] = node.declaration;
-      return stackTop;
-
-    case "ExportNamedDeclaration":
-      if (node.declaration) stack[stackTop++] = node.declaration;
-      return stackTop;
-
-    default:
-      return stackTop;
+    return stackTop;
   }
+
+  if (ts.isJsxElement(node) || ts.isJsxFragment(node)) {
+    const len = node.children.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = node.children[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isJsxExpression(node)) {
+    if (node.expression) {
+      stack[stackTop++] = node.expression;
+    }
+    return stackTop;
+  }
+
+  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+    if (node.body) {
+      stack[stackTop++] = node.body;
+    }
+    return stackTop;
+  }
+
+  if (ts.isReturnStatement(node)) {
+    if (node.expression) {
+      stack[stackTop++] = node.expression;
+    }
+    return stackTop;
+  }
+
+  if (ts.isVariableStatement(node)) {
+    const decls = node.declarationList.declarations;
+    const len = decls.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = decls[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isVariableDeclaration(node)) {
+    if (node.initializer) {
+      stack[stackTop++] = node.initializer;
+    }
+    return stackTop;
+  }
+
+  if (ts.isExpressionStatement(node)) {
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isCallExpression(node)) {
+    const args = node.arguments;
+    const len = args.length;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = args[i];
+      if (item) stack[stackTop++] = item;
+    }
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    stack[stackTop++] = node.whenFalse;
+    stack[stackTop++] = node.whenTrue;
+    stack[stackTop++] = node.condition;
+    return stackTop;
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    stack[stackTop++] = node.right;
+    stack[stackTop++] = node.left;
+    return stackTop;
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    const len = node.elements.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const el = node.elements[i];
+      if (el) stack[stackTop++] = el;
+    }
+    return stackTop;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    const len = node.properties.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = node.properties[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isPropertyAssignment(node)) {
+    stack[stackTop++] = node.initializer;
+    return stackTop;
+  }
+
+  if (ts.isSpreadElement(node) || ts.isSpreadAssignment(node)) {
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isIfStatement(node)) {
+    if (node.elseStatement) stack[stackTop++] = node.elseStatement;
+    stack[stackTop++] = node.thenStatement;
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isSwitchStatement(node)) {
+    const clauses = node.caseBlock.clauses;
+    const len = clauses.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = clauses[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isCaseClause(node) || ts.isDefaultClause(node)) {
+    const stmts = node.statements;
+    const len = stmts.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = stmts[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node) ||
+      ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+    stack[stackTop++] = node.statement;
+    return stackTop;
+  }
+
+  if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+    const members = node.members;
+    const len = members.length;
+    if (len === 0) return stackTop;
+    for (let i = len - 1; i >= 0; i--) {
+      const item = members[i];
+      if (item) stack[stackTop++] = item;
+    }
+    return stackTop;
+  }
+
+  if (ts.isTryStatement(node)) {
+    if (node.finallyBlock) stack[stackTop++] = node.finallyBlock;
+    if (node.catchClause) stack[stackTop++] = node.catchClause.block;
+    stack[stackTop++] = node.tryBlock;
+    return stackTop;
+  }
+
+  if (ts.isMethodDeclaration(node) || ts.isPropertyDeclaration(node)) {
+    if (ts.isMethodDeclaration(node) && node.body) {
+      stack[stackTop++] = node.body;
+    }
+    if (ts.isPropertyDeclaration(node) && node.initializer) {
+      stack[stackTop++] = node.initializer;
+    }
+    return stackTop;
+  }
+
+  if (ts.isExportAssignment(node)) {
+    stack[stackTop++] = node.expression;
+    return stackTop;
+  }
+
+  if (ts.isExportDeclaration(node)) {
+    // No relevant children for JSX search
+    return stackTop;
+  }
+
+  return stackTop;
 }

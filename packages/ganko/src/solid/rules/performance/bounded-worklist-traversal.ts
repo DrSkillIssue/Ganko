@@ -2,7 +2,7 @@
  * Flags queue/worklist traversals that grow without bounded guards.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { ScopeEntity, VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -16,7 +16,7 @@ const messages = {
 const options = {}
 
 interface QueueUsage {
-  node: T.Node
+  node: ts.Node
   hasPushInLoop: boolean
   hasLengthInLoop: boolean
   hasConditionalLengthInLoop: boolean
@@ -49,6 +49,7 @@ export const boundedWorklistTraversal = defineSolidRule({
         createDiagnostic(
           graph.file,
           usage.node,
+          graph.sourceFile,
           "bounded-worklist-traversal",
           "boundedWorklist",
           resolveMessage(messages.boundedWorklist, {
@@ -62,15 +63,12 @@ export const boundedWorklistTraversal = defineSolidRule({
 })
 
 function isQueueLikeArray(variable: VariableEntity): boolean {
-  if (variable.assignments.length === 0) return false
-  const first = variable.assignments[0]
-  if (!first) return false
-  if (first.operator !== null) return false
-  return first.value.type === "ArrayExpression"
+  const init = variable.initializer
+  return init !== null && ts.isArrayLiteralExpression(init)
 }
 
 function summarizeQueueUsage(variable: VariableEntity): QueueUsage | null {
-  let firstPushNode: T.Node | null = null
+  let firstPushNode: ts.Node | null = null
   let hasPushInLoop = false
   let hasLengthInLoop = false
   let hasConditionalLengthInLoop = false
@@ -79,9 +77,9 @@ function summarizeQueueUsage(variable: VariableEntity): QueueUsage | null {
     const read = variable.reads[i]
     if (!read) continue;
     const parent = read.node.parent
-    if (!parent || parent.type !== "MemberExpression" || parent.object !== read.node) continue
+    if (!parent || !ts.isPropertyAccessExpression(parent) || parent.expression !== read.node) continue
 
-    const method = memberPropertyName(parent)
+    const method = parent.name.text
     if (!method) continue
 
     if (method === "length" && read.isInLoop) {
@@ -93,7 +91,7 @@ function summarizeQueueUsage(variable: VariableEntity): QueueUsage | null {
     if (method !== "push" || !read.isInLoop) continue
 
     const call = parent.parent
-    if (!call || call.type !== "CallExpression" || call.callee !== parent) continue
+    if (!call || !ts.isCallExpression(call) || call.expression !== parent) continue
 
     hasPushInLoop = true
     if (firstPushNode === null) firstPushNode = call
@@ -124,11 +122,11 @@ function hasVisitedSetGuard(queueVariable: VariableEntity): boolean {
       if (!read.isInLoop) continue
 
       const parent = read.node.parent
-      if (!parent || parent.type !== "MemberExpression" || parent.object !== read.node) continue
+      if (!parent || !ts.isPropertyAccessExpression(parent) || parent.expression !== read.node) continue
       const call = parent.parent
-      if (!call || call.type !== "CallExpression" || call.callee !== parent) continue
+      if (!call || !ts.isCallExpression(call) || call.expression !== parent) continue
 
-      const method = memberPropertyName(parent)
+      const method = parent.name.text
       if (method === "has") hasHas = true
       if (method === "add") hasAdd = true
       if (hasHas && hasAdd) return true
@@ -171,17 +169,13 @@ function resolveOwningFunctionScope(scope: ScopeEntity): ScopeEntity {
 }
 
 function isSetVariable(variable: VariableEntity): boolean {
-  if (variable.assignments.length === 0) return false
-  const first = variable.assignments[0]
-  if (!first) return false
-  if (first.operator !== null) return false
-
-  const value = first.value
-  if (value.type === "NewExpression" && value.callee.type === "Identifier") {
-    return value.callee.name === "Set"
+  const value = variable.initializer
+  if (!value) return false
+  if (ts.isNewExpression(value) && ts.isIdentifier(value.expression)) {
+    return value.expression.text === "Set"
   }
-  if (value.type === "CallExpression" && value.callee.type === "Identifier") {
-    return value.callee.name === "Set"
+  if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+    return value.expression.text === "Set"
   }
   return false
 }
@@ -189,11 +183,4 @@ function isSetVariable(variable: VariableEntity): boolean {
 function looksLikeWorklistName(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.includes("queue") || lower.includes("worklist")
-}
-
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
-  return null
 }

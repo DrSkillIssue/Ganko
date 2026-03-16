@@ -5,7 +5,7 @@
  * Example: `import("@typescript-eslint/utils").TSESLint.RuleFixer`
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 
 /**
@@ -18,7 +18,7 @@ import type { FileEntity } from "./file";
 export interface InlineImportEntity {
   readonly id: number;
   /** The TSImportType node */
-  readonly node: T.TSImportType;
+  readonly node: ts.ImportTypeNode;
   /** The file containing this inline import */
   readonly file: FileEntity;
   /** The module specifier being imported (e.g., "@typescript-eslint/utils") */

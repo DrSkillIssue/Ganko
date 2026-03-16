@@ -12,6 +12,7 @@ import type {
   SemanticTokens,
 } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
+import type ts from "typescript";
 import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
 import { uriToPath } from "@drskillissue/ganko-shared";
 
@@ -97,8 +98,9 @@ export function handleSemanticTokens(
 
   const tokens: RawToken[] = [];
 
-  emitReactiveVariables(graph.reactiveVariables, tokens);
-  emitReactiveVariables(graph.propsVariables, tokens);
+  const sf = graph.sourceFile;
+  emitReactiveVariables(graph.reactiveVariables, tokens, sf);
+  emitReactiveVariables(graph.propsVariables, tokens, sf);
   emitComputations(graph, tokens);
 
   if (tokens.length === 0) return null;
@@ -114,6 +116,7 @@ export function handleSemanticTokens(
 function emitReactiveVariables(
   variables: readonly VariableEntity[],
   tokens: RawToken[],
+  sf: ts.SourceFile,
 ): void {
   for (let i = 0, len = variables.length; i < len; i++) {
     const v = variables[i];
@@ -123,8 +126,8 @@ function emitReactiveVariables(
     const type = REACTIVE_KIND_TO_TYPE[v.reactiveKind];
     if (type === undefined) continue;
 
-    emitDeclarations(v, type, tokens);
-    emitReads(v.reads, type, tokens);
+    emitDeclarations(v, type, tokens, sf);
+    emitReads(v.reads, type, tokens, sf);
   }
 }
 
@@ -135,17 +138,17 @@ function emitDeclarations(
   v: VariableEntity,
   type: number,
   tokens: RawToken[],
+  sf: ts.SourceFile,
 ): void {
   const modifiers = MOD_REACTIVE | MOD_DECLARATION;
   const declarations = v.declarations;
   for (let i = 0, len = declarations.length; i < len; i++) {
     const decl = declarations[i];
     if (!decl) continue;
-    const loc = decl.loc;
-    if (!loc) continue;
+    const pos = sf.getLineAndCharacterOfPosition(decl.getStart(sf));
     tokens.push({
-      line: loc.start.line - 1,
-      character: loc.start.column,
+      line: pos.line,
+      character: pos.character,
       length: v.name.length,
       type,
       modifiers,
@@ -163,12 +166,13 @@ function emitReads(
   reads: readonly ReadEntity[],
   type: number,
   tokens: RawToken[],
+  sf: ts.SourceFile,
 ): void {
   for (let i = 0, len = reads.length; i < len; i++) {
     const read = reads[i];
     if (!read) continue;
-    const loc = read.node.loc;
-    if (!loc) continue;
+    const startPos = sf.getLineAndCharacterOfPosition(read.node.getStart(sf));
+    const endPos = sf.getLineAndCharacterOfPosition(read.node.end);
 
     const ctx = read.scope._resolvedContext;
     const tracked = ctx !== null
@@ -178,9 +182,9 @@ function emitReads(
       : MOD_REACTIVE;
 
     tokens.push({
-      line: loc.start.line - 1,
-      character: loc.start.column,
-      length: loc.end.column - loc.start.column,
+      line: startPos.line,
+      character: startPos.character,
+      length: startPos.line === endPos.line ? endPos.character - startPos.character : read.node.end - read.node.getStart(sf),
       type,
       modifiers,
     });
@@ -200,16 +204,17 @@ function emitComputations(
   for (let i = 0, len = computations.length; i < len; i++) {
     const comp = computations[i];
     if (!comp) continue;
-    const callee = comp.call.node.callee;
-    const loc = callee.loc;
-    if (!loc) continue;
+    const callee = comp.call.node.expression;
+    const sf = graph.sourceFile;
+    const startPos = sf.getLineAndCharacterOfPosition(callee.getStart(sf));
+    const endPos = sf.getLineAndCharacterOfPosition(callee.end);
     // Skip multi-line callees — LSP semantic tokens require length on a single line
-    if (loc.start.line !== loc.end.line) continue;
+    if (startPos.line !== endPos.line) continue;
 
     tokens.push({
-      line: loc.start.line - 1,
-      character: loc.start.column,
-      length: loc.end.column - loc.start.column,
+      line: startPos.line,
+      character: startPos.character,
+      length: endPos.character - startPos.character,
       type: TYPE_EFFECT,
       modifiers: MOD_REACTIVE,
     });

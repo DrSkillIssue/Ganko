@@ -19,7 +19,7 @@
  *    The function recalculates the same value for every iteration.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { Diagnostic } from "../../../diagnostic"
 import type { SolidGraph } from "../../impl";
 import type {
@@ -118,31 +118,24 @@ interface LoopCallbackInfo {
  * Collect all binding identifier names from a parameter or destructuring node.
  * Handles Identifier, ObjectPattern, ArrayPattern, AssignmentPattern, RestElement.
  */
-function collectBindingNames(node: T.Node, names: Set<string>): void {
-  switch (node.type) {
-    case "Identifier":
-      names.add(node.name)
-      return
-    case "AssignmentPattern":
-      collectBindingNames(node.left, names)
-      return
-    case "RestElement":
-      collectBindingNames(node.argument, names)
-      return
-    case "ObjectPattern":
-      for (let i = 0, len = node.properties.length; i < len; i++) {
-        const prop = node.properties[i]
-        if (!prop) continue
-        if (prop.type === "RestElement") collectBindingNames(prop, names)
-        else collectBindingNames(prop.value, names)
-      }
-      return
-    case "ArrayPattern":
-      for (let i = 0, len = node.elements.length; i < len; i++) {
-        const el = node.elements[i]
-        if (el) collectBindingNames(el, names)
-      }
-      return
+function collectBindingNames(node: ts.Node, names: Set<string>): void {
+  if (ts.isIdentifier(node)) {
+    names.add(node.text)
+  } else if (ts.isBindingElement(node)) {
+    collectBindingNames(node.name, names)
+  } else if (ts.isObjectBindingPattern(node)) {
+    for (let i = 0, len = node.elements.length; i < len; i++) {
+      const el = node.elements[i]
+      if (!el) continue
+      collectBindingNames(el, names)
+    }
+  } else if (ts.isArrayBindingPattern(node)) {
+    for (let i = 0, len = node.elements.length; i < len; i++) {
+      const el = node.elements[i]
+      if (el && ts.isBindingElement(el)) collectBindingNames(el, names)
+    }
+  } else if (ts.isParameter(node)) {
+    collectBindingNames(node.name, names)
   }
 }
 
@@ -163,21 +156,21 @@ function collectBindingNames(node: T.Node, names: Set<string>): void {
  * Only considers `const`/`let`/`var` declarations in the callback's
  * immediate body (BlockStatement).
  */
-function expandWithDerivedLocals(body: T.BlockStatement | T.Expression, dependentNames: Set<string>): void {
-  if (body.type !== "BlockStatement") return;
+function expandWithDerivedLocals(body: ts.Block | ts.Expression, dependentNames: Set<string>): void {
+  if (!ts.isBlock(body)) return;
 
   // Collect all variable declarations in the callback body (top level only)
-  const decls: { name: string; init: T.Expression }[] = [];
-  for (let i = 0, len = body.body.length; i < len; i++) {
-    const stmt = body.body[i];
+  const decls: { name: string; init: ts.Expression }[] = [];
+  for (let i = 0, len = body.statements.length; i < len; i++) {
+    const stmt = body.statements[i];
     if (!stmt) continue;
-    if (stmt.type !== "VariableDeclaration") continue;
-    for (let j = 0, dlen = stmt.declarations.length; j < dlen; j++) {
-      const declarator = stmt.declarations[j];
+    if (!ts.isVariableStatement(stmt)) continue;
+    for (let j = 0, dlen = stmt.declarationList.declarations.length; j < dlen; j++) {
+      const declarator = stmt.declarationList.declarations[j];
       if (!declarator) continue;
-      if (declarator.id.type !== "Identifier") continue;
-      if (!declarator.init) continue;
-      decls.push({ name: declarator.id.name, init: declarator.init });
+      if (!ts.isIdentifier(declarator.name)) continue;
+      if (!declarator.initializer) continue;
+      decls.push({ name: declarator.name.text, init: declarator.initializer });
     }
   }
 
@@ -217,7 +210,9 @@ function buildLoopScopeIndex(
       }
 
       // Expand with local variables derived from loop params
-      expandWithDerivedLocals(callbackFn.body, paramNames);
+      if (callbackFn.body) {
+        expandWithDerivedLocals(callbackFn.body, paramNames);
+      }
 
       const info: LoopCallbackInfo = {
         element,
@@ -303,6 +298,7 @@ function checkSignalCreation(
       createDiagnostic(
         file,
         call.node,
+        graph.sourceFile,
         "signal-in-loop",
         "signalInLoop",
         resolveMessage(messages.signalInLoop, { component: loopInfo.element.tag ?? "For" }),
@@ -338,7 +334,7 @@ function checkSignalCalls(
 ): void {
   // Track which nodes we've already reported to avoid duplicates
 
-  const reported = new WeakSet<T.Node>();
+  const reported = new WeakSet<ts.Node>();
 
   iterateSignalLikeReads(graph, (variable, read) => {
     // Only check actual calls (isProperAccess = true means it's called)
@@ -372,6 +368,7 @@ function checkSignalCalls(
       createDiagnostic(
         file,
         read.node,
+        graph.sourceFile,
         "signal-in-loop",
         "signalCallInvariant",
         resolveMessage(messages.signalCallInvariant, {
@@ -424,7 +421,7 @@ function checkDerivedCalls(
   graph: SolidGraph,
   loopScopeIndex: Map<number, LoopCallbackInfo>,
   diagnostics: Diagnostic[],
-  reported: WeakSet<T.Node>,
+  reported: WeakSet<ts.Node>,
   file: string,
 ): void {
   const derivedFunctionsByVar = buildDerivedFunctionMap(graph);
@@ -436,7 +433,7 @@ function checkDerivedCalls(
       const read = reads[i];
       if (!read) continue;
       const parent = read.node.parent;
-      if (parent?.type !== "CallExpression" || parent.callee !== read.node) continue;
+      if (!parent || !ts.isCallExpression(parent) || parent.expression !== read.node) continue;
 
       const loopInfo = loopScopeIndex.get(read.scope.id);
       if (!loopInfo) continue;
@@ -475,6 +472,7 @@ function checkDerivedCalls(
         createDiagnostic(
           file,
           read.node,
+          graph.sourceFile,
           "signal-in-loop",
           "derivedCallInvariant",
           resolveMessage(messages.derivedCallInvariant, {

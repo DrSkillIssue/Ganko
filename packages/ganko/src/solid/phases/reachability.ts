@@ -10,7 +10,6 @@
  *
  * Reachability flags are stored as a bitmask on FunctionEntity._reachability.
  */
-import type { TSESTree as _T } from "@typescript-eslint/utils";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import type { FunctionEntity } from "../entities/function";
@@ -98,7 +97,7 @@ function findEnclosingFunction(scope: ScopeEntity, graph: SolidGraph): FunctionE
   let current: ScopeEntity | null = scope;
   while (current) {
     if (current.kind === "function" && current.node) {
-      const fn = graph.functionsByNode.get(current.node);
+      const fn = graph.functionsByNode.get(current.node as any);
       if (fn) return fn;
     }
     current = current.parent;

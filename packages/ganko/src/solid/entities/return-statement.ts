@@ -4,14 +4,14 @@
  * Represents a return statement in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 
 /**
  * Represents a return statement in the SolidGraph.
  */
 export interface ReturnStatementEntity {
   id: number;
-  node: T.ReturnStatement;
+  node: ts.ReturnStatement;
   /** The containing function's ID */
   functionId: number;
   /** Whether this return has an argument (non-void return) */

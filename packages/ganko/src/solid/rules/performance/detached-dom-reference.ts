@@ -19,7 +19,7 @@
  *   const nodeRef = new WeakRef(document.querySelector("#content")!);
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -60,21 +60,22 @@ export const detachedDomReference = defineSolidRule({
         if (!call) continue;
 
         // Verify this is document.method() or el.method()
-        if (call.callee.type !== "MemberExpression") continue
+        if (!ts.isPropertyAccessExpression(call.callee) && !ts.isElementAccessExpression(call.callee)) continue
 
         const parent = call.node.parent
 
         // Case 1: const el = document.querySelector(...)  — at module scope
-        if (parent?.type === "VariableDeclarator") {
-          const varId = parent.id
-          if (varId.type === "Identifier" && call.scope.isModuleScope) {
+        if (parent && ts.isVariableDeclaration(parent)) {
+          const varId = parent.name
+          if (ts.isIdentifier(varId) && call.scope.isModuleScope) {
             emit(
               createDiagnostic(
                 graph.file,
                 call.node,
+                graph.sourceFile,
                 "detached-dom-reference",
                 "detachedRef",
-                resolveMessage(messages.detachedRef, { method, name: varId.name }),
+                resolveMessage(messages.detachedRef, { method, name: varId.text }),
                 "warn",
               ),
             )
@@ -83,15 +84,16 @@ export const detachedDomReference = defineSolidRule({
         }
 
         // Case 2: cachedEl = document.querySelector(...)  — assigned to module-scope var
-        if (parent?.type === "AssignmentExpression" && parent.left.type === "Identifier") {
-          if (isModuleScopedVariable(graph, parent.left.name)) {
+        if (parent && ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(parent.left)) {
+          if (isModuleScopedVariable(graph, parent.left.text)) {
             emit(
               createDiagnostic(
                 graph.file,
                 call.node,
+                graph.sourceFile,
                 "detached-dom-reference",
                 "detachedRef",
-                resolveMessage(messages.detachedRef, { method, name: parent.left.name }),
+                resolveMessage(messages.detachedRef, { method, name: parent.left.text }),
                 "warn",
               ),
             )
@@ -100,7 +102,7 @@ export const detachedDomReference = defineSolidRule({
         }
 
         // Case 3: state.el = document.querySelector(...)  — property on module-scope object
-        if (parent?.type === "AssignmentExpression" && parent.left.type === "MemberExpression") {
+        if (parent && ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && (ts.isPropertyAccessExpression(parent.left) || ts.isElementAccessExpression(parent.left))) {
           const root = getRootObject(parent.left)
           if (root && isModuleScopedVariable(graph, root)) {
             const propName = root + "." + getMemberPath(parent.left)
@@ -108,6 +110,7 @@ export const detachedDomReference = defineSolidRule({
               createDiagnostic(
                 graph.file,
                 call.node,
+                graph.sourceFile,
                 "detached-dom-reference",
                 "detachedRef",
                 resolveMessage(messages.detachedRef, { method, name: propName }),
@@ -136,12 +139,12 @@ function isModuleScopedVariable(graph: SolidGraph, name: string): boolean {
  * Get the root identifier name from a MemberExpression chain.
  * e.g., `state.el` -> "state", `a.b.c` -> "a"
  */
-function getRootObject(node: T.MemberExpression): string | null {
-  let current: T.Expression = node.object
-  while (current.type === "MemberExpression") {
-    current = current.object
+function getRootObject(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | null {
+  let current: ts.Expression = node.expression
+  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    current = current.expression
   }
-  if (current.type === "Identifier") return current.name
+  if (ts.isIdentifier(current)) return current.text
   return null
 }
 
@@ -149,11 +152,10 @@ function getRootObject(node: T.MemberExpression): string | null {
  * Get the property path from a MemberExpression.
  * e.g., `state.el` -> "el", `state.nested.el` -> "nested.el"
  */
-function getMemberPath(node: T.MemberExpression): string {
-  const prop = node.property
-  const name = prop.type === "Identifier" ? prop.name : "[computed]"
-  if (node.object.type === "MemberExpression") {
-    return getMemberPath(node.object) + "." + name
+function getMemberPath(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string {
+  const name = ts.isPropertyAccessExpression(node) ? node.name.text : "[computed]"
+  if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) {
+    return getMemberPath(node.expression) + "." + name
   }
   return name
 }

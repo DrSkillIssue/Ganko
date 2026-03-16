@@ -1,0 +1,57 @@
+import ts from "typescript";
+
+export interface IncrementalTypeScriptService {
+  getProgram(): ts.Program
+  getLanguageService(): ts.LanguageService
+  updateFile(path: string, content: string): void
+  dispose(): void
+}
+
+export function createIncrementalProgram(rootPath: string): IncrementalTypeScriptService {
+  const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
+  if (!tsconfigPath) throw new Error(`No tsconfig.json found in ${rootPath}`);
+  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, rootPath);
+
+  const fileContents = new Map<string, string>();
+  const fileVersions = new Map<string, number>();
+
+  const servicesHost: ts.LanguageServiceHost = {
+    getScriptFileNames: () => parsedConfig.fileNames,
+    getScriptVersion: (fileName) => String(fileVersions.get(fileName) ?? 0),
+    getScriptSnapshot: (fileName) => {
+      const content = fileContents.get(fileName);
+      if (content !== undefined) return ts.ScriptSnapshot.fromString(content);
+      if (!ts.sys.fileExists(fileName)) return undefined;
+      return ts.ScriptSnapshot.fromString(ts.sys.readFile(fileName) ?? "");
+    },
+    getCurrentDirectory: () => rootPath,
+    getCompilationSettings: () => parsedConfig.options,
+    getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
+    fileExists: (fileName) => fileContents.has(fileName) || ts.sys.fileExists(fileName),
+    readFile: (fileName) => fileContents.get(fileName) ?? ts.sys.readFile(fileName),
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+  };
+
+  const languageService = ts.createLanguageService(servicesHost, ts.createDocumentRegistry());
+
+  return {
+    getProgram(): ts.Program {
+      const program = languageService.getProgram();
+      if (!program) throw new Error("Failed to get program from language service");
+      return program;
+    },
+    getLanguageService(): ts.LanguageService {
+      return languageService;
+    },
+    updateFile(path: string, content: string): void {
+      fileContents.set(path, content);
+      fileVersions.set(path, (fileVersions.get(path) ?? 0) + 1);
+    },
+    dispose(): void {
+      languageService.dispose();
+    },
+  };
+}

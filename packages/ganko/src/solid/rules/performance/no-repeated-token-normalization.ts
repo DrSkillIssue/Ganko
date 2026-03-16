@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
@@ -27,7 +27,7 @@ export const noRepeatedTokenNormalization = defineSolidRule({
   options,
 
   check(graph, emit) {
-    const grouped = new Map<string, { node: T.Node; chain: string; name: string; count: number }>()
+    const grouped = new Map<string, { node: ts.Node; chain: string; name: string; count: number }>()
 
     for (let i = 0; i < NORMALIZATION_METHODS.length; i++) {
       const normMethod = NORMALIZATION_METHODS[i]
@@ -40,7 +40,7 @@ export const noRepeatedTokenNormalization = defineSolidRule({
         const { methods, root } = getMethodChain(graph, call)
         if (methods.length < 2) continue
         if (!allNormalizationMethods(methods)) continue
-        if (!root || root.type !== "Identifier") continue
+        if (!root || !ts.isIdentifier(root)) continue
 
         if (!call) return;
         const fn = getContainingFunction(graph, call.node)
@@ -72,6 +72,7 @@ export const noRepeatedTokenNormalization = defineSolidRule({
         createDiagnostic(
           graph.file,
           entry.node,
+          graph.sourceFile,
           "no-repeated-token-normalization",
           "repeatedTokenNormalization",
           resolveMessage(messages.repeatedTokenNormalization, {

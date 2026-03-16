@@ -2,7 +2,7 @@
  * Flags temporary Map pipelines that copy key-for-key into another Map.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -17,7 +17,7 @@ const options = {}
 
 interface LoopCopyInfo {
   outName: string
-  node: T.Node
+  node: ts.Node
 }
 
 export const avoidIntermediateMapCopy = defineSolidRule({
@@ -48,6 +48,7 @@ export const avoidIntermediateMapCopy = defineSolidRule({
         createDiagnostic(
           graph.file,
           loopCopy.node,
+          graph.sourceFile,
           "avoid-intermediate-map-copy",
           "intermediateMapCopy",
           resolveMessage(messages.intermediateMapCopy, {
@@ -63,14 +64,10 @@ export const avoidIntermediateMapCopy = defineSolidRule({
 
 function isLocalMap(variable: VariableEntity): boolean {
   if (variable.scope.kind === "program") return false
-  if (variable.assignments.length === 0) return false
-
-  const first = variable.assignments[0]
-  if (!first) return false
-  if (first.operator !== null) return false
-  if (first.value.type !== "NewExpression") return false
-  if (first.value.callee.type !== "Identifier") return false
-  return first.value.callee.name === "Map"
+  const init = variable.initializer
+  if (!init || !ts.isNewExpression(init)) return false
+  if (!init.expression || !ts.isIdentifier(init.expression)) return false
+  return init.expression.text === "Map"
 }
 
 function countForOfConsumers(variable: VariableEntity): number {
@@ -82,7 +79,7 @@ function countForOfConsumers(variable: VariableEntity): number {
     const parent = readNode.parent
     if (!parent) continue
 
-    if (parent.type === "ForOfStatement" && parent.right === readNode) {
+    if (ts.isForOfStatement(parent) && parent.expression === readNode) {
       count++
     }
   }
@@ -97,9 +94,9 @@ function escapesScope(variable: VariableEntity): boolean {
     const parent = node.parent
     if (!parent) continue
 
-    if (parent.type === "ReturnStatement") return true
-    if (parent.type === "VariableDeclarator" && parent.init === node) return true
-    if (parent.type === "AssignmentExpression" && parent.right === node) return true
+    if (ts.isReturnStatement(parent)) return true
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node) return true
+    if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && parent.right === node) return true
     if (isCallArgument(node, parent)) return true
   }
   return false
@@ -114,12 +111,12 @@ function summarizeMapUsage(variable: VariableEntity): { writes: number; queries:
     if (!read) continue;
     const readNode = read.node
     const parent = readNode.parent
-    if (!parent || parent.type !== "MemberExpression" || parent.object !== readNode) continue
+    if (!parent || !ts.isPropertyAccessExpression(parent) || parent.expression !== readNode) continue
 
     const call = parent.parent
-    if (!call || call.type !== "CallExpression" || call.callee !== parent) continue
+    if (!call || !ts.isCallExpression(call) || call.expression !== parent) continue
 
-    const method = memberPropertyName(parent)
+    const method = parent.name.text
     if (!method) continue
 
     if (method === "set") {
@@ -135,37 +132,39 @@ function summarizeMapUsage(variable: VariableEntity): { writes: number; queries:
   return { writes, queries }
 }
 
-function findMapCopyLoop(calls: readonly { node: T.CallExpression | T.NewExpression }[], temp: VariableEntity): LoopCopyInfo | null {
+function findMapCopyLoop(calls: readonly { node: ts.CallExpression | ts.NewExpression }[], temp: VariableEntity): LoopCopyInfo | null {
   for (let i = 0; i < temp.reads.length; i++) {
     const tempRead = temp.reads[i];
     if (!tempRead) continue;
     const readNode = tempRead.node
     const parent = readNode.parent
-    if (!parent || parent.type !== "ForOfStatement" || parent.right !== readNode) continue
+    if (!parent || !ts.isForOfStatement(parent) || parent.expression !== readNode) continue
 
-    const keyName = forOfKeyName(parent.left)
+    const keyName = forOfKeyName(parent.initializer)
     if (!keyName) continue
 
-    const loopRange = parent.range
+    const loopStart = parent.getStart()
+    const loopEnd = parent.end
     for (let j = 0; j < calls.length; j++) {
       const callEntry = calls[j];
       if (!callEntry) continue;
       const node = callEntry.node
-      if (node.type !== "CallExpression") continue
-      if (!isInside(node, loopRange)) continue
+      if (!ts.isCallExpression(node)) continue
+      const nodeStart = node.getStart()
+      if (!(nodeStart >= loopStart && node.end <= loopEnd)) continue
 
-      const callee = node.callee
-      if (callee.type !== "MemberExpression") continue
-      const method = memberPropertyName(callee)
+      const callee = node.expression
+      if (!ts.isPropertyAccessExpression(callee)) continue
+      const method = callee.name.text
       if (method !== "set") continue
-      if (callee.object.type !== "Identifier") continue
+      if (!ts.isIdentifier(callee.expression)) continue
 
       const firstArg = node.arguments[0]
-      if (!firstArg || firstArg.type !== "Identifier" || firstArg.name !== keyName) continue
-      if (callee.object.name === temp.name) continue
+      if (!firstArg || !ts.isIdentifier(firstArg) || firstArg.text !== keyName) continue
+      if (callee.expression.text === temp.name) continue
 
       return {
-        outName: callee.object.name,
+        outName: callee.expression.text,
         node,
       }
     }
@@ -174,42 +173,34 @@ function findMapCopyLoop(calls: readonly { node: T.CallExpression | T.NewExpress
   return null
 }
 
-function forOfKeyName(left: T.ForOfStatement["left"]): string | null {
-  if (left.type !== "VariableDeclaration") return null
+function forOfKeyName(left: ts.ForInitializer): string | null {
+  if (!ts.isVariableDeclarationList(left)) return null
   if (left.declarations.length !== 1) return null
   const decl = left.declarations[0]
-  if (!decl || decl.id.type !== "ArrayPattern") return null
-  const first = decl.id.elements[0]
-  if (!first || first.type !== "Identifier") return null
-  return first.name
+  if (!decl || !ts.isArrayBindingPattern(decl.name)) return null
+  const first = decl.name.elements[0]
+  if (!first || !ts.isBindingElement(first) || !ts.isIdentifier(first.name)) return null
+  return first.name.text
 }
 
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
-  return null
-}
-
-function isCallArgument(node: T.Node, parent: T.Node): boolean {
-  if (parent.type === "CallExpression" || parent.type === "NewExpression") {
-    for (let i = 0; i < parent.arguments.length; i++) {
-      const argument = parent.arguments[i]
-      if (!argument) continue;
-      if (argument === node) return true
-      if (argument.type === "SpreadElement" && argument.argument === node) return true
+function isCallArgument(node: ts.Node, parent: ts.Node): boolean {
+  if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+    const args = parent.arguments
+    if (args) {
+      for (let i = 0; i < args.length; i++) {
+        const argument = args[i]
+        if (!argument) continue;
+        if (argument === node) return true
+        if (ts.isSpreadElement(argument) && argument.expression === node) return true
+      }
     }
   }
 
-  if (parent.type === "SpreadElement") {
+  if (ts.isSpreadElement(parent)) {
     const grand = parent.parent
     if (!grand) return false
-    return grand.type === "CallExpression" || grand.type === "NewExpression"
+    return ts.isCallExpression(grand) || ts.isNewExpression(grand)
   }
 
   return false
-}
-
-function isInside(node: T.Node, range: readonly [number, number]): boolean {
-  return node.range[0] >= range[0] && node.range[1] <= range[1]
 }

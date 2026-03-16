@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import type ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { readNodeRefById } from "./rule-runtime"
@@ -20,7 +20,7 @@ export const jsxNoDuplicateClassTokenClassClasslist = defineCrossRule({
     for (let i = 0; i < context.solids.length; i++) {
       const solid = context.solids[i]
       if (!solid) continue
-      const classNodeByElementId = new Map<number, T.Node>()
+      const classNodeByElementId = new Map<number, ts.Node>()
 
       for (let j = 0; j < solid.jsxClassAttributes.length; j++) {
         const entry = solid.jsxClassAttributes[j]
@@ -55,6 +55,7 @@ export const jsxNoDuplicateClassTokenClassClasslist = defineCrossRule({
           emit(createDiagnostic(
             solid.file,
             classNodeByElementId.get(elementId) ?? ref.element.node,
+            solid.sourceFile,
             jsxNoDuplicateClassTokenClassClasslist.id,
             "duplicateClassToken",
             resolveMessage(messages.duplicateClassToken, { name: token }),

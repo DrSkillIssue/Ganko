@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { isKebabCase } from "@drskillissue/ganko-shared"
@@ -20,16 +21,17 @@ export const jsxStyleKebabCaseKeys = defineCrossRule({
   check(context, emit) {
     const { solids } = context
     forEachStylePropertyAcross(solids, (solid, p) => {
-      if (p.type !== "Property") return
-      if (p.computed) return
-      const n = objectKeyName(p.key)
+      if (!ts.isPropertyAssignment(p)) return
+      if (ts.isComputedPropertyName(p.name)) return
+      const n = objectKeyName(p.name)
       if (!n) return
       const kebab = normalizeStylePropertyKey(n)
       if (n === kebab && isKebabCase(n)) return
 
       emit(createDiagnostic(
         solid.file,
-        p.key,
+        p.name,
+        solid.sourceFile,
         jsxStyleKebabCaseKeys.id,
         "kebabStyleKey",
         resolveMessage(messages.kebabStyleKey, { name: n, kebab }),

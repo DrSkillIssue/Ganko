@@ -1,14 +1,62 @@
+import ts from "typescript"
+import { resolve } from "path"
 import { buildSolidGraph, analyzeInput } from "../../src/solid/plugin"
-import { parseContent } from "../../src/solid/parse"
+import { createSolidInput } from "../../src/solid/create-input"
 import type { Emit } from "../../src/graph"
 import type { SolidGraph, SolidInput } from "../../src"
 import type { Diagnostic, FixOperation } from "../../src/diagnostic"
 
 /**
- * Parse code and create SolidInput.
+ * Create an in-memory ts.Program from a map of virtual file contents.
+ * Falls back to the real filesystem for lib files (e.g. lib.d.ts).
+ */
+export function createTestProgram(files: Record<string, string>): ts.Program {
+  // Normalize paths to absolute so TypeScript's internal path normalization matches
+  const fileMap = new Map<string, string>()
+  for (const [key, value] of Object.entries(files)) {
+    fileMap.set(resolve(key), value)
+  }
+  const defaultHost = ts.createCompilerHost({})
+
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    getSourceFile(fileName, languageVersion) {
+      const content = fileMap.get(fileName)
+      if (content !== undefined) {
+        return ts.createSourceFile(fileName, content, languageVersion, true)
+      }
+      return defaultHost.getSourceFile(fileName, languageVersion)
+    },
+    fileExists(fileName) {
+      return fileMap.has(fileName) || defaultHost.fileExists(fileName)
+    },
+    readFile(fileName) {
+      return fileMap.get(fileName) ?? defaultHost.readFile(fileName)
+    },
+  }
+
+  return ts.createProgram({
+    rootNames: [...fileMap.keys()],
+    options: {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      jsx: ts.JsxEmit.Preserve,
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+    },
+    host,
+  })
+}
+
+/**
+ * Parse code and create SolidInput using the TypeScript compiler API.
  */
 export function parseCode(code: string, filePath = "test.tsx"): SolidInput {
-  return parseContent(filePath, code)
+  const resolvedPath = resolve(filePath)
+  const program = createTestProgram({ [filePath]: code })
+  return createSolidInput(resolvedPath, program)
 }
 
 /**

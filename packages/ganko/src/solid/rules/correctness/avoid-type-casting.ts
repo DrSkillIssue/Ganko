@@ -31,12 +31,13 @@
  * All checks are individually configurable via rule options.
  */
 
+import type ts from "typescript"
 import type { TypeAssertionEntity, TypePredicateEntity, UnsafeGenericAssertionEntity } from "../../entities/type-assertion"
 import type { Diagnostic, Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getExpressionName, getTypeName } from "../../util/expression"
-import { getSourceCode, getTypeAssertions, getTypePredicates, getUnsafeGenericAssertions } from "../../queries"
+import { getTypeAssertions, getTypePredicates, getUnsafeGenericAssertions } from "../../queries"
 
 interface Options extends Record<string, unknown> {
   doubleAssertion: boolean
@@ -86,11 +87,11 @@ const messages = {
  * @param sourceText - The full source code text
  * @returns A fix that replaces the assertion with just the expression
  */
-function createRemoveCastFix(assertion: TypeAssertionEntity, sourceText: string): Fix {
+function createRemoveCastFix(assertion: TypeAssertionEntity, sourceText: string, sourceFile: ts.SourceFile): Fix {
   const expr = assertion.expression
-  const exprText = sourceText.slice(expr.range[0], expr.range[1])
+  const exprText = sourceText.slice(expr.getStart(sourceFile), expr.end)
   return [{
-    range: [assertion.node.range[0], assertion.node.range[1]],
+    range: [assertion.node.getStart(sourceFile), assertion.node.end],
     text: exprText,
   }]
 }
@@ -108,6 +109,7 @@ function checkTypeAssertion(
   options: Options,
   sourceText: string,
   file: string,
+  sourceFile: ts.SourceFile,
 ): Diagnostic[] {
   const results: Diagnostic[] = []
   const name = getExpressionName(assertion.expression)
@@ -116,10 +118,11 @@ function checkTypeAssertion(
   // Check for unnecessary cast first - this is the most common AI slop pattern
   if (assertion.isUnnecessary && options.unnecessaryCast) {
     const exprType = assertion.expressionType ?? "inferred type"
-    const fix = createRemoveCastFix(assertion, sourceText)
+    const fix = createRemoveCastFix(assertion, sourceText, sourceFile)
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "unnecessaryCast",
       resolveMessage(messages.unnecessaryCast, { name, type: typeName, exprType }),
@@ -134,6 +137,7 @@ function checkTypeAssertion(
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "doubleAssertion",
       resolveMessage(messages.doubleAssertion, { name, type: typeName }),
@@ -145,6 +149,7 @@ function checkTypeAssertion(
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "castToAny",
       resolveMessage(messages.castToAny, { name }),
@@ -157,6 +162,7 @@ function checkTypeAssertion(
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "assertionInLoop",
       resolveMessage(messages.assertionInLoop, { name, type: typeName }),
@@ -168,6 +174,7 @@ function checkTypeAssertion(
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "importAssertion",
       resolveMessage(messages.importAssertion, { type: typeName }),
@@ -179,6 +186,7 @@ function checkTypeAssertion(
     results.push(createDiagnostic(
       file,
       assertion.node,
+      sourceFile,
       "avoid-type-casting",
       "simpleAssertion",
       resolveMessage(messages.simpleAssertion, { name, type: typeName }),
@@ -199,6 +207,7 @@ function checkTypePredicate(
   predicate: TypePredicateEntity,
   options: Options,
   file: string,
+  sourceFile: ts.SourceFile,
 ): Diagnostic | null {
   if (!options.typePredicate) return null
 
@@ -207,6 +216,7 @@ function checkTypePredicate(
   return createDiagnostic(
     file,
     predicate.node,
+    sourceFile,
     "avoid-type-casting",
     "typePredicate",
     resolveMessage(messages.typePredicate, { param: predicate.parameterName, type: typeName }),
@@ -224,12 +234,14 @@ function checkUnsafeGeneric(
   unsafeGeneric: UnsafeGenericAssertionEntity,
   options: Options,
   file: string,
+  sourceFile: ts.SourceFile,
 ): Diagnostic | null {
   if (!options.unsafeGeneric) return null
 
   return createDiagnostic(
     file,
     unsafeGeneric.assertion,
+    sourceFile,
     "avoid-type-casting",
     "unsafeGeneric",
     resolveMessage(messages.unsafeGeneric, { typeParam: unsafeGeneric.typeParameterName }),
@@ -261,14 +273,15 @@ export const avoidTypeCasting = defineSolidRule({
   },
   options,
   check(graph, emit) {
-    const sourceText = getSourceCode(graph).text
+    const sourceText = graph.sourceFile.text
     const file = graph.file
+    const sourceFile = graph.sourceFile
 
     const typeAssertions = getTypeAssertions(graph)
     for (let i = 0, len = typeAssertions.length; i < len; i++) {
       const assertion = typeAssertions[i];
       if (!assertion) continue;
-      const issues = checkTypeAssertion(assertion, options, sourceText, file)
+      const issues = checkTypeAssertion(assertion, options, sourceText, file, sourceFile)
       for (let j = 0, jlen = issues.length; j < jlen; j++) {
         const issue = issues[j];
         if (!issue) continue;
@@ -280,7 +293,7 @@ export const avoidTypeCasting = defineSolidRule({
     for (let i = 0, len = typePredicates.length; i < len; i++) {
       const predicate = typePredicates[i]
       if (!predicate) return;
-      const issue = checkTypePredicate(predicate, options, file)
+      const issue = checkTypePredicate(predicate, options, file, sourceFile)
       if (issue) {
         emit(issue)
       }
@@ -290,7 +303,7 @@ export const avoidTypeCasting = defineSolidRule({
     for (let i = 0, len = unsafeGenerics.length; i < len; i++) {
       const unsafeGeneric = unsafeGenerics[i]
       if (!unsafeGeneric) return;
-      const issue = checkUnsafeGeneric(unsafeGeneric, options, file)
+      const issue = checkUnsafeGeneric(unsafeGeneric, options, file, sourceFile)
       if (issue) {
         emit(issue)
       }

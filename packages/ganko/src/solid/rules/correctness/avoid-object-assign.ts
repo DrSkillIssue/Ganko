@@ -9,14 +9,13 @@
  * - Flags mutations without auto-fix: Object.assign(existing, props)
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { CallEntity } from "../../entities/call"
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { isEmptyObjectLiteral } from "../../util"
-import { getSourceCode } from "../../queries/get"
 
 const messages = {
   avoidMerge:
@@ -31,15 +30,14 @@ const messages = {
  * @param callee - The callee node from a CallExpression
  * @returns True if the callee is Object.assign
  */
-function isObjectAssign(callee: T.Expression | T.Super): boolean {
-  if (callee.type !== "MemberExpression") return false
-  if (callee.computed) return false
+function isObjectAssign(callee: ts.Expression): boolean {
+  if (!ts.isPropertyAccessExpression(callee)) return false
 
-  const object = callee.object
-  const property = callee.property
+  const object = callee.expression
+  const property = callee.name
 
-  if (object.type !== "Identifier" || object.name !== "Object") return false
-  if (property.type !== "Identifier" || property.name !== "assign") return false
+  if (!ts.isIdentifier(object) || object.text !== "Object") return false
+  if (!ts.isIdentifier(property) || property.text !== "assign") return false
 
   return true
 }
@@ -53,13 +51,13 @@ function isObjectAssign(callee: T.Expression | T.Super): boolean {
  * @returns True if this is a namespace pattern
  */
 function isNamespacePattern(call: CallEntity, graph: SolidGraph): boolean {
-  if (call.node.type !== "CallExpression") return false
+  if (!ts.isCallExpression(call.node)) return false
   const args = call.node.arguments
   if (args.length < 2) return false
 
   const firstArg = args[0]
   if (!firstArg) return false
-  if (firstArg.type === "SpreadElement") return false
+  if (ts.isSpreadElement(firstArg)) return false
 
   const typeInfo = graph.typeResolver.getType(firstArg)
   if (!typeInfo) return false
@@ -77,8 +75,9 @@ function isNamespacePattern(call: CallEntity, graph: SolidGraph): boolean {
 function buildMergeFix(
   call: CallEntity,
   text: string,
+  sourceFile: ts.SourceFile,
 ): Fix | undefined {
-  if (call.node.type !== "CallExpression") return undefined
+  if (!ts.isCallExpression(call.node)) return undefined
 
   const args = call.node.arguments
   if (args.length < 2) return undefined
@@ -89,17 +88,17 @@ function buildMergeFix(
   for (let i = 0; i < sourceArgs.length; i++) {
     const arg = sourceArgs[i]
     if (!arg) continue;
-    if (arg.type === "SpreadElement") {
-      spreadParts.push(`...${text.slice(arg.argument.range[0], arg.argument.range[1])}`)
+    if (ts.isSpreadElement(arg)) {
+      spreadParts.push(`...${text.slice(arg.expression.getStart(sourceFile), arg.expression.end)}`)
     } else {
-      spreadParts.push(`...${text.slice(arg.range[0], arg.range[1])}`)
+      spreadParts.push(`...${text.slice(arg.getStart(sourceFile), arg.end)}`)
     }
   }
 
   const replacement = `{ ${spreadParts.join(", ")} }`
 
   return [{
-    range: [call.node.range[0], call.node.range[1]],
+    range: [call.node.getStart(sourceFile), call.node.end],
     text: replacement,
   }]
 }
@@ -121,21 +120,21 @@ export const avoidObjectAssign = defineSolidRule({
     const calls = graph.callsByMethodName.get("assign") ?? []
     if (calls.length === 0) return
 
-    const text = getSourceCode(graph).text
+    const text = graph.sourceFile.text
 
     for (let i = 0, len = calls.length; i < len; i++) {
       const call = calls[i]
       if (!call) continue;
       // Verify it's Object.assign specifically
       if (!isObjectAssign(call.callee)) continue
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
 
       const args = call.node.arguments
       if (args.length === 0) continue
 
       const firstArg = args[0]
       if (!firstArg) continue;
-      if (firstArg.type === "SpreadElement") continue
+      if (ts.isSpreadElement(firstArg)) continue
 
       // Skip namespace patterns (function + properties)
       if (isNamespacePattern(call, graph)) {
@@ -144,16 +143,16 @@ export const avoidObjectAssign = defineSolidRule({
 
       // Case 1: Simple merge with empty object literal - can auto-fix
       if (isEmptyObjectLiteral(firstArg)) {
-        const fix = buildMergeFix(call, text)
+        const fix = buildMergeFix(call, text, graph.sourceFile)
         emit(
-          createDiagnostic(graph.file, call.node, "avoid-object-assign", "avoidMerge", messages.avoidMerge, "error", fix),
+          createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-object-assign", "avoidMerge", messages.avoidMerge, "error", fix),
         )
         continue
       }
 
       // Case 2: Mutation (non-empty first arg) - flag without auto-fix
       emit(
-        createDiagnostic(graph.file, call.node, "avoid-object-assign", "avoidMutation", messages.avoidMutation, "error"),
+        createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-object-assign", "avoidMutation", messages.avoidMutation, "error"),
       )
     }
   },

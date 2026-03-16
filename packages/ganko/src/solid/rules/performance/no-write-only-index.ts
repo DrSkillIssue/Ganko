@@ -5,7 +5,7 @@
  * iterate or copy it without any keyed lookup.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -61,6 +61,7 @@ export const noWriteOnlyIndex = defineSolidRule({
         createDiagnostic(
           graph.file,
           diagNode,
+          graph.sourceFile,
           "no-write-only-index",
           "writeOnlyIndex",
           resolveMessage(messages.writeOnlyIndex, { name: variable.name }),
@@ -72,24 +73,20 @@ export const noWriteOnlyIndex = defineSolidRule({
 })
 
 function resolveIndexKind(variable: VariableEntity): IndexKind | null {
-  if (variable.assignments.length === 0) return null
-  const first = variable.assignments[0]
-  if (!first) return null
-  if (first.operator !== null) return null
+  const value = variable.initializer
+  if (!value) return null
 
-  const value = first.value
-
-  if (value.type === "NewExpression" && value.callee.type === "Identifier") {
-    if (value.callee.name === "Map") return "map"
+  if (ts.isNewExpression(value) && ts.isIdentifier(value.expression)) {
+    if (value.expression.text === "Map") return "map"
     return null
   }
 
-  if (value.type === "CallExpression" && value.callee.type === "Identifier") {
-    if (value.callee.name === "Map") return "map"
+  if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+    if (value.expression.text === "Map") return "map"
     return null
   }
 
-  if (value.type === "ObjectExpression") return "object"
+  if (ts.isObjectLiteralExpression(value)) return "object"
 
   return null
 }
@@ -98,12 +95,20 @@ function isExportedAtDeclaration(variable: VariableEntity): boolean {
   for (let i = 0; i < variable.declarations.length; i++) {
     const decl = variable.declarations[i]
     if (!decl) continue;
-    if (decl.type !== "Identifier") continue
+    if (!ts.isIdentifier(decl)) continue
     const declarator = decl.parent
-    if (!declarator || declarator.type !== "VariableDeclarator") continue
+    if (!declarator || !ts.isVariableDeclaration(declarator)) continue
     const varDecl = declarator.parent
-    if (!varDecl || varDecl.type !== "VariableDeclaration") continue
-    if (varDecl.parent?.type === "ExportNamedDeclaration") return true
+    if (!varDecl || !ts.isVariableDeclarationList(varDecl)) continue
+    const varStmt = varDecl.parent
+    if (!varStmt || !ts.isVariableStatement(varStmt)) continue
+    if (varStmt.parent && ts.isExportDeclaration(varStmt.parent)) return true
+    // Check for export modifier on the variable statement
+    if (varStmt.modifiers) {
+      for (const mod of varStmt.modifiers) {
+        if (mod.kind === ts.SyntaxKind.ExportKeyword) return true
+      }
+    }
   }
   return false
 }
@@ -120,9 +125,9 @@ function collectIndexUsage(variable: VariableEntity, kind: IndexKind): IndexUsag
     const parent = readNode.parent
     if (!parent) continue
 
-    if (parent.type === "MemberExpression" && parent.object === readNode) {
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === readNode) {
       const call = parent.parent
-      if (call?.type === "CallExpression" && call.callee === parent) {
+      if (call && ts.isCallExpression(call) && call.expression === parent) {
         const method = memberPropertyName(parent)
         if (!method) {
           escapes = true
@@ -149,22 +154,7 @@ function collectIndexUsage(variable: VariableEntity, kind: IndexKind): IndexUsag
       }
 
       if (kind === "object") {
-        if (!parent.computed) {
-          escapes = true
-          continue
-        }
-
-        const grand = parent.parent
-        if (grand?.type === "AssignmentExpression" && grand.left === parent) {
-          writes++
-          continue
-        }
-        if (grand?.type === "UpdateExpression") {
-          writes++
-          continue
-        }
-
-        queries++
+        escapes = true
         continue
       }
 
@@ -175,30 +165,54 @@ function collectIndexUsage(variable: VariableEntity, kind: IndexKind): IndexUsag
       continue
     }
 
-    if (parent.type === "ForOfStatement" && parent.right === readNode) {
-      continue
-    }
+    if (ts.isElementAccessExpression(parent) && parent.expression === readNode) {
+      if (kind === "object") {
+        const grand = parent.parent
+        if (grand && ts.isBinaryExpression(grand) && grand.operatorToken.kind === ts.SyntaxKind.EqualsToken && grand.left === parent) {
+          writes++
+          continue
+        }
+        if (grand && (ts.isPrefixUnaryExpression(grand) || ts.isPostfixUnaryExpression(grand))) {
+          writes++
+          continue
+        }
 
-    if (parent.type === "ReturnStatement") {
+        queries++
+        continue
+      }
+
+      // Map property reads are only safe for size.
+      const propertyName = memberPropertyName(parent as unknown as ts.PropertyAccessExpression)
+      if (propertyName === "size") continue
       escapes = true
       continue
     }
 
-    if (parent.type === "ExportSpecifier" || parent.type === "ExportNamedDeclaration") {
+    if (ts.isForOfStatement(parent) && parent.expression === readNode) {
+      continue
+    }
+
+    if (ts.isReturnStatement(parent)) {
+      escapes = true
+      continue
+    }
+
+    if (ts.isExportSpecifier(parent) || ts.isExportDeclaration(parent)) {
       escapes = true
       continue
     }
 
     if (
-      parent.type === "VariableDeclarator" &&
-      parent.init === readNode
+      ts.isVariableDeclaration(parent) &&
+      parent.initializer === readNode
     ) {
       escapes = true
       continue
     }
 
     if (
-      parent.type === "AssignmentExpression" &&
+      ts.isBinaryExpression(parent) &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       parent.right === readNode
     ) {
       escapes = true
@@ -226,27 +240,29 @@ function looksLikeIndexName(name: string): boolean {
   return false
 }
 
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
+function memberPropertyName(node: ts.PropertyAccessExpression): string | null {
+  const property = node.name
+  if (ts.isIdentifier(property)) return property.text
   return null
 }
 
-function isCallArgument(node: T.Node, parent: T.Node): boolean {
-  if (parent.type === "CallExpression" || parent.type === "NewExpression") {
-    for (let i = 0; i < parent.arguments.length; i++) {
-      const argument = parent.arguments[i]
-      if (!argument) continue;
-      if (argument === node) return true
-      if (argument.type === "SpreadElement" && argument.argument === node) return true
+function isCallArgument(node: ts.Node, parent: ts.Node): boolean {
+  if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+    const args = parent.arguments
+    if (args) {
+      for (let i = 0; i < args.length; i++) {
+        const argument = args[i]
+        if (!argument) continue;
+        if (argument === node) return true
+        if (ts.isSpreadElement(argument) && argument.expression === node) return true
+      }
     }
   }
 
-  if (parent.type === "SpreadElement") {
+  if (ts.isSpreadElement(parent)) {
     const grand = parent.parent
     if (!grand) return false
-    return grand.type === "CallExpression" || grand.type === "NewExpression"
+    return ts.isCallExpression(grand) || ts.isNewExpression(grand)
   }
 
   return false

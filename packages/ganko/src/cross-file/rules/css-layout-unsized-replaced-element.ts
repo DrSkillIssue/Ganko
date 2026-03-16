@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { parsePxValue } from "../../css/parser/value-util"
 import { defineCrossRule } from "../rule"
@@ -42,6 +43,7 @@ export const cssLayoutUnsizedReplacedElement = defineCrossRule({
         createDiagnostic(
           ref.solid.file,
           ref.element.node,
+          ref.solid.sourceFile,
           cssLayoutUnsizedReplacedElement.id,
           "unsizedReplacedElement",
           resolveMessage(messages.unsizedReplacedElement, { tag }),
@@ -111,8 +113,8 @@ function readPositiveJsxAttribute(
   const staticString = getStaticStringFromJSXValue(attribute.valueNode)
   if (staticString !== null) return parsePositiveLength(staticString)
 
-  if (attribute.valueNode.type !== "JSXExpressionContainer") return false
-  if (attribute.valueNode.expression.type === "JSXEmptyExpression") return false
+  if (!ts.isJsxExpression(attribute.valueNode)) return false
+  if (!attribute.valueNode.expression) return false
   const staticNumeric = getStaticNumericValue(attribute.valueNode.expression)
   if (staticNumeric === null) return false
   return staticNumeric > 0

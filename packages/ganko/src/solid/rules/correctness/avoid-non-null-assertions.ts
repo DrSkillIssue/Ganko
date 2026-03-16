@@ -24,7 +24,6 @@ import type { Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getExpressionName } from "../../util/expression"
-import { getSourceCode } from "../../queries/get"
 
 const messages = {
   avoidNonNull:
@@ -48,16 +47,16 @@ export const avoidNonNullAssertions = defineSolidRule({
     const assertions = graph.nonNullAssertions
     if (assertions.length === 0) return
 
-    const sourceText = getSourceCode(graph).text
+    const sourceText = graph.sourceFile.text
 
     for (let i = 0, len = assertions.length; i < len; i++) {
       const assertion = assertions[i]
       if (!assertion) continue;
       const name = getExpressionName(assertion.expression)
-      const expressionText = sourceText.slice(assertion.expression.range[0], assertion.expression.range[1])
+      const expressionText = sourceText.slice(assertion.expression.getStart(graph.sourceFile), assertion.expression.end)
 
       const fix: Fix = [{
-        range: [assertion.node.range[0], assertion.node.range[1]],
+        range: [assertion.node.getStart(graph.sourceFile), assertion.node.end],
         text: expressionText,
       }]
 
@@ -65,6 +64,7 @@ export const avoidNonNullAssertions = defineSolidRule({
         createDiagnostic(
           graph.file,
           assertion.node,
+          graph.sourceFile,
           "avoid-non-null-assertions",
           "avoidNonNull",
           resolveMessage(messages.avoidNonNull, { name }),

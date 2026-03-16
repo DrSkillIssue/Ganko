@@ -1,7 +1,9 @@
 /**
  * SolidGraph Implementation
  */
-import { TSESTree as T, TSESLint } from "@typescript-eslint/utils";
+import ts from "typescript";
+import type { CommentEntry } from "../diagnostic";
+import { extractAllComments } from "../suppression";
 import type { SolidInput } from "./input";
 import type { ScopeEntity } from "./entities/scope";
 import type { VariableEntity } from "./entities/variable";
@@ -45,7 +47,7 @@ interface JSXStaticObjectKeyIndex {
 }
 
 interface JSXObjectPropertyWithElement {
-  readonly property: T.ObjectLiteralElementLike;
+  readonly property: ts.ObjectLiteralElementLike;
   readonly attr: JSXAttributeEntity;
   readonly element: JSXElementEntity;
 }
@@ -62,7 +64,8 @@ export class SolidGraph {
   readonly file: string;
   readonly logger: Logger;
 
-  readonly sourceCode: TSESLint.SourceCode;
+  readonly sourceFile: ts.SourceFile;
+  readonly comments: readonly CommentEntry[];
   readonly typeResolver: TypeResolver;
   readonly fileEntity: FileEntity;
 
@@ -97,16 +100,15 @@ export class SolidGraph {
   readonly unsafeTypeAnnotations: UnsafeTypeAnnotationEntity[] = [];
   readonly inlineImports: InlineImportEntity[] = [];
 
-  readonly eslintScopeMap: Map<TSESLint.Scope.Scope, ScopeEntity> = new Map();
   readonly variablesByName = new Map<string, VariableEntity[]>();
-  readonly functionsByNode = new Map<T.Node, FunctionEntity>();
-  readonly functionsByDeclarationNode = new Map<T.Node, FunctionEntity>();
+  readonly functionsByNode = new Map<ts.Node, FunctionEntity>();
+  readonly functionsByDeclarationNode = new Map<ts.Node, FunctionEntity>();
   readonly functionsByName = new Map<string, FunctionEntity[]>();
-  readonly callsByNode = new Map<T.CallExpression | T.NewExpression, CallEntity>();
+  readonly callsByNode = new Map<ts.CallExpression | ts.NewExpression, CallEntity>();
   readonly callsByPrimitive = new Map<string, CallEntity[]>();
   readonly callsByMethodName = new Map<string, CallEntity[]>();
-  readonly callsByArgNode = new Map<T.Node, ArgumentEntity>();
-  readonly jsxByNode = new Map<T.JSXElement | T.JSXFragment, JSXElementEntity>();
+  readonly callsByArgNode = new Map<ts.Node, ArgumentEntity>();
+  readonly jsxByNode = new Map<ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment, JSXElementEntity>();
   readonly jsxByTag = new Map<string, JSXElementEntity[]>();
   readonly jsxAttributesByElementId = new Map<number, ReadonlyMap<string, JSXAttributeEntity>>();
   readonly jsxAttrsByKind = new Map<JSXAttributeKind, JSXAttributeWithElement[]>();
@@ -124,14 +126,15 @@ export class SolidGraph {
   readonly importsBySource = new Map<string, ImportEntity[]>();
   readonly exportsByName = new Map<string, ExportEntity>();
   readonly exportsByEntityId = new Map<number, ExportEntity>();
-  readonly classesByNode = new Map<T.ClassDeclaration | T.ClassExpression, ClassEntity>();
+  readonly classesByNode = new Map<ts.ClassDeclaration | ts.ClassExpression, ClassEntity>();
   readonly classesByName = new Map<string, ClassEntity[]>();
 
   // AST node indexes (built by entities phase)
-  readonly unaryExpressionsByOperator = new Map<string, T.UnaryExpression[]>();
-  readonly spreadElements: T.SpreadElement[] = [];
-  readonly newExpressionsByCallee = new Map<string, T.NewExpression[]>();
-  readonly identifiersByName = new Map<string, T.Identifier[]>();
+  readonly unaryExpressionsByOperator = new Map<ts.SyntaxKind, ts.PrefixUnaryExpression[]>();
+  readonly spreadElements: (ts.SpreadElement | ts.SpreadAssignment)[] = [];
+  readonly newExpressionsByCallee = new Map<string, ts.NewExpression[]>();
+  readonly deleteExpressions: ts.DeleteExpression[] = [];
+  readonly identifiersByName = new Map<string, ts.Identifier[]>();
 
   // Position index for O(1) node lookup (built by entities phase)
   readonly positionIndex: PositionIndex;
@@ -155,10 +158,10 @@ export class SolidGraph {
   /** Ownership edges: parent owns child computation. */
   ownershipEdges: OwnershipEdge[] = [];
 
-  readonly jsxContextCache = new WeakMap<T.Node, JSXContext | null>();
-  readonly scopeForCache = new WeakMap<T.Node, ScopeEntity>();
-  readonly onDepsCache = new WeakMap<T.Node, boolean>();
-  readonly passthroughCache = new WeakMap<T.Node, boolean>();
+  readonly jsxContextCache = new WeakMap<ts.Node, JSXContext | null>();
+  readonly scopeForCache = new WeakMap<ts.Node, ScopeEntity>();
+  readonly onDepsCache = new WeakMap<ts.Node, boolean>();
+  readonly passthroughCache = new WeakMap<ts.Node, boolean>();
 
   /**
    * Creates a new SolidGraph instance.
@@ -168,17 +171,14 @@ export class SolidGraph {
   constructor(input: SolidInput) {
     this.file = input.file;
     this.logger = input.logger ?? noopLogger;
-    this.sourceCode = input.sourceCode;
+    this.sourceFile = input.sourceFile;
 
-    this.typeResolver = createTypeResolver(this.logger);
-    if (input.parserServices) {
-      this.typeResolver.initialize(input.parserServices);
-    }
+    this.typeResolver = createTypeResolver(input.checker, this.logger);
 
     this.fileEntity = {
       id: 0,
       path: input.file,
-      sourceCode: input.sourceCode,
+      sourceFile: input.sourceFile,
       functions: this.functions,
       calls: this.calls,
       variables: this.variables,
@@ -188,11 +188,13 @@ export class SolidGraph {
       conditionalSpreads: this.conditionalSpreads,
     };
 
-    const text = input.sourceCode.text;
+    const text = input.sourceFile.text;
     this.positionIndex = {
-      nodeAtOffset: new Array<T.Node | null>(text.length).fill(null),
+      nodeAtOffset: new Array<ts.Node | null>(text.length).fill(null),
       lineStartOffsets: computeLineStarts(text),
     };
+
+    this.comments = extractAllComments(input.sourceFile);
   }
 
   /** @internal Generate next scope ID */
@@ -221,9 +223,8 @@ export class SolidGraph {
   /**
    * @internal Add a scope entity to the graph. Called by scopesPhase.
    */
-  addScope(scope: ScopeEntity, eslintScope: TSESLint.Scope.Scope): void {
+  addScope(scope: ScopeEntity): void {
     this.scopes.push(scope);
-    this.eslintScopeMap.set(eslintScope, scope);
     if (this.firstScope === null) {
       this.firstScope = scope;
     }
@@ -340,24 +341,25 @@ export class SolidGraph {
    */
   private extractInlineStyleClassNames(element: JSXElementEntity): void {
     const astNode = element.node;
-    if (astNode.type !== "JSXElement") return;
+    if (!ts.isJsxElement(astNode)) return;
     const astChildren = astNode.children;
     for (let i = 0, len = astChildren.length; i < len; i++) {
       const child = astChildren[i];
       if (!child) continue;
       let cssText: string | null = null;
-      if (child.type === "JSXExpressionContainer") {
+      if (ts.isJsxExpression(child)) {
         const expr = child.expression;
-        if (expr.type === "TemplateLiteral" && expr.quasis.length === 1) {
-          const quasi = expr.quasis[0];
-          if (quasi) {
-            cssText = quasi.value.raw;
+        if (expr) {
+          if (ts.isNoSubstitutionTemplateLiteral(expr)) {
+            cssText = expr.text;
+          } else if (ts.isTemplateExpression(expr)) {
+            // Template expressions with substitutions are dynamic; skip
+          } else if (ts.isStringLiteral(expr)) {
+            cssText = expr.text;
           }
-        } else if (expr.type === "Literal" && typeof expr.value === "string") {
-          cssText = expr.value;
         }
-      } else if (child.type === "JSXText") {
-        cssText = child.value;
+      } else if (ts.isJsxText(child)) {
+        cssText = child.text;
       }
       if (cssText === null) continue;
       // Extract class selectors: `.className` patterns
@@ -512,9 +514,9 @@ export class SolidGraph {
         else if (kind === "resource") resources.push(v);
       }
 
-      // Variables whose first assignment is a property access (e.g., const x = obj.prop)
-      const first = v.assignments[0];
-      if (first && first.value.type === "MemberExpression") {
+      // Variables whose initializer is a property access (e.g., const x = obj.prop)
+      const init = v.initializer;
+      if (init && (ts.isPropertyAccessExpression(init) || ts.isElementAccessExpression(init))) {
         withPropertyAssignment.push(v);
       }
     }
@@ -528,7 +530,7 @@ export class SolidGraph {
 
   // Internal helpers for AST node collection
   /** @internal */
-  addUnaryExpression(node: T.UnaryExpression): void {
+  addUnaryExpression(node: ts.PrefixUnaryExpression): void {
     const op = node.operator;
     const existing = this.unaryExpressionsByOperator.get(op);
     if (existing) existing.push(node);
@@ -536,32 +538,36 @@ export class SolidGraph {
   }
 
   /** @internal */
-  addSpreadElement(node: T.SpreadElement): void {
+  addDeleteExpression(node: ts.DeleteExpression): void {
+    this.deleteExpressions.push(node);
+  }
+
+  /** @internal */
+  addSpreadElement(node: ts.SpreadElement | ts.SpreadAssignment): void {
     this.spreadElements.push(node);
   }
 
   /** @internal */
-  addNewExpressionByCallee(name: string, node: T.NewExpression): void {
+  addNewExpressionByCallee(name: string, node: ts.NewExpression): void {
     const existing = this.newExpressionsByCallee.get(name);
     if (existing) existing.push(node);
     else this.newExpressionsByCallee.set(name, [node]);
   }
 
   /** @internal */
-  addIdentifierReference(node: T.Identifier): void {
-    const name = node.name;
+  addIdentifierReference(node: ts.Identifier): void {
+    const name = node.text;
     const existing = this.identifiersByName.get(name);
     if (existing) existing.push(node);
     else this.identifiersByName.set(name, [node]);
   }
 
   /** @internal Index node for O(1) position lookup. Children overwrite parents. */
-  addToPositionIndex(node: T.Node): void {
-    const range = node.range;
-    if (!range) return;
+  addToPositionIndex(node: ts.Node): void {
+    const start = node.getStart(this.sourceFile);
+    const end = node.end;
     const arr = this.positionIndex.nodeAtOffset;
-    const end = range[1];
-    for (let i = range[0]; i < end; i++) {
+    for (let i = start; i < end; i++) {
       arr[i] = node;
     }
   }
@@ -570,9 +576,9 @@ export class SolidGraph {
 /**
  * Extracts method name from callee expression.
  */
-function getMethodName(callee: T.Expression | T.Super): string | null {
-  if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
-    return callee.property.name;
+function getMethodName(callee: ts.Expression): string | null {
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)) {
+    return callee.name.text;
   }
   return null;
 }
@@ -583,7 +589,7 @@ function getMethodName(callee: T.Expression | T.Super): string | null {
  * - lineStartOffsets[i] = character offset where line (i+1) starts
  */
 interface PositionIndex {
-  readonly nodeAtOffset: Array<T.Node | null>;
+  readonly nodeAtOffset: Array<ts.Node | null>;
   readonly lineStartOffsets: readonly number[];
 }
 
@@ -602,7 +608,7 @@ function computeLineStarts(text: string): number[] {
   return starts;
 }
 
-function parseStaticClassTokens(node: T.Node | null): JSXStaticClassIndex {
+function parseStaticClassTokens(node: ts.Node | null): JSXStaticClassIndex {
   if (!node) return { hasDynamicClass: true, tokens: [] };
 
   const text = getStaticStringFromJSXValue(node);
@@ -620,34 +626,34 @@ function parseStaticClassTokens(node: T.Node | null): JSXStaticClassIndex {
   return { hasDynamicClass: false, tokens };
 }
 
-function parseStaticObject(node: T.Node | null): JSXStaticObjectKeyIndex & { properties: readonly T.ObjectLiteralElementLike[] } {
-  if (!node || node.type !== "JSXExpressionContainer") {
+function parseStaticObject(node: ts.Node | null): JSXStaticObjectKeyIndex & { properties: readonly ts.ObjectLiteralElementLike[] } {
+  if (!node || !ts.isJsxExpression(node)) {
     return { hasDynamic: true, keys: [], properties: [] };
   }
 
   const expression = node.expression;
-  if (expression.type !== "ObjectExpression") {
+  if (!expression || !ts.isObjectLiteralExpression(expression)) {
     return { hasDynamic: true, keys: [], properties: [] };
   }
 
   const keys: string[] = [];
-  const properties: T.ObjectLiteralElementLike[] = [];
+  const properties: ts.ObjectLiteralElementLike[] = [];
   let hasDynamic = false;
 
   for (let i = 0; i < expression.properties.length; i++) {
     const property = expression.properties[i];
     if (!property) continue;
     properties.push(property);
-    if (property.type !== "Property") {
+    if (!ts.isPropertyAssignment(property)) {
       hasDynamic = true;
       continue;
     }
-    if (property.computed) {
+    if (property.name && ts.isComputedPropertyName(property.name)) {
       hasDynamic = true;
       continue;
     }
 
-    const name = getPropertyKeyName(property.key);
+    const name = getPropertyKeyName(property.name);
     if (name !== null) {
       keys.push(name);
       continue;

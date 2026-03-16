@@ -200,6 +200,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         createDiagnostic(
           subjectRef.solid.file,
           subjectRef.element.node,
+          subjectRef.solid.sourceFile,
           cssLayoutSiblingAlignmentOutlier.id,
           "misalignedSibling",
           resolveMessage(messages.misalignedSibling, {

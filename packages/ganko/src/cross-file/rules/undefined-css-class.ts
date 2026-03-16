@@ -27,6 +27,7 @@ export const jsxNoUndefinedCssClass = defineCrossRule({
       emit(createDiagnostic(
         ref.solid.file,
         ref.element.node,
+        ref.solid.sourceFile,
         jsxNoUndefinedCssClass.id,
         "undefinedClass",
         resolveMessage(messages.undefinedClass, { className: item.className }),

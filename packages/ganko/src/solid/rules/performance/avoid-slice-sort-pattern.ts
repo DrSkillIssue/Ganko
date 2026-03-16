@@ -4,7 +4,7 @@
  * Also flags .slice().reverse() (use .toReversed()).
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getCallsByMethodName, getMethodChain } from "../../queries"
@@ -88,6 +88,7 @@ export const avoidSliceSortPattern = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "avoid-slice-sort-pattern",
             messageId,
             message,
@@ -99,9 +100,9 @@ export const avoidSliceSortPattern = defineSolidRule({
   },
 })
 
-function isSingleSpreadArray(root: T.Node | null): boolean {
-  if (!root || root.type !== "ArrayExpression") return false
+function isSingleSpreadArray(root: ts.Node | null): boolean {
+  if (!root || !ts.isArrayLiteralExpression(root)) return false
   if (root.elements.length !== 1) return false
   const first = root.elements[0]
-  return first?.type === "SpreadElement"
+  return first !== undefined && ts.isSpreadElement(first)
 }

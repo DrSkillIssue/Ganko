@@ -567,11 +567,10 @@ describe("avoid-hidden-class-transition", () => {
     expect(diagnostics).toHaveLength(0)
   })
 
-  it("does not flag object literal conditional property addition without type info", () => {
-    // Without a TypeScript program, checkPropertyExistsOnType returns true
-    // (safe default), so the rule correctly does not fire.
-    // True positives require type info to verify the property doesn't exist
-    // on the declared type — tested via ESLint integration, not unit tests.
+  it("flags object literal conditional property addition with type info", () => {
+    // With the TypeScript compiler API, type info is always available.
+    // checkPropertyExistsOnType correctly determines 'b' doesn't exist on { a: number },
+    // so the rule fires as a true positive.
     const code = `
       function build(condition: boolean) {
         const obj = { a: 1 };
@@ -582,7 +581,7 @@ describe("avoid-hidden-class-transition", () => {
       }
     `
     const { diagnostics } = check(code)
-    expect(diagnostics).toHaveLength(0)
+    expect(diagnostics).toHaveLength(1)
   })
 
   it("does not flag function return value property assignment in conditional", () => {

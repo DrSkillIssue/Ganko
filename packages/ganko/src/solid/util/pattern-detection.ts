@@ -6,7 +6,7 @@
  * early returns, etc.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 
 /**
  * Get the name from a VariableDeclarator if it's a simple identifier.
@@ -21,8 +21,8 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
  * const { a, b } = obj;  // returns null
  * const [x, y] = arr;    // returns null
  */
-export function getDeclaratorName(node: T.VariableDeclarator): string | null {
-  return node.id.type === "Identifier" ? node.id.name : null;
+export function getDeclaratorName(node: ts.VariableDeclaration): string | null {
+  return ts.isIdentifier(node.name) ? node.name.text : null;
 }
 
 /**
@@ -38,17 +38,17 @@ export function getDeclaratorName(node: T.VariableDeclarator): string | null {
  * const x = foo();  // from foo() CallExpression, returns the VariableDeclarator
  * foo();            // from standalone call, returns null
  */
-export function findContainingVariableDeclarator(node: T.Node): T.VariableDeclarator | null {
-  let current: T.Node | undefined = node.parent;
+export function findContainingVariableDeclarator(node: ts.Node): ts.VariableDeclaration | null {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "VariableDeclarator") return current;
+    if (ts.isVariableDeclaration(current)) return current;
     // Stop at function/statement boundaries
     if (
-      current.type === "FunctionDeclaration" ||
-      current.type === "FunctionExpression" ||
-      current.type === "ArrowFunctionExpression" ||
-      current.type === "ExpressionStatement" ||
-      current.type === "ReturnStatement"
+      ts.isFunctionDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current) ||
+      ts.isExpressionStatement(current) ||
+      ts.isReturnStatement(current)
     ) {
       return null;
     }
@@ -71,14 +71,14 @@ export function findContainingVariableDeclarator(node: T.Node): T.VariableDeclar
  * if (!x) { return null; }       // returns true
  * if (!x) { console.log(x); }    // returns false
  */
-export function isEarlyReturnPattern(ifStmt: T.IfStatement): boolean {
-  const consequent = ifStmt.consequent;
+export function isEarlyReturnPattern(ifStmt: ts.IfStatement): boolean {
+  const consequent = ifStmt.thenStatement;
   return (
-    consequent.type === "ReturnStatement" ||
-    (consequent.type === "BlockStatement" &&
-      consequent.body.length === 1 &&
-      consequent.body[0] !== undefined &&
-      consequent.body[0].type === "ReturnStatement")
+    ts.isReturnStatement(consequent) ||
+    (ts.isBlock(consequent) &&
+      consequent.statements.length === 1 &&
+      consequent.statements[0] !== undefined &&
+      ts.isReturnStatement(consequent.statements[0]))
   );
 }
 
@@ -97,9 +97,9 @@ export function isEarlyReturnPattern(ifStmt: T.IfStatement): boolean {
  * { [expr]: 3 }     // returns null (computed)
  * { 123: 4 }        // returns null (numeric)
  */
-export function getPropertyKeyName(key: T.Node): string | null {
-  if (key.type === "Identifier") return key.name;
-  if (key.type === "Literal" && typeof key.value === "string") return key.value;
+export function getPropertyKeyName(key: ts.Node): string | null {
+  if (ts.isIdentifier(key)) return key.text;
+  if (ts.isStringLiteral(key)) return key.text;
   return null;
 }
 
@@ -115,19 +115,19 @@ const REACTIVE_PRIMITIVE_NAME = /^(?:create[A-Z]|use[A-Z])/;
  * where the callee matches the create-/use- naming convention.
  */
 export function isFunctionInReactivePrimitiveConfig(
-  node: T.ArrowFunctionExpression | T.FunctionExpression | T.FunctionDeclaration,
+  node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
   const parent = node.parent;
-  if (!parent || parent.type !== "Property" || parent.value !== node) return false;
+  if (!parent || !ts.isPropertyAssignment(parent) || parent.initializer !== node) return false;
 
   const obj = parent.parent;
-  if (!obj || obj.type !== "ObjectExpression") return false;
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return false;
 
   const callOrArg = obj.parent;
   if (!callOrArg) return false;
 
   // Direct argument: createFoo({ init: () => ... })
-  if (callOrArg.type === "CallExpression") {
+  if (ts.isCallExpression(callOrArg)) {
     return isReactivePrimitiveCallNode(callOrArg);
   }
 
@@ -136,13 +136,13 @@ export function isFunctionInReactivePrimitiveConfig(
   return false;
 }
 
-function isReactivePrimitiveCallNode(node: T.CallExpression): boolean {
-  const callee = node.callee;
-  if (callee.type === "Identifier") {
-    return REACTIVE_PRIMITIVE_NAME.test(callee.name);
+function isReactivePrimitiveCallNode(node: ts.CallExpression): boolean {
+  const callee = node.expression;
+  if (ts.isIdentifier(callee)) {
+    return REACTIVE_PRIMITIVE_NAME.test(callee.text);
   }
-  if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
-    return REACTIVE_PRIMITIVE_NAME.test(callee.property.name);
+  if (ts.isPropertyAccessExpression(callee)) {
+    return REACTIVE_PRIMITIVE_NAME.test(callee.name.text);
   }
   return false;
 }

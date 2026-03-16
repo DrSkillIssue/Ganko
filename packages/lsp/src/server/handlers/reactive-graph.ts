@@ -86,6 +86,7 @@ export function handleReactiveGraph(
 function buildNodes(graph: SolidGraph): ReactiveGraphNode[] {
   const nodes: ReactiveGraphNode[] = [];
   const coveredVarIds = new Set<number>();
+  const sf = graph.sourceFile;
 
   // Computation nodes
   const computations = graph.computations;
@@ -93,7 +94,7 @@ function buildNodes(graph: SolidGraph): ReactiveGraphNode[] {
     const comp = computations[i];
     if (!comp) continue;
     const name = computationName(comp);
-    const line = comp.call.node.loc?.start.line ?? 0;
+    const line = sf.getLineAndCharacterOfPosition(comp.call.node.getStart(sf)).line + 1;
 
     nodes.push({
       id: `comp_${comp.id}`,
@@ -113,7 +114,8 @@ function buildNodes(graph: SolidGraph): ReactiveGraphNode[] {
     if (coveredVarIds.has(v.id)) continue;
     if (!v.reactiveKind) continue;
 
-    const line = v.declarations[0]?.loc?.start.line ?? 0;
+    const declNode = v.declarations[0];
+    const line = declNode ? sf.getLineAndCharacterOfPosition(declNode.getStart(sf)).line + 1 : 0;
     nodes.push({
       id: `var_${v.id}`,
       name: v.name,

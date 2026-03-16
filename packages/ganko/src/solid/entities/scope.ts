@@ -4,7 +4,7 @@
  * Represents a lexical scope in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 import type { VariableEntity } from "./variable";
 import type { FunctionEntity } from "./function";
@@ -18,7 +18,7 @@ import type { FunctionEntity } from "./function";
 export interface ScopeEntity {
   id: number;
   /** The AST node that creates this scope. May be null for fallback/synthetic scopes. */
-  node: T.Node | null;
+  node: ts.Node | null;
   file: FileEntity;
   kind: "program" | "function" | "block";
   parent: ScopeEntity | null;
@@ -65,7 +65,7 @@ export const UNKNOWN_CONTEXT: TrackingContext = Object.freeze({ type: "unknown" 
 
 export interface CreateScopeArgs {
   id: number;
-  node: T.Node | null;
+  node: ts.Node | null;
   file: FileEntity;
   kind: "program" | "function" | "block";
   parent: ScopeEntity | null;

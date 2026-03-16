@@ -5,7 +5,7 @@
  * in the same synchronous scope.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { CallEntity, ScopeEntity, VariableEntity, ReadEntity } from "../../entities";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -89,13 +89,13 @@ export const batchOptimization = defineSolidRule({
     // Step 5: For each group, check if there are 3+ consecutive setters not in batch
     for (const [scope, calls] of callsByFunctionScope) {
       // Filter out calls already inside batch()
-      const unbatchedCalls = filterUnbatchedCalls(calls, batchRanges);
+      const unbatchedCalls = filterUnbatchedCalls(calls, batchRanges, graph);
 
       if (unbatchedCalls.length < options.threshold) {
         continue;
       }
 
-      const consecutiveGroups = findConsecutiveSetterGroups(unbatchedCalls);
+      const consecutiveGroups = findConsecutiveSetterGroups(unbatchedCalls, graph);
 
       for (let i = 0, len = consecutiveGroups.length; i < len; i++) {
         const group = consecutiveGroups[i];
@@ -109,14 +109,15 @@ export const batchOptimization = defineSolidRule({
 
         const firstCall = group[0];
         if (!firstCall) continue;
-        const setterList = formatSetterList(group, graph.sourceCode.text);
+        const setterList = formatSetterList(group, graph.sourceFile);
         const message = resolveMessage(messages.multipleSetters, { setters: setterList });
-        const fix = buildFix(group, graph.sourceCode.text, graph, scope);
+        const fix = buildFix(group, graph.sourceFile, graph, scope);
 
         emit(
           createDiagnostic(
             graph.file,
             firstCall.callNode,
+            graph.sourceFile,
             "batch-optimization",
             "multipleSetters",
             message,
@@ -132,8 +133,8 @@ export const batchOptimization = defineSolidRule({
 // Caches - WeakMaps to avoid memory leaks across files
 // These are module-level to persist across rule invocations on the same AST
 
-/** Cache: BlockStatement/Program -> Map<Node, index in body> */
-const blockIndexCache = new WeakMap<T.BlockStatement | T.Program, Map<T.Node, number>>();
+/** Cache: Block -> Map<Node, index in body> */
+const blockIndexCache = new WeakMap<ts.Block | ts.SourceFile, Map<ts.Node, number>>();
 
 interface SetterInfo {
   variable: VariableEntity;
@@ -143,13 +144,13 @@ interface SetterInfo {
 /** Minimal setter call info - before expensive AST walks */
 interface SetterCallMinimal {
   read: ReadEntity;
-  callNode: T.CallExpression;
+  callNode: ts.CallExpression;
   name: string;
 }
 
 /** Full setter call info - after hydrating with containingStatement */
 interface SetterCall extends SetterCallMinimal {
-  containingStatement: T.Node | null;
+  containingStatement: ts.Node | null;
 }
 
 /**
@@ -175,7 +176,7 @@ function extractSortedBatchRanges(batchCalls: readonly CallEntity[]): readonly [
   for (let i = 0, len = batchCalls.length; i < len; i++) {
     const call = batchCalls[i];
     if (!call) continue;
-    ranges.push(call.node.range);
+    ranges.push([call.node.getStart(), call.node.end]);
   }
 
   ranges.sort((a, b) => a[0] - b[0]);
@@ -193,6 +194,7 @@ function extractSortedBatchRanges(batchCalls: readonly CallEntity[]): readonly [
  * not other accesses like passing setValue as a parameter.
  *
  * @param setterVariables - Setter variable definitions to search for
+ * @param graph - The solid graph for sourceFile access
  * @returns Array of setter calls with their containing statements
  */
 function findSetterCallsViaReads(setterVariables: SetterInfo[]): SetterCall[] {
@@ -212,7 +214,7 @@ function findSetterCallsViaReads(setterVariables: SetterInfo[]): SetterCall[] {
         continue;
       }
 
-      if (read.node.parent?.type !== "CallExpression") continue;
+      if (!read.node.parent || !ts.isCallExpression(read.node.parent)) continue;
       const callNode = read.node.parent;
 
       const containingStatement = getContainingStatement(callNode);
@@ -287,11 +289,13 @@ function findFunctionScope(scope: ScopeEntity): ScopeEntity | null {
  *
  * @param calls - All setter calls to filter
  * @param sortedBatchRanges - Sorted [start, end] ranges of batch() calls
+ * @param graph - The solid graph for sourceFile access
  * @returns Only the setter calls NOT inside any batch()
  */
 function filterUnbatchedCalls(
   calls: SetterCall[],
   sortedBatchRanges: readonly [number, number][],
+  graph: SolidGraph,
 ): SetterCall[] {
   if (sortedBatchRanges.length === 0) {
     return calls;
@@ -303,8 +307,8 @@ function filterUnbatchedCalls(
   outer: for (let i = 0, len = calls.length; i < len; i++) {
     const call = calls[i];
     if (!call) continue;
-    const callStart = call.callNode.range[0];
-    const callEnd = call.callNode.range[1];
+    const callStart = call.callNode.getStart(graph.sourceFile);
+    const callEnd = call.callNode.end;
 
     for (let j = 0; j < rangeLen; j++) {
       const batch = sortedBatchRanges[j];
@@ -331,15 +335,16 @@ function filterUnbatchedCalls(
  * a fresh array (e.g., from filterUnbatchedCalls()).
  *
  * @param calls - Setter calls to group (WILL BE MUTATED by sort)
+ * @param graph - The solid graph for sourceFile access
  * @returns Groups of consecutive statements with 2+ setter calls
  */
-function findConsecutiveSetterGroups(calls: SetterCall[]): SetterCall[][] {
+function findConsecutiveSetterGroups(calls: SetterCall[], graph: SolidGraph): SetterCall[][] {
   if (calls.length === 0) {
     return [];
   }
 
   // Sort in place - caller provides a fresh array from filterUnbatchedCalls
-  calls.sort((a, b) => a.callNode.range[0] - b.callNode.range[0]);
+  calls.sort((a, b) => a.callNode.getStart(graph.sourceFile) - b.callNode.getStart(graph.sourceFile));
 
   const first = calls[0];
   if (!first) return [];
@@ -371,16 +376,16 @@ function findConsecutiveSetterGroups(calls: SetterCall[]): SetterCall[][] {
  * Uses a WeakMap cache to avoid rebuilding the index map on every call.
  * The cache is per-block and persists across rule invocations on the same AST.
  *
- * @param block - The containing block or program
+ * @param block - The containing block or source file
  * @param stmt - The statement to find the index of
  * @returns Zero-based index, or -1 if statement not found in block
  */
-function getStatementIndex(block: T.BlockStatement | T.Program, stmt: T.Node): number {
+function getStatementIndex(block: ts.Block | ts.SourceFile, stmt: ts.Node): number {
   const cached = blockIndexCache.get(block);
   if (cached) return cached.get(stmt) ?? -1;
 
-  const indexMap = new Map<T.Node, number>();
-  const body = block.body;
+  const indexMap = new Map<ts.Node, number>();
+  const body = block.statements;
   for (let i = 0, len = body.length; i < len; i++) {
     const stmt = body[i];
     if (!stmt) continue;
@@ -403,6 +408,7 @@ function getStatementIndex(block: T.BlockStatement | T.Program, stmt: T.Node): n
  *
  * @param prev - First setter call
  * @param curr - Second setter call
+ * @param graph - The solid graph for sourceFile access
  * @returns True if the calls are in consecutive statements
  */
 function areConsecutiveStatements(prev: SetterCall, curr: SetterCall): boolean {
@@ -418,9 +424,9 @@ function areConsecutiveStatements(prev: SetterCall, curr: SetterCall): boolean {
     return false;
   }
 
-  // Parent must be a BlockStatement (or Program) with a body array
+  // Parent must be a Block (or SourceFile) with a statements array
   if (!parent) return false;
-  if (parent.type !== "BlockStatement" && parent.type !== "Program") {
+  if (!ts.isBlock(parent) && !ts.isSourceFile(parent)) {
     return false;
   }
 
@@ -438,13 +444,13 @@ function areConsecutiveStatements(prev: SetterCall, curr: SetterCall): boolean {
  * If there are more than 3, adds "..." to indicate truncation.
  *
  * @param calls - The setter calls to format
- * @param sourceText - The full source code to extract call text from
+ * @param sourceFile - The source file to extract call text from
  * @returns Formatted string like "setA(x); setB(y); setC(z); ..."
  */
-function formatSetterList(calls: SetterCall[], sourceText: string): string {
+function formatSetterList(calls: SetterCall[], sourceFile: ts.SourceFile): string {
   if (calls.length <= 3) {
     return calls
-      .map((c) => sourceText.slice(c.callNode.range[0], c.callNode.range[1]))
+      .map((c) => c.callNode.getText(sourceFile))
       .join("; ");
   }
 
@@ -452,7 +458,7 @@ function formatSetterList(calls: SetterCall[], sourceText: string): string {
   for (let i = 0; i < 3; i++) {
     const c = calls[i];
     if (!c) continue;
-    first3.push(sourceText.slice(c.callNode.range[0], c.callNode.range[1]));
+    first3.push(c.callNode.getText(sourceFile));
   }
   return `${first3.join("; ")}; ...`;
 }
@@ -488,7 +494,7 @@ function isGroupAutoBatched(
 
   const firstGroupCall = group[0];
   if (!firstGroupCall) return false;
-  const groupStart = firstGroupCall.callNode.range[0];
+  const groupStart = firstGroupCall.callNode.getStart(graph.sourceFile);
   return !hasAwaitBeforePosition(entity.awaitRanges, groupStart);
 }
 
@@ -499,9 +505,9 @@ function isGroupAutoBatched(
  * Direct:  createEffect(() => { ... })
  * Wrapped: createEffect(on(deps, () => { ... }))
  */
-function getAutoBatchPrimitive(fn: T.Node, graph: SolidGraph): string | null {
+function getAutoBatchPrimitive(fn: ts.Node, graph: SolidGraph): string | null {
   const parent = fn.parent;
-  if (!parent || parent.type !== "CallExpression" || parent.callee === fn) return null;
+  if (!parent || !ts.isCallExpression(parent) || parent.expression === fn) return null;
 
   const name = resolvePrimitiveName(parent, graph);
   if (name && AUTO_BATCH_PRIMITIVES.has(name)) return name;
@@ -509,7 +515,7 @@ function getAutoBatchPrimitive(fn: T.Node, graph: SolidGraph): string | null {
   // on() wrapper — check if on()'s parent is an auto-batching primitive
   if (name === "on") {
     const grandparent = parent.parent;
-    if (grandparent?.type === "CallExpression" && grandparent.callee !== parent) {
+    if (grandparent && ts.isCallExpression(grandparent) && grandparent.expression !== parent) {
       const outer = resolvePrimitiveName(grandparent, graph);
       if (outer && AUTO_BATCH_PRIMITIVES.has(outer)) return outer;
     }
@@ -523,10 +529,10 @@ function getAutoBatchPrimitive(fn: T.Node, graph: SolidGraph): string | null {
  * Uses the graph's CallEntity primitive field (which handles import resolution)
  * with a fallback to the callee identifier name.
  */
-function resolvePrimitiveName(call: T.CallExpression, graph: SolidGraph): string | null {
+function resolvePrimitiveName(call: ts.CallExpression, graph: SolidGraph): string | null {
   const entity = getCallByNode(graph, call);
   if (entity?.primitive) return entity.primitive.name;
-  if (call.callee.type === "Identifier") return call.callee.name;
+  if (ts.isIdentifier(call.expression)) return call.expression.text;
   return null;
 }
 
@@ -556,7 +562,7 @@ function hasAwaitBeforePosition(ranges: readonly [number, number][], position: n
  */
 function buildFix(
   calls: SetterCall[],
-  sourceText: string,
+  sourceFile: ts.SourceFile,
   graph: SolidGraph,
   scope: ScopeEntity,
 ): Fix | undefined {
@@ -564,6 +570,7 @@ function buildFix(
     return undefined;
   }
 
+  const sourceText = sourceFile.text;
   const postAwaitRange = getPostAwaitStatementsRange(scope, calls, graph);
   if (postAwaitRange) {
     return buildPostAwaitFix(postAwaitRange, sourceText, graph);
@@ -590,15 +597,15 @@ function getPostAwaitStatementsRange(
 
   if (!getAutoBatchPrimitive(fn, graph)) return null;
 
-  if (entity.body.type !== "BlockStatement") return null;
+  if (!entity.body || !ts.isBlock(entity.body)) return null;
   const body = entity.body;
-  const stmts = body.body;
+  const stmts = body.statements;
   if (stmts.length === 0) return null;
 
   // Find the last await position before this group
   const firstCall = calls[0];
   if (!firstCall) return null;
-  const groupStart = firstCall.callNode.range[0];
+  const groupStart = firstCall.callNode.getStart(graph.sourceFile);
   let lastAwaitEnd = -1;
   for (let i = 0, len = entity.awaitRanges.length; i < len; i++) {
     const range = entity.awaitRanges[i];
@@ -614,7 +621,7 @@ function getPostAwaitStatementsRange(
   for (let i = 0, len = stmts.length; i < len; i++) {
     const stmt = stmts[i];
     if (!stmt) continue;
-    if (stmt.range[0] > lastAwaitEnd) {
+    if (stmt.getStart(graph.sourceFile) > lastAwaitEnd) {
       firstPostAwaitIdx = i;
       break;
     }
@@ -627,7 +634,7 @@ function getPostAwaitStatementsRange(
     for (let i = 0, len = stmts.length; i < len; i++) {
       const stmt = stmts[i];
       if (!stmt) continue;
-      if (stmt.range[1] >= lastAwaitEnd && i + 1 < len) {
+      if (stmt.end >= lastAwaitEnd && i + 1 < len) {
         firstPostAwaitIdx = i + 1;
         break;
       }
@@ -639,7 +646,7 @@ function getPostAwaitStatementsRange(
   const lastStmt = stmts[stmts.length - 1];
   if (!firstStmt || !lastStmt) return null;
 
-  return [firstStmt.range[0], lastStmt.range[1]];
+  return [firstStmt.getStart(graph.sourceFile), lastStmt.end];
 }
 
 /**
@@ -707,14 +714,15 @@ function buildConsecutiveFix(
   const lastStmt = statements[statements.length - 1];
   if (!firstStmt || !lastStmt) return undefined;
 
-  const lineStart = sourceText.lastIndexOf("\n", firstStmt.range[0]) + 1;
-  const indentation = sourceText.slice(lineStart, firstStmt.range[0]);
+  const firstStart = firstStmt.getStart(graph.sourceFile);
+  const lineStart = sourceText.lastIndexOf("\n", firstStart) + 1;
+  const indentation = sourceText.slice(lineStart, firstStart);
 
   const statementsTexts: string[] = [];
   for (let i = 0, len = statements.length; i < len; i++) {
     const s = statements[i];
     if (!s) continue;
-    statementsTexts.push(sourceText.slice(s.range[0], s.range[1]));
+    statementsTexts.push(sourceText.slice(s.getStart(graph.sourceFile), s.end));
   }
 
   const statementsText = statementsTexts.join("\n" + indentation + "  ");
@@ -722,7 +730,7 @@ function buildConsecutiveFix(
 
   const ops: FixOperation[] = [
     {
-      range: [firstStmt.range[0], lastStmt.range[1]],
+      range: [firstStart, lastStmt.end],
       text: batchCode,
     },
   ];

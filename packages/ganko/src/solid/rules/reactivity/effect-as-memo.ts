@@ -25,7 +25,7 @@
  * - Rule provides auto-fix to convert automatically
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { Fix } from "../../../diagnostic"
 import type { CallEntity, VariableEntity, ScopeEntity } from "../../entities";
 import { getVariableByNameInScope } from "../../queries/scope";
@@ -115,18 +115,19 @@ export const effectAsMemo = defineSolidRule({
 
       // Verify the setter is only used inside this effect (safe to remove)
       const setterVar = getVariableByNameInScope(graph, setterName, call.scope);
-      if (setterVar && hasReadsOutsideNode(setterVar, call.node)) {
+      if (setterVar && hasReadsOutsideNode(setterVar, call.node, graph.sourceFile)) {
         continue;
       }
 
-      const expressionText = truncateText(graph.sourceCode.getText(argument));
+      const expressionText = truncateText(argument.getText(graph.sourceFile));
 
-      const fix = buildFix(graph.sourceCode, call.node, signalInfo, argument);
+      const fix = buildFix(graph.sourceFile, call.node, signalInfo, argument);
 
       emit(
         createDiagnostic(
           graph.file,
           setterCallNode,
+          graph.sourceFile,
           "effect-as-memo",
           "effectAsMemo",
           resolveMessage(messages.effectAsMemo, {
@@ -145,19 +146,19 @@ interface SignalInfo {
   variable: VariableEntity;
   signalName: string;
   setterName: string;
-  declarationNode: T.VariableDeclarator;
+  declarationNode: ts.VariableDeclaration;
 }
 
 interface SetterCallInfo {
   setterName: string;
-  argument: T.Node;
-  setterCallNode: T.CallExpression;
+  argument: ts.Node;
+  setterCallNode: ts.CallExpression;
 }
 
 interface EffectCandidate {
   call: CallEntity;
   setterInfo: SetterCallInfo;
-  callbackNode: T.ArrowFunctionExpression | T.FunctionExpression;
+  callbackNode: ts.ArrowFunction | ts.FunctionExpression;
 }
 
 /**
@@ -183,12 +184,12 @@ function extractEffectCandidate(call: CallEntity): EffectCandidate | null {
 
   const callbackNode = callbackArg.node;
   // Direct type check for TypeScript narrowing (isFunctionExpression doesn't narrow)
-  if (callbackNode.type !== "ArrowFunctionExpression" && callbackNode.type !== "FunctionExpression") {
+  if (!ts.isArrowFunction(callbackNode) && !ts.isFunctionExpression(callbackNode)) {
     return null;
   }
 
   // Async effects cannot be converted to createMemo (returns Promise<T> not T)
-  if (callbackNode.async) {
+  if (callbackNode.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword)) {
     return null;
   }
 
@@ -214,17 +215,17 @@ function extractEffectCandidate(call: CallEntity): EffectCandidate | null {
  * @returns Setter call info or null if not a single setter pattern
  */
 function extractSingleSetterCall(
-  fn: T.ArrowFunctionExpression | T.FunctionExpression,
+  fn: ts.ArrowFunction | ts.FunctionExpression,
 ): SetterCallInfo | null {
   const body = fn.body;
 
   // Arrow function with expression body: () => setSetter(expr)
-  if (body.type !== "BlockStatement") {
-    return extractSetterFromExpression(body);
+  if (!ts.isBlock(body)) {
+    return extractSetterFromExpression(body as ts.Expression);
   }
 
   // Block body - must contain exactly one statement
-  const statements = body.body;
+  const statements = body.statements;
   if (statements.length !== 1) {
     return null;
   }
@@ -233,13 +234,13 @@ function extractSingleSetterCall(
   if (!stmt) return null;
 
   // ExpressionStatement: { setSetter(expr); }
-  if (stmt.type === "ExpressionStatement") {
+  if (ts.isExpressionStatement(stmt)) {
     return extractSetterFromExpression(stmt.expression);
   }
 
   // ReturnStatement: { return setSetter(expr); }
-  if (stmt.type === "ReturnStatement" && stmt.argument) {
-    return extractSetterFromExpression(stmt.argument);
+  if (ts.isReturnStatement(stmt) && stmt.expression) {
+    return extractSetterFromExpression(stmt.expression);
   }
 
   return null;
@@ -256,13 +257,13 @@ function extractSingleSetterCall(
  * @param expr - The expression to analyze
  * @returns Setter call info or null if not a setter call
  */
-function extractSetterFromExpression(expr: T.Expression): SetterCallInfo | null {
-  if (expr.type !== "CallExpression") {
+function extractSetterFromExpression(expr: ts.Expression): SetterCallInfo | null {
+  if (!ts.isCallExpression(expr)) {
     return null;
   }
 
   // Callee must be an identifier (the setter function)
-  if (expr.callee.type !== "Identifier") {
+  if (!ts.isIdentifier(expr.expression)) {
     return null;
   }
 
@@ -273,17 +274,17 @@ function extractSetterFromExpression(expr: T.Expression): SetterCallInfo | null 
   const arg = expr.arguments[0];
   if (!arg) return null;
 
-  if (arg.type === "SpreadElement") {
+  if (ts.isSpreadElement(arg)) {
     return null;
   }
 
   // Setter function form: setCount(prev => prev + 1) cannot be converted to createMemo
-  if (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") {
+  if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
     return null;
   }
 
   return {
-    setterName: expr.callee.name,
+    setterName: expr.expression.text,
     argument: arg,
     setterCallNode: expr,
   };
@@ -328,7 +329,7 @@ function isScopeAccessible(
  * const doubled = createMemo(() => count() * 2);
  * ```
  *
- * @param sourceCode - ESLint's source code object for text extraction
+ * @param sourceFile - TypeScript source file for position computation
  * @param effectNode - The createEffect call expression to remove
  * @param signalInfo - Information about the signal being replaced
  * @param callbackNode - The effect callback function node
@@ -336,10 +337,10 @@ function isScopeAccessible(
  * @returns Fix operations or undefined if fix cannot be applied
  */
 function buildFix(
-  sourceCode: { text: string; getText(node: T.Node): string },
-  effectNode: T.CallExpression | T.NewExpression,
+  sourceFile: ts.SourceFile,
+  effectNode: ts.CallExpression | ts.NewExpression,
   signalInfo: SignalInfo,
-  argument: T.Node,
+  argument: ts.Node,
 ): Fix | undefined {
   const effectStatement = getContainingStatement(effectNode);
   const signalStatement = getContainingStatement(signalInfo.declarationNode);
@@ -348,25 +349,27 @@ function buildFix(
     return undefined;
   }
 
-  let expressionText = sourceCode.getText(argument);
+  let expressionText = argument.getText(sourceFile);
 
   // () => { x: 1 } is a labeled statement, () => ({ x: 1 }) is an object
-  if (argument.type === "ObjectExpression") {
+  if (ts.isObjectLiteralExpression(argument)) {
     expressionText = `(${expressionText})`;
   }
 
   const memoText = `const ${signalInfo.signalName} = createMemo(() => ${expressionText});`;
+
+  const sourceText = sourceFile.text;
 
   // Create fix operations:
   // 1. Replace signal declaration with memo
   // 2. Remove effect statement (including leading whitespace and trailing newline)
   return [
     {
-      range: [signalStatement.range[0], signalStatement.range[1]] as const,
+      range: [signalStatement.getStart(sourceFile), signalStatement.end] as const,
       text: memoText,
     },
     {
-      range: [getStatementLineStart(sourceCode.text, effectStatement), getStatementEndWithNewline(sourceCode.text, effectStatement)] as const,
+      range: [getStatementLineStart(sourceText, effectStatement), getStatementEndWithNewline(sourceText, effectStatement)] as const,
       text: "",
     },
   ];
@@ -383,14 +386,16 @@ function buildFix(
  * @param container - The AST node to check containment against
  * @returns True if the variable has reads outside the container
  */
-function hasReadsOutsideNode(variable: VariableEntity, container: T.Node): boolean {
-  const containerRange = container.range;
+function hasReadsOutsideNode(variable: VariableEntity, container: ts.Node, sourceFile: ts.SourceFile): boolean {
+  const containerStart = container.getStart(sourceFile);
+  const containerEnd = container.end;
   const reads = variable.reads;
   for (let i = 0, len = reads.length; i < len; i++) {
     const read = reads[i];
     if (!read) continue;
-    const range = read.node.range;
-    if (range[0] < containerRange[0] || range[1] > containerRange[1]) {
+    const readStart = read.node.getStart(sourceFile);
+    const readEnd = read.node.end;
+    if (readStart < containerStart || readEnd > containerEnd) {
       return true;
     }
   }

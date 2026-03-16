@@ -13,7 +13,7 @@
  *   registry.register(obj, obj.id);        // heldValue is a primitive/different ref
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -48,17 +48,17 @@ export const finalizationRegistryLeak = defineSolidRule({
       if (!call) continue;
 
       // Verify receiver is a known FinalizationRegistry instance
-      if (call.callee.type !== "MemberExpression") continue
-      const receiver = call.callee.object
-      if (receiver.type === "Identifier") {
-        if (!registryNames.has(receiver.name)) continue
+      if (!ts.isPropertyAccessExpression(call.callee)) continue
+      const receiver = call.callee.expression
+      if (ts.isIdentifier(receiver)) {
+        if (!registryNames.has(receiver.text)) continue
       } else if (
-        receiver.type === "MemberExpression" &&
-        receiver.object.type === "ThisExpression" &&
-        receiver.property.type === "Identifier"
+        ts.isPropertyAccessExpression(receiver) &&
+        receiver.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isIdentifier(receiver.name)
       ) {
         // this.registry.register(...)
-        if (!registryNames.has(receiver.property.name)) continue
+        if (!registryNames.has(receiver.name.text)) continue
       } else {
         continue
       }
@@ -83,6 +83,7 @@ export const finalizationRegistryLeak = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "finalization-registry-leak",
             "selfReference",
             resolveMessage(messages.selfReference, { name: targetName }),
@@ -98,6 +99,7 @@ export const finalizationRegistryLeak = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "finalization-registry-leak",
             "selfReference",
             resolveMessage(messages.selfReference, { name: targetName }),
@@ -111,18 +113,21 @@ export const finalizationRegistryLeak = defineSolidRule({
 
 /**
  * Extract a stable reference name from a node for comparison.
- * Handles Identifiers and simple MemberExpressions (e.g., obj.ref).
+ * Handles Identifiers and simple PropertyAccessExpressions (e.g., obj.ref).
  */
-function extractReferenceName(node: T.Node): string | null {
-  if (node.type === "Identifier") return node.name
-  if (node.type === "MemberExpression") {
-    const objName = extractReferenceName(node.object)
+function extractReferenceName(node: ts.Node): string | null {
+  if (ts.isIdentifier(node)) return node.text
+  if (ts.isPropertyAccessExpression(node)) {
+    const objName = extractReferenceName(node.expression)
     if (!objName) return null
-    if (node.property.type === "Identifier") return `${objName}.${node.property.name}`
-    // Handle computed access with literal keys: items[0], items["key"]
-    if (node.computed && node.property.type === "Literal") {
-      return `${objName}[${String(node.property.value)}]`
-    }
+    if (ts.isIdentifier(node.name)) return `${objName}.${node.name.text}`
+  }
+  if (ts.isElementAccessExpression(node)) {
+    const objName = extractReferenceName(node.expression)
+    if (!objName) return null
+    const arg = node.argumentExpression
+    if (ts.isStringLiteral(arg)) return `${objName}[${arg.text}]`
+    if (ts.isNumericLiteral(arg)) return `${objName}[${arg.text}]`
   }
   return null
 }
@@ -139,18 +144,18 @@ function collectFinalizationRegistryNames(graph: SolidGraph): Set<string> {
     if (!expr) continue;
     const parent = expr.parent
     // const registry = new FinalizationRegistry(...)
-    if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") {
-      names.add(parent.id.name)
+    if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+      names.add(parent.name.text)
       continue
     }
     // registry = new FinalizationRegistry(...)
-    if (parent?.type === "AssignmentExpression" && parent.left.type === "Identifier") {
-      names.add(parent.left.name)
+    if (parent && ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(parent.left)) {
+      names.add(parent.left.text)
       continue
     }
     // class Foo { registry = new FinalizationRegistry(...) }
-    if (parent?.type === "PropertyDefinition" && parent.key.type === "Identifier") {
-      names.add(parent.key.name)
+    if (parent && ts.isPropertyDeclaration(parent) && ts.isIdentifier(parent.name)) {
+      names.add(parent.name.text)
     }
   }
 
@@ -162,27 +167,27 @@ function collectFinalizationRegistryNames(graph: SolidGraph): Set<string> {
  * Checks object properties, array elements, and common wrapper patterns.
  * Does NOT walk into nested functions (those create their own scope).
  */
-function containsIdentifier(node: T.Node, name: string): boolean {
-  if (node.type === "Identifier") {
-    return node.name === name
+function containsIdentifier(node: ts.Node, name: string): boolean {
+  if (ts.isIdentifier(node)) {
+    return node.text === name
   }
 
-  if (node.type === "ObjectExpression") {
+  if (ts.isObjectLiteralExpression(node)) {
     const props = node.properties
     for (let i = 0, len = props.length; i < len; i++) {
       const prop = props[i]
       if (!prop) continue;
-      if (prop.type === "Property" && containsIdentifier(prop.value, name)) {
+      if (ts.isPropertyAssignment(prop) && containsIdentifier(prop.initializer, name)) {
         return true
       }
-      if (prop.type === "SpreadElement" && containsIdentifier(prop.argument, name)) {
+      if (ts.isSpreadAssignment(prop) && containsIdentifier(prop.expression, name)) {
         return true
       }
     }
     return false
   }
 
-  if (node.type === "ArrayExpression") {
+  if (ts.isArrayLiteralExpression(node)) {
     const elements = node.elements
     for (let i = 0, len = elements.length; i < len; i++) {
       const el = elements[i]
@@ -191,17 +196,17 @@ function containsIdentifier(node: T.Node, name: string): boolean {
     return false
   }
 
-  if (node.type === "MemberExpression") {
-    return containsIdentifier(node.object, name)
+  if (ts.isPropertyAccessExpression(node)) {
+    return containsIdentifier(node.expression, name)
   }
 
   // Conditional: cond ? target : alt
-  if (node.type === "ConditionalExpression") {
-    return containsIdentifier(node.consequent, name) || containsIdentifier(node.alternate, name)
+  if (ts.isConditionalExpression(node)) {
+    return containsIdentifier(node.whenTrue, name) || containsIdentifier(node.whenFalse, name)
   }
 
   // Call expression argument: wrap(target)
-  if (node.type === "CallExpression") {
+  if (ts.isCallExpression(node)) {
     const args = node.arguments
     for (let i = 0, len = args.length; i < len; i++) {
       const arg = args[i];

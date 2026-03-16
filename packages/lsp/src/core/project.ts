@@ -7,7 +7,7 @@
 import { createRunner, type Runner, type Diagnostic, type Plugin } from "@drskillissue/ganko";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
-import { createTypeScriptProjectService, type TypeScriptProjectService, type ProjectServiceOptions } from "./project-service";
+import { createIncrementalProgram, type IncrementalTypeScriptService } from "./incremental-program";
 import type { Logger } from "./logger";
 
 /** Project configuration */
@@ -27,26 +27,17 @@ export interface Project {
   /** Run plugins on files and get diagnostics */
   run(files: readonly string[]): readonly Diagnostic[]
 
-  /** Get the current TypeScript program for a file. */
-  getProgram(path: string): ts.Program | null
+  /** Get the current TypeScript program. */
+  getProgram(): ts.Program
 
-  /** Warm the TypeScript program for the containing project. */
-  warmProgram(path: string, content?: string): ts.Program | null
+  /** Get a TypeScript source file by path. */
+  getSourceFile(path: string): ts.SourceFile | undefined
 
   /** Get TypeScript language service for cross-file features */
-  getLanguageService(path: string): ts.LanguageService | null
-
-  /** Get script version string for cache invalidation */
-  getScriptVersion(path: string): string | null
+  getLanguageService(): ts.LanguageService
 
   /** Update in-memory file content for unsaved buffers */
   updateFile(path: string, content: string): void
-
-  /** Close a file in the TypeScript project service, releasing its resources. */
-  closeFile(path: string): void
-
-  /** Return the set of currently open file paths in the TypeScript project service. */
-  openFiles(): ReadonlySet<string>
 
   /** Update plugins configuration */
   setPlugins(plugins: readonly Plugin<string>[]): void
@@ -69,9 +60,7 @@ export function createProject(config: ProjectConfig): Project {
     ? createRunner({ plugins: config.plugins, rules: config.rules })
     : createRunner({ plugins: config.plugins });
 
-  const tsOptions: ProjectServiceOptions = { tsconfigRootDir: config.rootPath };
-  if (log !== undefined) tsOptions.log = log;
-  const tsService: TypeScriptProjectService = createTypeScriptProjectService(tsOptions);
+  const tsService: IncrementalTypeScriptService = createIncrementalProgram(config.rootPath);
 
   if (log?.enabled) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
 
@@ -83,32 +72,20 @@ export function createProject(config: ProjectConfig): Project {
       return result;
     },
 
-    getProgram(path) {
-      return tsService.getProgram(path);
+    getProgram() {
+      return tsService.getProgram();
     },
 
-    warmProgram(path, content) {
-      return tsService.warmProgram(path, content);
+    getSourceFile(path) {
+      return tsService.getProgram().getSourceFile(path);
     },
 
-    getLanguageService(path) {
-      return tsService.getLanguageServiceForFile(path);
-    },
-
-    getScriptVersion(path) {
-      return tsService.getScriptVersionForFile(path);
+    getLanguageService() {
+      return tsService.getLanguageService();
     },
 
     updateFile(path, content) {
       tsService.updateFile(path, content);
-    },
-
-    closeFile(path) {
-      tsService.closeFile(path);
-    },
-
-    openFiles() {
-      return tsService.openFiles();
     },
 
     setPlugins(plugins) {

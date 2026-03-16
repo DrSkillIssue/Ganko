@@ -6,7 +6,7 @@
  * - `<Index>`: primitives - keyed by index
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript";
 import type { SolidGraph } from "../../impl"
 import type { JSXElementEntity } from "../../entities/jsx"
 import type { FixOperation } from "../../../diagnostic"
@@ -34,12 +34,12 @@ const messages = {
 } as const
 
 /** Find callback arrow in For/Index children. */
-function findCallbackArrow(el: T.JSXElement): T.ArrowFunctionExpression | null {
+function findCallbackArrow(el: ts.JsxElement): ts.ArrowFunction | null {
   const children = el.children
   for (let i = 0, len = children.length; i < len; i++) {
     const child = children[i]
     if (!child) continue;
-    if (child.type === "JSXExpressionContainer" && child.expression.type === "ArrowFunctionExpression") {
+    if (ts.isJsxExpression(child) && child.expression && ts.isArrowFunction(child.expression)) {
       return child.expression
     }
   }
@@ -58,44 +58,43 @@ function getIndentAt(text: string, pos: number): string {
 /** Create fix ops for tag replacement and callback transformation. */
 function createFix(el: JSXElementEntity, newTag: string, fromTag: LoopTag, graph: SolidGraph): readonly FixOperation[] {
   const node = el.node
-  if (node.type !== "JSXElement") return []
+  if (!ts.isJsxElement(node)) return []
 
   const ops: FixOperation[] = []
   const importFix = buildSolidImportFix(graph, newTag)
   if (importFix) ops.push(importFix)
 
-  const opening = node.openingElement.name
-  if (opening.type === "JSXIdentifier") {
-    ops.push({ range: [opening.range[0], opening.range[1]], text: newTag })
+  const opening = node.openingElement.tagName
+  if (ts.isIdentifier(opening)) {
+    ops.push({ range: [opening.getStart(graph.sourceFile), opening.end], text: newTag })
   }
 
-  const closing = node.closingElement?.name
-  if (closing?.type === "JSXIdentifier") {
-    ops.push({ range: [closing.range[0], closing.range[1]], text: newTag })
+  const closing = node.closingElement.tagName
+  if (ts.isIdentifier(closing)) {
+    ops.push({ range: [closing.getStart(graph.sourceFile), closing.end], text: newTag })
   }
 
   const arrow = findCallbackArrow(node)
-  const param = arrow?.params[0]
-  if (!arrow || param?.type !== "Identifier") return ops
+  const param = arrow?.parameters[0]
+  if (!arrow || !param || !ts.isIdentifier(param.name)) return ops
 
   const func = getFunctionByNode(graph, arrow)
   if (!func) return ops
 
-  const variable = getVariableByNameInScope(graph, param.name, func.scope)
+  const paramName = param.name.text
+  const variable = getVariableByNameInScope(graph, paramName, func.scope)
   if (!variable) return ops
-
-  const name = param.name
 
   if (fromTag === "For") {
     const body = arrow.body
-    if (body.type === "BlockStatement") {
-      ops.push({ range: [body.range[0] + 1, body.range[0] + 1], text: ` const ${name} = ${name}();` })
-      ops.push({ range: [param.range[0], param.range[1]], text: `_${name}` })
+    if (ts.isBlock(body)) {
+      ops.push({ range: [body.getStart(graph.sourceFile) + 1, body.getStart(graph.sourceFile) + 1], text: ` const ${paramName} = ${paramName}();` })
+      ops.push({ range: [param.name.getStart(graph.sourceFile), param.name.end], text: `_${paramName}` })
     } else {
-      const indent = getIndentAt(graph.sourceCode.text, body.range[0])
-      const bodyText = graph.sourceCode.getText(body)
-      ops.push({ range: [body.range[0], body.range[1]], text: `{\n${indent}  const ${name} = _${name}()\n${indent}  return ${bodyText}\n${indent}}` })
-      ops.push({ range: [param.range[0], param.range[1]], text: `_${name}` })
+      const indent = getIndentAt(graph.sourceFile.text, body.getStart(graph.sourceFile))
+      const bodyText = body.getText(graph.sourceFile)
+      ops.push({ range: [body.getStart(graph.sourceFile), body.end], text: `{\n${indent}  const ${paramName} = _${paramName}()\n${indent}  return ${bodyText}\n${indent}}` })
+      ops.push({ range: [param.name.getStart(graph.sourceFile), param.name.end], text: `_${paramName}` })
     }
   } else {
     const reads = getVariableReads(variable)
@@ -103,7 +102,7 @@ function createFix(el: JSXElementEntity, newTag: string, fromTag: LoopTag, graph
       const read = reads[i]
       if (!read) continue;
       if (read.isProperAccess) {
-        ops.push({ range: [read.node.range[1], read.node.range[1] + 2], text: "" })
+        ops.push({ range: [read.node.end, read.node.end + 2], text: "" })
       }
     }
   }
@@ -132,7 +131,7 @@ function checkElement(
   const fix = createFix(el, replacement, tag, graph)
   const messageId = isIndex ? "indexWithObjects" : "forWithPrimitives"
 
-  emit(createDiagnostic(graph.file, el.node, "index-vs-for", messageId, messages[messageId], "warn", fix.length > 0 ? fix : undefined))
+  emit(createDiagnostic(graph.file, el.node, graph.sourceFile, "index-vs-for", messageId, messages[messageId], "warn", fix.length > 0 ? fix : undefined))
 }
 
 const options = {}

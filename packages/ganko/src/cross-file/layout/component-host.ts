@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { ExportKind, type ExportEntity } from "../../solid/entities/export"
 import type { FunctionEntity } from "../../solid/entities/function"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { VariableEntity } from "../../solid/entities/variable"
 import { SolidGraph } from "../../solid/impl"
-import { parseContent } from "../../solid/parse"
+import { createSolidInput } from "../../solid/create-input"
 import { runPhases } from "../../solid/phases"
 import { getStaticClassTokensForElementEntity } from "../../solid/queries/jsx-derived"
 import { getStaticStringFromJSXValue } from "../../solid/util/static-value"
@@ -91,7 +91,7 @@ type ComponentHostEntry = ResolvedComponentHostEntry | DeferredComponentHostEntr
 interface SolidModuleIndex {
   readonly graph: SolidGraph
   readonly hostByComponentName: ReadonlyMap<string, ComponentHostEntry>
-  readonly variableInitByName: ReadonlyMap<string, T.Expression>
+  readonly variableInitByName: ReadonlyMap<string, ts.Expression>
   readonly importByLocalName: ReadonlyMap<string, ImportBinding>
   readonly exportsByName: ReadonlyMap<string, readonly ExportEntity[]>
   readonly transparentPrimitiveNames: ReadonlySet<string>
@@ -269,27 +269,27 @@ export function createLayoutComponentHostResolver(
     return null
   }
 
-  function resolveBindingFromExpression(filePath: string, expression: T.Expression): LayoutBinding | null {
+  function resolveBindingFromExpression(filePath: string, expression: ts.Expression): LayoutBinding | null {
     const unwrapped = unwrapExpression(expression)
-    if (unwrapped.type === "Identifier") {
-      return resolveLocalIdentifierBinding(filePath, unwrapped.name)
+    if (ts.isIdentifier(unwrapped)) {
+      return resolveLocalIdentifierBinding(filePath, unwrapped.text)
     }
 
-    if (unwrapped.type === "MemberExpression") {
+    if (ts.isPropertyAccessExpression(unwrapped)) {
       return resolveBindingFromMemberExpression(filePath, unwrapped)
     }
 
-    if (unwrapped.type === "CallExpression") {
+    if (ts.isCallExpression(unwrapped)) {
       return resolveBindingFromCallExpression(filePath, unwrapped)
     }
 
-    if (unwrapped.type === "ObjectExpression") {
+    if (ts.isObjectLiteralExpression(unwrapped)) {
       return resolveNamespaceFromObjectExpression(filePath, unwrapped, null)
     }
 
-    if (unwrapped.type === "SequenceExpression") {
-      if (unwrapped.expressions.length === 0) return null
-      const lastExpr = unwrapped.expressions[unwrapped.expressions.length - 1]
+    if (ts.isCommaListExpression(unwrapped)) {
+      if (unwrapped.elements.length === 0) return null
+      const lastExpr = unwrapped.elements[unwrapped.elements.length - 1]
       if (!lastExpr) return null
       return resolveBindingFromExpression(filePath, lastExpr)
     }
@@ -299,21 +299,19 @@ export function createLayoutComponentHostResolver(
 
   function resolveBindingFromMemberExpression(
     filePath: string,
-    expression: T.MemberExpression,
+    expression: ts.PropertyAccessExpression,
   ): LayoutBinding | null {
-    if (expression.computed) return null
-    if (expression.object.type === "Super") return null
-    if (expression.property.type !== "Identifier") return null
+    if (expression.expression.kind === ts.SyntaxKind.SuperKeyword) return null
 
-    const objectBinding = resolveBindingFromExpression(filePath, expression.object)
+    const objectBinding = resolveBindingFromExpression(filePath, expression.expression)
     if (objectBinding === null) return null
     if (objectBinding.kind !== "namespace") return null
-    return objectBinding.members.get(expression.property.name) ?? null
+    return objectBinding.members.get(expression.name.text) ?? null
   }
 
   function resolveBindingFromCallExpression(
     filePath: string,
-    expression: T.CallExpression,
+    expression: ts.CallExpression,
   ): LayoutBinding | null {
     if (!isObjectAssignCall(expression)) return null
     if (expression.arguments.length === 0) return null
@@ -342,8 +340,8 @@ export function createLayoutComponentHostResolver(
     for (let i = 1; i < expression.arguments.length; i++) {
       const argument = expression.arguments[i]
       if (!argument) continue
-      if (argument.type === "SpreadElement") {
-        const spread = resolveBindingFromExpression(filePath, argument.argument)
+      if (ts.isSpreadElement(argument)) {
+        const spread = resolveBindingFromExpression(filePath, argument.expression)
         if (!spread || spread.kind !== "namespace") continue
         for (const [name, value] of spread.members) {
           members.set(name, value)
@@ -351,7 +349,7 @@ export function createLayoutComponentHostResolver(
         continue
       }
 
-      if (argument.type !== "ObjectExpression") continue
+      if (!ts.isObjectLiteralExpression(argument)) continue
       appendObjectExpressionMembers(filePath, argument, members)
     }
 
@@ -367,7 +365,7 @@ export function createLayoutComponentHostResolver(
 
   function resolveNamespaceFromObjectExpression(
     filePath: string,
-    objectExpression: T.ObjectExpression,
+    objectExpression: ts.ObjectLiteralExpression,
     base: ComponentBinding | null,
   ): NamespaceBinding | null {
     const members = new Map<string, LayoutBinding>()
@@ -383,14 +381,14 @@ export function createLayoutComponentHostResolver(
 
   function appendObjectExpressionMembers(
     filePath: string,
-    objectExpression: T.ObjectExpression,
+    objectExpression: ts.ObjectLiteralExpression,
     members: Map<string, LayoutBinding>,
   ): void {
     for (let i = 0; i < objectExpression.properties.length; i++) {
       const property = objectExpression.properties[i]
       if (!property) continue
-      if (property.type === "SpreadElement") {
-        const spread = resolveBindingFromExpression(filePath, property.argument)
+      if (ts.isSpreadAssignment(property)) {
+        const spread = resolveBindingFromExpression(filePath, property.expression)
         if (!spread || spread.kind !== "namespace") continue
         for (const [name, value] of spread.members) {
           members.set(name, value)
@@ -398,19 +396,11 @@ export function createLayoutComponentHostResolver(
         continue
       }
 
-      if (property.type !== "Property") continue
-      if (property.computed) continue
-      const keyName = readObjectPropertyKey(property.key)
+      if (!ts.isPropertyAssignment(property)) continue
+      if (property.name && ts.isComputedPropertyName(property.name)) continue
+      const keyName = readObjectPropertyKey(property.name)
       if (keyName === null) continue
-      const value = property.value
-      if (
-        value.type === "AssignmentPattern"
-        || value.type === "ArrayPattern"
-        || value.type === "ObjectPattern"
-        || value.type === "TSEmptyBodyFunctionExpression"
-      ) {
-        continue
-      }
+      const value = property.initializer
 
       const valueBinding = resolveBindingFromExpression(filePath, value)
       if (valueBinding === null) continue
@@ -628,7 +618,27 @@ function buildSolidModuleIndexes(solids: readonly SolidGraph[]): ReadonlyMap<str
 function parseAndBuildExternalIndex(filePath: string): SolidModuleIndex | null {
   try {
     const content = readFileSync(filePath, "utf-8")
-    const input = parseContent(filePath, content)
+    const program = ts.createProgram([filePath], {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.Preserve,
+      allowJs: true,
+      noEmit: true,
+    }, {
+      getSourceFile(name, languageVersion) {
+        if (name === filePath) return ts.createSourceFile(name, content, languageVersion, true)
+        return undefined
+      },
+      writeFile() {},
+      getDefaultLibFileName: () => "lib.d.ts",
+      useCaseSensitiveFileNames: () => true,
+      getCanonicalFileName: (f) => f,
+      getCurrentDirectory: () => "",
+      getNewLine: () => "\n",
+      fileExists: (f) => f === filePath,
+      readFile: (f) => f === filePath ? content : undefined,
+    })
+    const input = createSolidInput(filePath, program)
     const graph = new SolidGraph(input)
     runPhases(graph, input)
     return buildSolidModuleIndex(graph)
@@ -666,8 +676,8 @@ function resolveComponentHostEntryForFunction(
   for (let i = 0; i < fn.returnStatements.length; i++) {
     const returnStatement = fn.returnStatements[i]
     if (!returnStatement) continue
-    const argument = returnStatement.node.argument
-    if (argument === null) continue
+    const argument = returnStatement.node.expression
+    if (!argument) continue
     const returnEntry = resolveHostEntryFromExpression(graph, argument)
     if (returnEntry === null) return null
 
@@ -687,20 +697,20 @@ function resolveHostEntryFromFunctionBody(
   graph: SolidGraph,
   fn: FunctionEntity,
 ): ComponentHostEntry | null {
-  if (fn.body.type === "BlockStatement") return null
+  if (!fn.body || ts.isBlock(fn.body)) return null
   return resolveHostEntryFromExpression(graph, fn.body)
 }
 
 function resolveHostEntryFromExpression(
   graph: SolidGraph,
-  expression: T.Expression,
+  expression: ts.Expression,
 ): ComponentHostEntry | null {
   const unwrapped = unwrapExpression(expression)
-  if (unwrapped.type === "JSXElement") {
+  if (ts.isJsxElement(unwrapped) || ts.isJsxSelfClosingElement(unwrapped)) {
     return resolveHostEntryFromJSXElement(graph, unwrapped)
   }
 
-  if (unwrapped.type !== "JSXFragment") return null
+  if (!ts.isJsxFragment(unwrapped)) return null
   return resolveHostEntryFromJSXFragment(graph, unwrapped)
 }
 
@@ -714,7 +724,7 @@ function resolveHostEntryFromExpression(
  * carrying the call-site attributes and class tokens, plus the inner component
  * tag for later cross-file recursive resolution.
  */
-function resolveHostEntryFromJSXElement(graph: SolidGraph, node: T.JSXElement): ComponentHostEntry | null {
+function resolveHostEntryFromJSXElement(graph: SolidGraph, node: ts.JsxElement | ts.JsxSelfClosingElement): ComponentHostEntry | null {
   const element = graph.jsxByNode.get(node)
   if (!element) return null
   if (element.tag === null) return null
@@ -736,7 +746,8 @@ function resolveHostEntryFromJSXElement(graph: SolidGraph, node: T.JSXElement): 
   // that render children directly without adding DOM elements. When the root JSX
   // element is a provider, look through its children to find the actual host element.
   if (isContextProviderTag(element.tag)) {
-    return resolveHostEntryFromJSXChildren(graph, node.children)
+    const children = ts.isJsxElement(node) ? node.children : ([] as readonly ts.JsxChild[])
+    return resolveHostEntryFromJSXChildren(graph, children)
   }
 
   return {
@@ -765,7 +776,7 @@ function isContextProviderTag(tag: string): boolean {
  * Iterates through JSX children to find a single consistent host entry,
  * using the same logic as fragment resolution.
  */
-function resolveHostEntryFromJSXChildren(graph: SolidGraph, children: readonly T.JSXChild[]): ComponentHostEntry | null {
+function resolveHostEntryFromJSXChildren(graph: SolidGraph, children: readonly ts.JsxChild[]): ComponentHostEntry | null {
   let candidate: ComponentHostEntry | null = null
 
   for (let i = 0; i < children.length; i++) {
@@ -783,29 +794,29 @@ function resolveHostEntryFromJSXChildren(graph: SolidGraph, children: readonly T
   return candidate
 }
 
-function resolveHostEntryFromJSXFragment(graph: SolidGraph, node: T.JSXFragment): ComponentHostEntry | null {
-  return resolveHostEntryFromJSXChildren(graph, node.children)
+function resolveHostEntryFromJSXFragment(graph: SolidGraph, node: ts.JsxFragment): ComponentHostEntry | null {
+  return resolveHostEntryFromJSXChildren(graph, [...node.children])
 }
 
 function resolveHostEntryFromJSXChild(
   graph: SolidGraph,
-  child: T.JSXChild,
+  child: ts.JsxChild,
 ): ComponentHostEntry | null | "ignore" {
-  if (child.type === "JSXText") {
-    if (isBlank(child.value)) return "ignore"
+  if (ts.isJsxText(child)) {
+    if (isBlank(child.text)) return "ignore"
     return null
   }
 
-  if (child.type === "JSXExpressionContainer") {
-    if (child.expression.type === "JSXEmptyExpression") return "ignore"
+  if (ts.isJsxExpression(child)) {
+    if (!child.expression) return "ignore"
     return null
   }
 
-  if (child.type === "JSXElement") {
+  if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)) {
     return resolveHostEntryFromJSXElement(graph, child)
   }
 
-  if (child.type !== "JSXFragment") return null
+  if (!ts.isJsxFragment(child)) return null
   return resolveHostEntryFromJSXFragment(graph, child)
 }
 
@@ -823,8 +834,8 @@ function detectChildrenForwarding(root: JSXElementEntity): boolean {
       const child = current.children[j]
       if (!child) continue
       if (child.kind !== "expression") continue
-      if (child.node.type !== "JSXExpressionContainer") continue
-      if (child.node.expression.type === "JSXEmptyExpression") continue
+      if (!ts.isJsxExpression(child.node)) continue
+      if (!child.node.expression) continue
       if (containsChildrenReference(child.node.expression)) return true
     }
 
@@ -840,37 +851,42 @@ function detectChildrenForwarding(root: JSXElementEntity): boolean {
 
 const MAX_CHILDREN_REFERENCE_QUEUE_SIZE = 512
 
-function containsChildrenReference(expression: T.Expression): boolean {
-  const queue: T.Node[] = [expression]
+function containsChildrenReference(expression: ts.Expression): boolean {
+  const queue: ts.Node[] = [expression]
 
   for (let i = 0; i < queue.length; i++) {
     if (queue.length > MAX_CHILDREN_REFERENCE_QUEUE_SIZE) return false
     const current = queue[i]
     if (!current) continue
 
-    if (current.type === "Identifier") {
-      if (current.name === "children") return true
+    if (ts.isIdentifier(current)) {
+      if (current.text === "children") return true
       continue
     }
 
-    if (current.type === "MemberExpression") {
-      if (!current.computed && current.property.type === "Identifier" && current.property.name === "children") {
+    if (ts.isPropertyAccessExpression(current)) {
+      if (ts.isIdentifier(current.name) && current.name.text === "children") {
         return true
       }
-      queue.push(current.object)
-      if (current.computed) queue.push(current.property)
+      queue.push(current.expression)
       continue
     }
 
-    if (current.type === "CallExpression") {
-      if (current.callee.type === "Identifier" && current.callee.name === "children") return true
-      queue.push(current.callee)
+    if (ts.isElementAccessExpression(current)) {
+      queue.push(current.expression)
+      queue.push(current.argumentExpression)
+      continue
+    }
+
+    if (ts.isCallExpression(current)) {
+      if (ts.isIdentifier(current.expression) && current.expression.text === "children") return true
+      queue.push(current.expression)
 
       for (let j = 0; j < current.arguments.length; j++) {
         const argument = current.arguments[j]
         if (!argument) continue
-        if (argument.type === "SpreadElement") {
-          queue.push(argument.argument)
+        if (ts.isSpreadElement(argument)) {
+          queue.push(argument.expression)
           continue
         }
         queue.push(argument)
@@ -878,95 +894,77 @@ function containsChildrenReference(expression: T.Expression): boolean {
       continue
     }
 
-    if (current.type === "ConditionalExpression") {
-      queue.push(current.test)
-      queue.push(current.consequent)
-      queue.push(current.alternate)
+    if (ts.isConditionalExpression(current)) {
+      queue.push(current.condition)
+      queue.push(current.whenTrue)
+      queue.push(current.whenFalse)
       continue
     }
 
-    if (current.type === "LogicalExpression") {
+    if (ts.isBinaryExpression(current)) {
       queue.push(current.left)
       queue.push(current.right)
       continue
     }
 
-    if (current.type === "ChainExpression") {
-      queue.push(current.expression)
+    if (ts.isPrefixUnaryExpression(current) || ts.isPostfixUnaryExpression(current)) {
+      queue.push(current.operand)
       continue
     }
 
-    if (current.type === "UnaryExpression") {
-      queue.push(current.argument)
-      continue
-    }
-
-    if (current.type === "BinaryExpression") {
-      queue.push(current.left)
-      queue.push(current.right)
-      continue
-    }
-
-    if (current.type === "AssignmentExpression") {
-      queue.push(current.left)
-      queue.push(current.right)
-      continue
-    }
-
-    if (current.type === "SequenceExpression") {
-      for (let j = 0; j < current.expressions.length; j++) {
-        const expr = current.expressions[j]
+    if (ts.isCommaListExpression(current)) {
+      for (let j = 0; j < current.elements.length; j++) {
+        const expr = current.elements[j]
         if (!expr) continue
         queue.push(expr)
       }
       continue
     }
 
-    if (current.type === "ArrayExpression") {
+    if (ts.isArrayLiteralExpression(current)) {
       for (let j = 0; j < current.elements.length; j++) {
-        const element = current.elements[j]
-        if (element === null || element === undefined) continue
-        queue.push(element)
+        const elem = current.elements[j]
+        if (!elem) continue
+        queue.push(elem)
       }
       continue
     }
 
-    if (current.type === "ObjectExpression") {
+    if (ts.isObjectLiteralExpression(current)) {
       for (let j = 0; j < current.properties.length; j++) {
         const property = current.properties[j]
         if (!property) continue
-        if (property.type === "SpreadElement") {
-          queue.push(property.argument)
+        if (ts.isSpreadAssignment(property)) {
+          queue.push(property.expression)
           continue
         }
-
-        if (property.type !== "Property") continue
-        if (property.computed) queue.push(property.key)
-        queue.push(property.value)
+        if (!ts.isPropertyAssignment(property)) continue
+        if (property.name && ts.isComputedPropertyName(property.name)) queue.push(property.name.expression)
+        queue.push(property.initializer)
       }
       continue
     }
 
-    if (current.type === "TemplateLiteral") {
-      for (let j = 0; j < current.expressions.length; j++) {
-        const expr = current.expressions[j]
-        if (!expr) continue
-        queue.push(expr)
+    if (ts.isTemplateExpression(current)) {
+      for (let j = 0; j < current.templateSpans.length; j++) {
+        const span = current.templateSpans[j]
+        if (!span) continue
+        queue.push(span.expression)
       }
       continue
     }
 
-    if (current.type === "AwaitExpression") {
-      queue.push(current.argument)
-      continue
-    }
-
-    if (current.type === "TSAsExpression" || current.type === "TSTypeAssertion") {
+    if (ts.isAwaitExpression(current)) {
       queue.push(current.expression)
       continue
     }
 
-    if (current.type === "TSNonNullExpression") {
+    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
+      queue.push(current.expression)
+      continue
+    }
+
+    if (ts.isNonNullExpression(current)) {
       queue.push(current.expression)
       continue
     }
@@ -981,7 +979,7 @@ export function collectStaticAttributes(element: JSXElementEntity): ReadonlyMap<
   for (let i = 0; i < element.attributes.length; i++) {
     const attribute = element.attributes[i]
     if (!attribute) continue
-    if (attribute.node.type !== "JSXAttribute") continue
+    if (!ts.isJsxAttribute(attribute.node)) continue
     if (!attribute.name) continue
     const name = attribute.name.toLowerCase()
 
@@ -1000,8 +998,8 @@ export function collectStaticAttributes(element: JSXElementEntity): ReadonlyMap<
   return out
 }
 
-function collectTopLevelVariableInitializers(graph: SolidGraph): ReadonlyMap<string, T.Expression> {
-  const out = new Map<string, T.Expression>()
+function collectTopLevelVariableInitializers(graph: SolidGraph): ReadonlyMap<string, ts.Expression> {
+  const out = new Map<string, ts.Expression>()
 
   for (let i = 0; i < graph.variables.length; i++) {
     const variable = graph.variables[i]
@@ -1016,15 +1014,8 @@ function collectTopLevelVariableInitializers(graph: SolidGraph): ReadonlyMap<str
   return out
 }
 
-function resolveInitializerExpression(variable: VariableEntity): T.Expression | null {
-  for (let i = 0; i < variable.assignments.length; i++) {
-    const assignment = variable.assignments[i]
-    if (!assignment) continue
-    if (assignment.operator !== null) continue
-    return assignment.value
-  }
-
-  return null
+function resolveInitializerExpression(variable: VariableEntity): ts.Expression | null {
+  return variable.initializer
 }
 
 function collectImportBindingsByLocalName(graph: SolidGraph): ReadonlyMap<string, ImportBinding> {
@@ -1091,16 +1082,21 @@ function collectExportsByName(graph: SolidGraph): ReadonlyMap<string, readonly E
   return out
 }
 
-function unwrapExpression(expression: T.Expression): T.Expression {
+function unwrapExpression(expression: ts.Expression): ts.Expression {
   let current = expression
 
   while (true) {
-    if (current.type === "TSAsExpression" || current.type === "TSTypeAssertion") {
+    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
       current = current.expression
       continue
     }
 
-    if (current.type === "TSNonNullExpression") {
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression
+      continue
+    }
+
+    if (ts.isParenthesizedExpression(current)) {
       current = current.expression
       continue
     }
@@ -1109,36 +1105,29 @@ function unwrapExpression(expression: T.Expression): T.Expression {
   }
 }
 
-function isObjectAssignCall(expression: T.CallExpression): boolean {
-  if (expression.callee.type !== "MemberExpression") return false
-  if (expression.callee.computed) return false
-  if (expression.callee.object.type !== "Identifier") return false
-  if (expression.callee.object.name !== "Object") return false
-  if (expression.callee.property.type !== "Identifier") return false
-  return expression.callee.property.name === "assign"
+function isObjectAssignCall(expression: ts.CallExpression): boolean {
+  const callee = expression.expression
+  if (!ts.isPropertyAccessExpression(callee)) return false
+  if (!ts.isIdentifier(callee.expression)) return false
+  if (callee.expression.text !== "Object") return false
+  return callee.name.text === "assign"
 }
 
-function toExpressionArgument(argument: T.CallExpressionArgument): T.Expression | null {
-  if (argument.type === "SpreadElement") return null
+function toExpressionArgument(argument: ts.Expression): ts.Expression | null {
+  if (ts.isSpreadElement(argument)) return null
   return argument
 }
 
-function readObjectPropertyKey(key: T.Expression | T.PrivateIdentifier): string | null {
-  if (key.type === "PrivateIdentifier") return null
-  if (key.type === "Identifier") return key.name
+function readObjectPropertyKey(key: ts.PropertyName): string | null {
+  if (ts.isPrivateIdentifier(key)) return null
+  if (ts.isIdentifier(key)) return key.text
 
-  if (key.type === "Literal") {
-    if (typeof key.value === "string") return key.value
-    if (typeof key.value === "number") return String(key.value)
-    return null
-  }
+  if (ts.isStringLiteral(key)) return key.text
+  if (ts.isNumericLiteral(key)) return key.text
 
-  if (key.type !== "TemplateLiteral") return null
-  if (key.expressions.length !== 0) return null
-  if (key.quasis.length !== 1) return null
-  const quasi = key.quasis[0]
-  if (!quasi) return null
-  return quasi.value.cooked ?? quasi.value.raw
+  if (ts.isNoSubstitutionTemplateLiteral(key)) return key.text
+
+  return null
 }
 
 function splitTagPath(tag: string): readonly string[] {

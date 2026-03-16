@@ -12,7 +12,7 @@
  * - Access props directly via `props.x` to preserve reactivity
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { ObjectSpreadEntity, CallEntity, SpreadSourceReactivity } from "../../entities"
 import type { ObjectPropertyInfo } from "../../typescript"
@@ -23,7 +23,6 @@ import { getScopeFor, getEffectiveTrackingContext } from "../../queries/scope"
 import { getObjectProperties, getTypeInfo } from "../../queries/type"
 import { getSpreadSourceReactivity, isPropsPassThrough } from "../../queries/spread"
 import { getMemberAccessesOnIdentifier } from "../../queries/entity"
-import { getSourceCode } from "../../queries/get"
 import { matchesAnyGlobPattern } from "@drskillissue/ganko-shared"
 
 interface Options extends Record<string, unknown> {
@@ -55,9 +54,9 @@ const IDENTIFIER_REGEX = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/
  * @param sourceCode - Source code text
  * @returns The source text of what's being spread
  */
-function getSpreadArgumentSource(node: T.SpreadElement | T.JSXSpreadAttribute, sourceCode: string): string {
-  const arg = node.argument
-  return sourceCode.slice(arg.range[0], arg.range[1])
+function getSpreadArgumentSource(node: ts.SpreadElement | ts.SpreadAssignment | ts.JsxSpreadAttribute, sourceCode: string, sourceFile: ts.SourceFile): string {
+  const arg = ts.isJsxSpreadAttribute(node) ? node.expression : node.expression
+  return sourceCode.slice(arg.getStart(sourceFile), arg.end)
 }
 
 /**
@@ -158,8 +157,8 @@ function getComponentPropsProperties(spread: ObjectSpreadEntity, graph: SolidGra
   const opening = spread.parentJSXElement
   if (!opening) return null
 
-  const tag = opening.name
-  if (tag.type !== "JSXIdentifier" && tag.type !== "JSXMemberExpression") return null
+  const tag = opening.tagName
+  if (!ts.isIdentifier(tag) && !ts.isPropertyAccessExpression(tag) && !ts.isJsxNamespacedName(tag)) return null
 
   // Get the type of the component tag — works for both identifiers and
   // member expressions (e.g. Base.Item). The type resolver calls
@@ -187,14 +186,14 @@ function getComponentPropsProperties(spread: ObjectSpreadEntity, graph: SolidGra
  * @param graph - The program graph
  * @returns Synthetic property info array, or null if not applicable
  */
-function getPropertiesFromMemberAccesses(arg: T.Identifier, graph: SolidGraph): readonly ObjectPropertyInfo[] | null {
+function getPropertiesFromMemberAccesses(arg: ts.Identifier, graph: SolidGraph): readonly ObjectPropertyInfo[] | null {
   // Walk up AST to find the enclosing function node
-  let current: T.Node | undefined = arg.parent;
+  let current: ts.Node | undefined = arg.parent;
   while (current) {
     if (
-      current.type === "ArrowFunctionExpression" ||
-      current.type === "FunctionExpression" ||
-      current.type === "FunctionDeclaration"
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current)
     ) break;
     current = current.parent;
   }
@@ -205,7 +204,7 @@ function getPropertiesFromMemberAccesses(arg: T.Identifier, graph: SolidGraph): 
   if (!fn) return null;
 
   // Verify the identifier is actually a parameter of this function
-  const paramName = arg.name;
+  const paramName = arg.text;
   let isParam = false;
   for (let i = 0, len = fn.params.length; i < len; i++) {
     const param = fn.params[i];
@@ -224,10 +223,10 @@ function getPropertiesFromMemberAccesses(arg: T.Identifier, graph: SolidGraph): 
   for (let i = 0, len = accesses.length; i < len; i++) {
     const access = accesses[i];
     if (!access) continue;
-    if (access.computed) continue;
-    const prop = access.property;
-    if (prop.type !== "Identifier") continue;
-    const name = prop.name;
+    if (!ts.isPropertyAccessExpression(access)) continue;
+    const prop = access.name;
+    if (!ts.isIdentifier(prop)) continue;
+    const name = prop.text;
     if (seen.has(name)) continue;
     seen.add(name);
     result.push({ name, optional: false, type: "unknown" });
@@ -238,22 +237,23 @@ function getPropertiesFromMemberAccesses(arg: T.Identifier, graph: SolidGraph): 
 
 function tryCreateFix(spread: ObjectSpreadEntity, graph: SolidGraph, sourceCode: string): Fix | null {
   const node = spread.node
+  const sourceFile = graph.sourceFile
 
   // Skip rest destructuring - needs splitProps which is more complex
-  if (node.type === "RestElement") return null
+  if (ts.isBindingElement(node)) return null
 
   // Skip merge patterns - multiple spreads are complex
   if (spread.kind === "object-merge") return null
 
-  const arg = node.argument
-  const source = getSpreadArgumentSource(node, sourceCode)
+  const arg = ts.isJsxSpreadAttribute(node) ? node.expression : node.expression
+  const source = getSpreadArgumentSource(node, sourceCode, sourceFile)
 
   // For object literals being spread, we can inline directly
-  if (arg.type === "ObjectExpression") {
-    return createObjectLiteralFix(node, arg, sourceCode)
+  if (ts.isObjectLiteralExpression(arg)) {
+    return createObjectLiteralFix(node, arg, sourceCode, sourceFile)
   }
 
-  if (spread.kind === "jsx-spread" && node.type === "JSXSpreadAttribute") {
+  if (spread.kind === "jsx-spread" && ts.isJsxSpreadAttribute(node)) {
     // For JSX spreads, include callable props (event handlers, callbacks)
     let props = getObjectProperties(graph, arg, 10, true)
 
@@ -266,20 +266,20 @@ function tryCreateFix(spread: ObjectSpreadEntity, graph: SolidGraph, sourceCode:
     // Structural fallback: when both type-based paths fail (e.g. project
     // service resolves generic callback params to `any`), discover properties
     // by scanning member accesses on the spread argument within its function.
-    if ((!props || props.length === 0) && arg.type === "Identifier") {
+    if ((!props || props.length === 0) && ts.isIdentifier(arg)) {
       props = getPropertiesFromMemberAccesses(arg, graph)
     }
 
     if (!props || props.length === 0) return null
-    return createJSXSpreadFix(node, props, source, sourceCode)
+    return createJSXSpreadFix(node, props, source, sourceCode, sourceFile)
   }
 
   // For non-JSX spreads, exclude callable properties
   const props = getObjectProperties(graph, arg)
   if (!props || props.length === 0) return null
 
-  if (node.type === "SpreadElement") {
-    return createObjectSpreadFix(node, props, source)
+  if (ts.isSpreadElement(node)) {
+    return createObjectSpreadFix(node, props, source, sourceFile)
   }
 
   return null
@@ -293,19 +293,21 @@ function tryCreateFix(spread: ObjectSpreadEntity, graph: SolidGraph, sourceCode:
  * @returns A fix or null if not fixable
  */
 function createObjectLiteralFix(
-  node: T.SpreadElement | T.JSXSpreadAttribute,
-  objExpr: T.ObjectExpression,
+  node: ts.SpreadElement | ts.SpreadAssignment | ts.JsxSpreadAttribute | ts.BindingElement,
+  objExpr: ts.ObjectLiteralExpression,
   sourceCode: string,
+  sourceFile: ts.SourceFile,
 ): Fix | null {
-  const innerStart = objExpr.range[0] + 1
-  const innerEnd = objExpr.range[1] - 1
+  const innerStart = objExpr.getStart(sourceFile) + 1
+  const innerEnd = objExpr.end - 1
 
   // Early exit if range is empty or whitespace-only
   if (innerStart >= innerEnd) return null
   const raw = sourceCode.slice(innerStart, innerEnd)
   if (!raw || !raw.trim()) return null
 
-  const [start, end] = node.range
+  const start = node.getStart(sourceFile)
+  const end = node.end
   return [{ range: [start, end] as const, text: raw.trim() }]
 }
 
@@ -323,17 +325,19 @@ function createObjectLiteralFix(
  * @returns A fix or null if not fixable
  */
 function createJSXSpreadFix(
-  node: T.JSXSpreadAttribute,
+  node: ts.JsxSpreadAttribute,
   props: readonly ObjectPropertyInfo[],
   source: string,
   sourceCode: string,
+  sourceFile: ts.SourceFile,
 ): Fix | null {
   const opening = node.parent
-  const indent = opening ? detectLineIndent(sourceCode, opening.range[0]) : ""
+  const indent = opening ? detectLineIndent(sourceCode, opening.getStart(sourceFile)) : ""
   const expanded = generateExpandedJSXAttrs(props, source, indent)
   if (!expanded) return null
 
-  const [start, end] = node.range
+  const start = node.getStart(sourceFile)
+  const end = node.end
   return [{ range: [start, end] as const, text: expanded }]
 }
 
@@ -344,11 +348,12 @@ function createJSXSpreadFix(
  * @param source - Source expression text
  * @returns A fix or null if not fixable
  */
-function createObjectSpreadFix(node: T.SpreadElement, props: readonly ObjectPropertyInfo[], source: string): Fix | null {
+function createObjectSpreadFix(node: ts.SpreadElement, props: readonly ObjectPropertyInfo[], source: string, sourceFile: ts.SourceFile): Fix | null {
   const expanded = generateExpandedProps(props, source)
   if (!expanded) return null
 
-  const [start, end] = node.range
+  const start = node.getStart(sourceFile)
+  const end = node.end
   return [{ range: [start, end] as const, text: expanded }]
 }
 
@@ -362,28 +367,30 @@ function createObjectSpreadFix(node: T.SpreadElement, props: readonly ObjectProp
 function checkUnnecessarySplitProps(
   call: CallEntity,
   file: string,
+  sourceFile: ts.SourceFile,
 ): Diagnostic | null {
   const callNode = call.node
 
-  if (callNode.type !== "CallExpression") return null
+  if (!ts.isCallExpression(callNode)) return null
   if (callNode.arguments.length < 2) return null
 
   // Check if second argument is an empty array
   const secondArg = callNode.arguments[1]
   if (!secondArg) return null
-  if (secondArg.type !== "ArrayExpression") return null
+  if (!ts.isArrayLiteralExpression(secondArg)) return null
   if (secondArg.elements.length !== 0) return null
 
   // Get the first argument (the props source)
   const firstArg = callNode.arguments[0]
   if (!firstArg) return null
-  if (firstArg.type !== "Identifier") return null
+  if (!ts.isIdentifier(firstArg)) return null
 
-  const propsName = firstArg.name
+  const propsName = firstArg.text
 
   return createDiagnostic(
     file,
     callNode,
+    sourceFile,
     "avoid-object-spread",
     "unnecessarySplitProps",
     resolveMessage(messages.unnecessarySplitProps, { source: propsName }),
@@ -405,12 +412,12 @@ function checkUnnecessarySplitProps(
  * Detect if a spread node is inside a setter callback: `setX(prev => ({ ...prev, ... }))`.
  * The callback is a function expression that is a direct argument to a call expression.
  */
-function isInsideSetterCallback(node: T.SpreadElement | T.JSXSpreadAttribute | T.RestElement): boolean {
-  let current: T.Node | undefined = node.parent
+function isInsideSetterCallback(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent
   while (current) {
-    if (current.type === "ArrowFunctionExpression" || current.type === "FunctionExpression") {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       const fnParent = current.parent
-      return fnParent?.type === "CallExpression" && fnParent.callee !== current
+      return fnParent !== undefined && ts.isCallExpression(fnParent) && fnParent.expression !== current
     }
     current = current.parent
   }
@@ -536,7 +543,7 @@ export const avoidObjectSpread = defineSolidRule({
     const splitPropsCalls = graph.callsByPrimitive.get("splitProps") ?? []
 
     for (const call of splitPropsCalls) {
-      const diagnostic = checkUnnecessarySplitProps(call, graph.file)
+      const diagnostic = checkUnnecessarySplitProps(call, graph.file, graph.sourceFile)
       if (diagnostic) {
         emit(diagnostic)
       }
@@ -546,7 +553,7 @@ export const avoidObjectSpread = defineSolidRule({
     const len = spreads.length
     if (len === 0) return
 
-    const sourceCode = getSourceCode(graph).text
+    const sourceCode = graph.sourceFile.text
 
     for (let i = 0; i < len; i++) {
       const spread = spreads[i]
@@ -570,7 +577,7 @@ export const avoidObjectSpread = defineSolidRule({
       const msg = messages[messageId]
       const fix = tryCreateFix(spread, graph, sourceCode)
 
-      emit(createDiagnostic(graph.file, spread.node, "avoid-object-spread", messageId, msg, "error", fix ?? undefined))
+      emit(createDiagnostic(graph.file, spread.node, graph.sourceFile, "avoid-object-spread", messageId, msg, "error", fix ?? undefined))
     }
   },
 })

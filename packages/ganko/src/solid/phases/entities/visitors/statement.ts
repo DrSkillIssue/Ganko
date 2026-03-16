@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import { visitExpression, visitFunctionBody } from "./expression";
 import { visitTypeNode, visitInterfaceBody } from "./type";
@@ -7,243 +7,284 @@ import { handleFunction } from "../handlers/function";
 import { handleClass, handleProperty } from "../handlers/class";
 import { handleReturnStatement, handleThrowStatement } from "../handlers/misc";
 import { handleRestDestructure } from "../handlers/spread";
-export function visitProgram(ctx: VisitorContext, node: T.Program): void {
-  if (node.body.length === 0) return;
+export function visitProgram(ctx: VisitorContext, node: ts.SourceFile): void {
+  if (node.statements.length === 0) return;
 
-  for (let i = 0, len = node.body.length; i < len; i++) {
-    const stmt = node.body[i];
+  for (let i = 0, len = node.statements.length; i < len; i++) {
+    const stmt = node.statements[i];
     if (!stmt) continue;
     visitProgramStatement(ctx, stmt);
   }
 }
 
-export function visitProgramStatement(ctx: VisitorContext, node: T.ProgramStatement): void {
-  switch (node.type) {
-    case "ImportDeclaration":
-      handleImport(ctx, node);
-      break;
-    case "ExportNamedDeclaration":
-      if (node.declaration) visitDeclaration(ctx, node.declaration);
-      break;
-    case "ExportDefaultDeclaration":
-      visitExportDefaultDeclaration(ctx, node);
-      break;
-    case "FunctionDeclaration":
-      handleFunction(ctx, node);
-      visitFunctionBody(ctx, node.body);
-      ctx.functionStack.pop();
-      break;
-    case "ClassDeclaration":
-      handleClass(ctx, node);
-      visitClassBody(ctx, node.body);
-      ctx.classStack.pop();
-      break;
-    case "VariableDeclaration":
-      visitVariableDeclaration(ctx, node);
-      break;
-    case "ExpressionStatement":
-      visitExpression(ctx, node.expression);
-      break;
-    case "BlockStatement":
-      visitBlockStatement(ctx, node);
-      break;
-    case "IfStatement":
-      visitIfStatement(ctx, node);
-      break;
-    case "ForStatement":
-      visitForStatement(ctx, node);
-      break;
-    case "ForInStatement":
-    case "ForOfStatement":
-      visitForInOfStatement(ctx, node);
-      break;
-    case "WhileStatement":
-    case "DoWhileStatement":
-      visitExpression(ctx, node.test);
-      visitStatement(ctx, node.body);
-      break;
-    case "SwitchStatement":
-      visitSwitchStatement(ctx, node);
-      break;
-    case "TryStatement":
-      visitTryStatement(ctx, node);
-      break;
-    case "ReturnStatement":
-      handleReturnStatement(ctx, node);
-      if (node.argument) visitExpression(ctx, node.argument);
-      break;
-    case "ThrowStatement":
-      handleThrowStatement(ctx, );
-      visitExpression(ctx, node.argument);
-      break;
-    case "LabeledStatement":
-      visitStatement(ctx, node.body);
-      break;
-    case "WithStatement":
-      visitExpression(ctx, node.object);
-      visitStatement(ctx, node.body);
-      break;
-    // Empty statements, debugger, break, continue - no children to visit
-    case "EmptyStatement":
-    case "DebuggerStatement":
-    case "BreakStatement":
-    case "ContinueStatement":
-      break;
-    // TypeScript declarations - visit for inline imports in type annotations
-    case "TSTypeAliasDeclaration":
-      visitTypeNode(ctx, node.typeAnnotation);
-      break;
-    case "TSInterfaceDeclaration":
-      visitInterfaceBody(ctx, node.body);
-      break;
-    case "TSEnumDeclaration":
-    case "TSModuleDeclaration":
-    case "TSDeclareFunction":
-    case "TSImportEqualsDeclaration":
-    case "TSExportAssignment":
-    case "TSNamespaceExportDeclaration":
-      break;
+export function visitProgramStatement(ctx: VisitorContext, node: ts.Statement): void {
+  if (ts.isImportDeclaration(node)) {
+    handleImport(ctx, node);
+    return;
   }
+
+  if (ts.isExportDeclaration(node)) {
+    // ExportNamedDeclaration without declaration — skip
+    return;
+  }
+
+  if (ts.isExportAssignment(node)) {
+    // export default expression
+    if (node.expression) {
+      visitExpression(ctx, node.expression);
+    }
+    return;
+  }
+
+  if (ts.isFunctionDeclaration(node)) {
+    // Check if it's an export
+    handleFunction(ctx, node);
+    if (node.body) visitFunctionBody(ctx, node.body);
+    ctx.functionStack.pop();
+    return;
+  }
+
+  if (ts.isClassDeclaration(node)) {
+    handleClass(ctx, node);
+    visitClassBody(ctx, node);
+    ctx.classStack.pop();
+    return;
+  }
+
+  if (ts.isVariableStatement(node)) {
+    visitVariableDeclaration(ctx, node.declarationList);
+    return;
+  }
+
+  if (ts.isExpressionStatement(node)) {
+    visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isBlock(node)) {
+    visitBlockStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isIfStatement(node)) {
+    visitIfStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isForStatement(node)) {
+    visitForStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+    visitForInOfStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+    visitExpression(ctx, node.expression);
+    visitStatement(ctx, node.statement);
+    return;
+  }
+
+  if (ts.isSwitchStatement(node)) {
+    visitSwitchStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isTryStatement(node)) {
+    visitTryStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isReturnStatement(node)) {
+    handleReturnStatement(ctx, node);
+    if (node.expression) visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isThrowStatement(node)) {
+    handleThrowStatement(ctx);
+    if (node.expression) visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isLabeledStatement(node)) {
+    visitStatement(ctx, node.statement);
+    return;
+  }
+
+  if (ts.isWithStatement(node)) {
+    visitExpression(ctx, node.expression);
+    visitStatement(ctx, node.statement);
+    return;
+  }
+
+  // TypeScript declarations - visit for inline imports in type annotations
+  if (ts.isTypeAliasDeclaration(node)) {
+    visitTypeNode(ctx, node.type);
+    return;
+  }
+
+  if (ts.isInterfaceDeclaration(node)) {
+    visitInterfaceBody(ctx, node);
+    return;
+  }
+
+  // Empty statements, debugger, break, continue, enum, module, declare function - no children
 }
 
-export function visitStatement(ctx: VisitorContext, node: T.Statement): void {
-  switch (node.type) {
-    case "BlockStatement":
-      visitBlockStatement(ctx, node);
-      break;
-    case "ExpressionStatement":
-      visitExpression(ctx, node.expression);
-      break;
-    case "IfStatement":
-      visitIfStatement(ctx, node);
-      break;
-    case "ForStatement":
-      visitForStatement(ctx, node);
-      break;
-    case "ForInStatement":
-    case "ForOfStatement":
-      visitForInOfStatement(ctx, node);
-      break;
-    case "WhileStatement":
-    case "DoWhileStatement":
-      ctx.loopDepth++;
-      visitExpression(ctx, node.test);
-      visitStatement(ctx, node.body);
-      ctx.loopDepth--;
-      break;
-    case "SwitchStatement":
-      visitSwitchStatement(ctx, node);
-      break;
-    case "TryStatement":
-      visitTryStatement(ctx, node);
-      break;
-    case "ReturnStatement":
-      handleReturnStatement(ctx, node);
-      if (node.argument) visitExpression(ctx, node.argument);
-      break;
-    case "ThrowStatement":
-      handleThrowStatement(ctx, );
-      visitExpression(ctx, node.argument);
-      break;
-    case "VariableDeclaration":
-      visitVariableDeclaration(ctx, node);
-      break;
-    case "FunctionDeclaration":
-      handleFunction(ctx, node);
-      visitFunctionBody(ctx, node.body);
-      ctx.functionStack.pop();
-      break;
-    case "ClassDeclaration":
-      handleClass(ctx, node);
-      visitClassBody(ctx, node.body);
-      ctx.classStack.pop();
-      break;
-    case "LabeledStatement":
-      visitStatement(ctx, node.body);
-      break;
-    case "WithStatement":
-      visitExpression(ctx, node.object);
-      visitStatement(ctx, node.body);
-      break;
-    case "EmptyStatement":
-    case "DebuggerStatement":
-    case "BreakStatement":
-    case "ContinueStatement":
-      break;
-    // TS declarations - visit for inline imports in type annotations
-    case "TSTypeAliasDeclaration":
-      visitTypeNode(ctx, node.typeAnnotation);
-      break;
-    case "TSInterfaceDeclaration":
-      visitInterfaceBody(ctx, node.body);
-      break;
-    case "TSEnumDeclaration":
-    case "TSModuleDeclaration":
-    case "TSDeclareFunction":
-    case "TSImportEqualsDeclaration":
-    case "TSExportAssignment":
-    case "TSNamespaceExportDeclaration":
-      break;
-    // These don't appear as statements
-    case "ImportDeclaration":
-    case "ExportNamedDeclaration":
-    case "ExportDefaultDeclaration":
-    case "ExportAllDeclaration":
-      break;
+export function visitStatement(ctx: VisitorContext, node: ts.Statement): void {
+  if (ts.isBlock(node)) {
+    visitBlockStatement(ctx, node);
+    return;
   }
+
+  if (ts.isExpressionStatement(node)) {
+    visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isIfStatement(node)) {
+    visitIfStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isForStatement(node)) {
+    visitForStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+    visitForInOfStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+    ctx.loopDepth++;
+    visitExpression(ctx, node.expression);
+    visitStatement(ctx, node.statement);
+    ctx.loopDepth--;
+    return;
+  }
+
+  if (ts.isSwitchStatement(node)) {
+    visitSwitchStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isTryStatement(node)) {
+    visitTryStatement(ctx, node);
+    return;
+  }
+
+  if (ts.isReturnStatement(node)) {
+    handleReturnStatement(ctx, node);
+    if (node.expression) visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isThrowStatement(node)) {
+    handleThrowStatement(ctx);
+    if (node.expression) visitExpression(ctx, node.expression);
+    return;
+  }
+
+  if (ts.isVariableStatement(node)) {
+    visitVariableDeclaration(ctx, node.declarationList);
+    return;
+  }
+
+  if (ts.isFunctionDeclaration(node)) {
+    handleFunction(ctx, node);
+    if (node.body) visitFunctionBody(ctx, node.body);
+    ctx.functionStack.pop();
+    return;
+  }
+
+  if (ts.isClassDeclaration(node)) {
+    handleClass(ctx, node);
+    visitClassBody(ctx, node);
+    ctx.classStack.pop();
+    return;
+  }
+
+  if (ts.isLabeledStatement(node)) {
+    visitStatement(ctx, node.statement);
+    return;
+  }
+
+  if (ts.isWithStatement(node)) {
+    visitExpression(ctx, node.expression);
+    visitStatement(ctx, node.statement);
+    return;
+  }
+
+  // TS declarations - visit for inline imports in type annotations
+  if (ts.isTypeAliasDeclaration(node)) {
+    visitTypeNode(ctx, node.type);
+    return;
+  }
+
+  if (ts.isInterfaceDeclaration(node)) {
+    visitInterfaceBody(ctx, node);
+    return;
+  }
+
+  // Empty, debugger, break, continue, import, export - no children
 }
 
-export function visitBlockStatement(ctx: VisitorContext, node: T.BlockStatement): void {
-  if (node.body.length === 0) return;
-  for (let i = 0, len = node.body.length; i < len; i++) {
-    const stmt = node.body[i];
+export function visitBlockStatement(ctx: VisitorContext, node: ts.Block): void {
+  if (node.statements.length === 0) return;
+  for (let i = 0, len = node.statements.length; i < len; i++) {
+    const stmt = node.statements[i];
     if (!stmt) continue;
     visitStatement(ctx, stmt);
   }
 }
 
-export function visitIfStatement(ctx: VisitorContext, node: T.IfStatement): void {
-  visitExpression(ctx, node.test);
+export function visitIfStatement(ctx: VisitorContext, node: ts.IfStatement): void {
+  visitExpression(ctx, node.expression);
   ctx.conditionalDepth++;
-  visitStatement(ctx, node.consequent);
-  if (node.alternate) visitStatement(ctx, node.alternate);
+  visitStatement(ctx, node.thenStatement);
+  if (node.elseStatement) visitStatement(ctx, node.elseStatement);
   ctx.conditionalDepth--;
 }
 
-export function visitForStatement(ctx: VisitorContext, node: T.ForStatement): void {
-  if (node.init) {
-    if (node.init.type === "VariableDeclaration") {
-      visitVariableDeclaration(ctx, node.init);
+export function visitForStatement(ctx: VisitorContext, node: ts.ForStatement): void {
+  if (node.initializer) {
+    if (ts.isVariableDeclarationList(node.initializer)) {
+      visitVariableDeclaration(ctx, node.initializer);
     } else {
-      visitExpression(ctx, node.init);
+      visitExpression(ctx, node.initializer);
     }
   }
-  if (node.test) visitExpression(ctx, node.test);
-  if (node.update) visitExpression(ctx, node.update);
+  if (node.condition) visitExpression(ctx, node.condition);
+  if (node.incrementor) visitExpression(ctx, node.incrementor);
   ctx.loopDepth++;
-  visitStatement(ctx, node.body);
+  visitStatement(ctx, node.statement);
   ctx.loopDepth--;
 }
 
-export function visitForInOfStatement(ctx: VisitorContext, node: T.ForInStatement | T.ForOfStatement): void {
-  if (node.left.type === "VariableDeclaration") {
-    visitVariableDeclaration(ctx, node.left);
+export function visitForInOfStatement(ctx: VisitorContext, node: ts.ForInStatement | ts.ForOfStatement): void {
+  if (ts.isVariableDeclarationList(node.initializer)) {
+    visitVariableDeclaration(ctx, node.initializer);
   }
-  visitExpression(ctx, node.right);
+  visitExpression(ctx, node.expression);
   ctx.loopDepth++;
-  visitStatement(ctx, node.body);
+  visitStatement(ctx, node.statement);
   ctx.loopDepth--;
 }
 
-export function visitSwitchStatement(ctx: VisitorContext, node: T.SwitchStatement): void {
-  visitExpression(ctx, node.discriminant);
+export function visitSwitchStatement(ctx: VisitorContext, node: ts.SwitchStatement): void {
+  visitExpression(ctx, node.expression);
   ctx.conditionalDepth++;
-  for (let i = 0, len = node.cases.length; i < len; i++) {
-    const c = node.cases[i];
+  for (let i = 0, len = node.caseBlock.clauses.length; i < len; i++) {
+    const c = node.caseBlock.clauses[i];
     if (!c) continue;
-    if (c.test) visitExpression(ctx, c.test);
-    for (let j = 0, clen = c.consequent.length; j < clen; j++) {
-      const consequent = c.consequent[j];
+    if (ts.isCaseClause(c) && c.expression) visitExpression(ctx, c.expression);
+    for (let j = 0, clen = c.statements.length; j < clen; j++) {
+      const consequent = c.statements[j];
       if (!consequent) continue;
       visitStatement(ctx, consequent);
     }
@@ -251,142 +292,115 @@ export function visitSwitchStatement(ctx: VisitorContext, node: T.SwitchStatemen
   ctx.conditionalDepth--;
 }
 
-export function visitTryStatement(ctx: VisitorContext, node: T.TryStatement): void {
-  visitBlockStatement(ctx, node.block);
-  if (node.handler) visitBlockStatement(ctx, node.handler.body);
-  if (node.finalizer) visitBlockStatement(ctx, node.finalizer);
+export function visitTryStatement(ctx: VisitorContext, node: ts.TryStatement): void {
+  visitBlockStatement(ctx, node.tryBlock);
+  if (node.catchClause) visitBlockStatement(ctx, node.catchClause.block);
+  if (node.finallyBlock) visitBlockStatement(ctx, node.finallyBlock);
 }
 
-export function visitVariableDeclaration(ctx: VisitorContext, node: T.VariableDeclaration): void {
+export function visitVariableDeclaration(ctx: VisitorContext, node: ts.VariableDeclarationList): void {
   if (node.declarations.length === 0) return;
 
   for (let i = 0, len = node.declarations.length; i < len; i++) {
     const decl = node.declarations[i];
     if (!decl) continue;
-    if (decl.id.typeAnnotation) {
-      visitTypeNode(ctx, decl.id.typeAnnotation.typeAnnotation);
+    if (decl.type) {
+      visitTypeNode(ctx, decl.type);
     }
     // Check for rest destructuring: const { a, ...rest } = obj
-    if (decl.id.type === "ObjectPattern") {
-      visitObjectPattern(ctx, decl.id, decl.init);
+    if (ts.isObjectBindingPattern(decl.name)) {
+      visitObjectPattern(ctx, decl.name, decl.initializer ?? null);
     }
-    if (decl.init) visitExpression(ctx, decl.init);
+    if (decl.initializer) visitExpression(ctx, decl.initializer);
   }
 }
 
-export function visitObjectPattern(ctx: VisitorContext, pattern: T.ObjectPattern, init: T.Expression | null): void {
-  const properties = pattern.properties;
-  for (let i = 0, len = properties.length; i < len; i++) {
-    const prop = properties[i];
-    if (!prop) continue;
-    if (prop.type === "RestElement") {
-      handleRestDestructure(ctx, prop, pattern, init);
+export function visitObjectPattern(ctx: VisitorContext, pattern: ts.ObjectBindingPattern, init: ts.Expression | null): void {
+  const elements = pattern.elements;
+  for (let i = 0, len = elements.length; i < len; i++) {
+    const el = elements[i];
+    if (!el) continue;
+    if (el.dotDotDotToken) {
+      handleRestDestructure(ctx, el, pattern, init);
     }
   }
 }
 
-export function visitDeclaration(ctx: VisitorContext, node: NonNullable<T.ExportNamedDeclaration["declaration"]>): void {
-  switch (node.type) {
-    case "FunctionDeclaration":
-      handleFunction(ctx, node);
-      visitFunctionBody(ctx, node.body);
-      ctx.functionStack.pop();
-      break;
-    case "ClassDeclaration":
-      handleClass(ctx, node);
-      visitClassBody(ctx, node.body);
-      ctx.classStack.pop();
-      break;
-    case "VariableDeclaration":
-      visitVariableDeclaration(ctx, node);
-      break;
-    case "TSTypeAliasDeclaration":
-    case "TSInterfaceDeclaration":
-    case "TSEnumDeclaration":
-    case "TSModuleDeclaration":
-    case "TSDeclareFunction":
-      break;
+export function visitDeclaration(ctx: VisitorContext, node: ts.Declaration): void {
+  if (ts.isFunctionDeclaration(node)) {
+    handleFunction(ctx, node);
+    if (node.body) visitFunctionBody(ctx, node.body);
+    ctx.functionStack.pop();
+    return;
   }
+
+  if (ts.isClassDeclaration(node)) {
+    handleClass(ctx, node);
+    visitClassBody(ctx, node);
+    ctx.classStack.pop();
+    return;
+  }
+
+  if (ts.isVariableStatement(node)) {
+    visitVariableDeclaration(ctx, node.declarationList);
+    return;
+  }
+
+  // TypeAlias, Interface, Enum, Module, DeclareFunction - skip
 }
 
-export function visitExportDefaultDeclaration(ctx: VisitorContext, node: T.ExportDefaultDeclaration): void {
-  const decl = node.declaration;
-  if (decl.type === "FunctionDeclaration") {
+export function visitExportDefaultDeclaration(ctx: VisitorContext, node: ts.ExportAssignment): void {
+  const decl = node.expression;
+  if (ts.isFunctionExpression(decl)) {
     handleFunction(ctx, decl);
     visitFunctionBody(ctx, decl.body);
     ctx.functionStack.pop();
     return;
   }
-  if (decl.type === "ClassDeclaration") {
+  if (ts.isClassExpression(decl)) {
     handleClass(ctx, decl);
-    visitClassBody(ctx, decl.body);
-    ctx.classStack.pop()
+    visitClassBody(ctx, decl);
+    ctx.classStack.pop();
     return;
   }
-  // Skip TypeScript-only declarations
-  if (
-    decl.type === "TSDeclareFunction" ||
-    decl.type === "TSInterfaceDeclaration" ||
-    decl.type === "TSEnumDeclaration" ||
-    decl.type === "TSModuleDeclaration" ||
-    decl.type === "TSTypeAliasDeclaration"
-  ) {
-    return;
-  }
-  // Handle VariableDeclaration (e.g., export default const x = ...)
-  if (decl.type === "VariableDeclaration") {
-    visitVariableDeclaration(ctx, decl);
-    return;
-  }
-  // Now TypeScript knows decl is Expression
   visitExpression(ctx, decl);
 }
 
-export function visitClassBody(ctx: VisitorContext, node: T.ClassBody): void {
-  if (node.body.length === 0 || ctx.classStack.length === 0) return;
+export function visitClassBody(ctx: VisitorContext, node: ts.ClassDeclaration | ts.ClassExpression): void {
+  const members = node.members;
+  if (members.length === 0 || ctx.classStack.length === 0) return;
   const currentClass = ctx.classStack[ctx.classStack.length - 1];
   if (!currentClass) return;
 
-  for (let i = 0, len = node.body.length; i < len; i++) {
-    const member = node.body[i];
+  for (let i = 0, len = members.length; i < len; i++) {
+    const member = members[i];
     if (!member) continue;
-    switch (member.type) {
-      case "MethodDefinition":
-        if (member.value && member.value.type !== "TSEmptyBodyFunctionExpression") {
-          handleFunction(ctx, member.value);
-          const fn = ctx.functionStack[ctx.functionStack.length - 1];
-          if (!fn) break;
-          if (member.kind === "constructor") {
-            currentClass.constructor = fn;
-          } else {
-            currentClass.methods.push(fn);
-          }
-          if (member.value.body) {
-            visitFunctionBody(ctx, member.value.body);
-          }
-          ctx.functionStack.pop();
+
+    if (ts.isMethodDeclaration(member) || ts.isConstructorDeclaration(member)) {
+      if (member.body) {
+        // For methods, wrap in FunctionExpression-like handling
+        handleFunction(ctx, member as any);
+        const fn = ctx.functionStack[ctx.functionStack.length - 1];
+        if (!fn) continue;
+        if (ts.isConstructorDeclaration(member)) {
+          currentClass.constructor = fn;
+        } else {
+          currentClass.methods.push(fn);
         }
-        break;
-      case "PropertyDefinition":
-        handleProperty(ctx, member, currentClass);
-        if (member.typeAnnotation) visitTypeNode(ctx, member.typeAnnotation.typeAnnotation);
-        if (member.value) visitExpression(ctx, member.value);
-        break;
-      case "StaticBlock":
-        for (let j = 0, slen = member.body.length; j < slen; j++) {
-          const stmt = member.body[j];
-          if (!stmt) continue;
-          visitStatement(ctx, stmt);
-        }
-        break;
-      case "AccessorProperty":
-        if (member.value) visitExpression(ctx, member.value);
-        break;
-      case "TSAbstractMethodDefinition":
-      case "TSAbstractPropertyDefinition":
-      case "TSAbstractAccessorProperty":
-      case "TSIndexSignature":
-        break;
+        visitFunctionBody(ctx, member.body);
+        ctx.functionStack.pop();
+      }
+    } else if (ts.isPropertyDeclaration(member)) {
+      handleProperty(ctx, member, currentClass);
+      if (member.type) visitTypeNode(ctx, member.type);
+      if (member.initializer) visitExpression(ctx, member.initializer);
+    } else if (ts.isClassStaticBlockDeclaration(member)) {
+      visitBlockStatement(ctx, member.body);
+    } else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+      if (member.body) {
+        visitFunctionBody(ctx, member.body);
+      }
     }
+    // TSAbstractMethodDefinition, TSAbstractPropertyDefinition, TSIndexSignature - skip
   }
 }

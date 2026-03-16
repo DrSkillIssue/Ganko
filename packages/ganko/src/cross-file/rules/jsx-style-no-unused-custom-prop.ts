@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { getJSXAttributesByKind } from "../../solid/queries/jsx"
@@ -43,14 +44,15 @@ export const jsxStyleNoUnusedCustomProp = defineCrossRule({
         const entry = properties[i]
         if (!entry) continue
         const p = entry.property
-        if (p.type !== "Property") continue
-        const n = objectKeyName(p.key)
+        if (!ts.isPropertyAssignment(p)) continue
+        const n = objectKeyName(p.name)
         if (!n || !n.startsWith("--")) continue
         if (used.has(n)) continue
 
         emit(createDiagnostic(
           solid.file,
-          p.key,
+          p.name,
+          solid.sourceFile,
           jsxStyleNoUnusedCustomProp.id,
           "unusedInlineVar",
           resolveMessage(messages.unusedInlineVar, { name: n }),

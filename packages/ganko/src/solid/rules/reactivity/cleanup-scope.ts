@@ -20,13 +20,14 @@
  * designed to be called from reactive contexts.
  */
 
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { ScopeEntity, CallEntity } from "../../entities"
 import { getAncestorScopes, getCallByNode, getCallsByPrimitive, getEffectiveTrackingContext, getEnclosingComponentScope } from "../../queries"
 import { getJSXAttributesByKind } from "../../queries/jsx"
-import { getFunctionName } from "../../util"
+import { isFunctionNode, getFunctionName } from "../../util"
 import { isFunctionInReactivePrimitiveConfig } from "../../util/pattern-detection"
 
 const messages = {
@@ -69,6 +70,7 @@ export const cleanupScope = defineSolidRule({
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "cleanup-scope",
           "cleanupOutsideScope",
           resolveMessage(messages.cleanupOutsideScope, { location }),
@@ -158,12 +160,11 @@ function isInDirective(graph: SolidGraph, scope: ScopeEntity, directiveNames: Re
     const node = ancestor.node;
     if (node === null) continue;
 
-    const nodeType = node.type;
-    if (nodeType !== "FunctionDeclaration" && nodeType !== "FunctionExpression" && nodeType !== "ArrowFunctionExpression") {
+    if (!isFunctionNode(node)) {
       continue;
     }
 
-    const name = getFunctionName(node);
+    const name = getFunctionName(node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction);
     if (name !== null && directiveNames.has(name)) {
       return true;
     }
@@ -203,7 +204,7 @@ function isOwnerPrimitiveCallback(graph: SolidGraph, scope: ScopeEntity): boolea
   if (node === null) return false;
 
   const parent = node.parent;
-  if (parent?.type !== "CallExpression") return false;
+  if (!parent || !ts.isCallExpression(parent)) return false;
 
   const callEntity = getCallByNode(graph, parent);
   if (!callEntity?.primitive) return false;
@@ -250,19 +251,19 @@ function isInCustomReactivePrimitive(graph: SolidGraph, scope: ScopeEntity): boo
     const node = ancestor.node;
     if (node === null) continue;
 
-    const nodeType = node.type;
-    if (nodeType !== "FunctionDeclaration" && nodeType !== "FunctionExpression" && nodeType !== "ArrowFunctionExpression") {
+    if (!isFunctionNode(node)) {
       continue;
     }
 
-    const name = getFunctionName(node);
+    const fnNode = node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+    const name = getFunctionName(fnNode);
     if (name !== null && isReactivePrimitiveName(name)) {
       return true;
     }
 
     // Check if this function is a property callback inside an object literal
     // argument to a create*/use* call (e.g. createSimpleContext({ init: () => ... }))
-    if (isFunctionInReactivePrimitiveConfig(node)) {
+    if (isFunctionInReactivePrimitiveConfig(fnNode)) {
       return true;
     }
   }
@@ -296,13 +297,10 @@ function getLocationDescription(scope: ScopeEntity): string {
   while (current !== null) {
     if (current.kind === "function") {
       const node = current.node;
-      if (node !== null) {
-        const nodeType = node.type;
-        if (nodeType === "FunctionDeclaration" || nodeType === "FunctionExpression" || nodeType === "ArrowFunctionExpression") {
-          const name = getFunctionName(node);
-          if (name) {
-            return `utility function '${name}'`;
-          }
+      if (node !== null && isFunctionNode(node)) {
+        const name = getFunctionName(node as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction);
+        if (name) {
+          return `utility function '${name}'`;
         }
       }
       return "anonymous function";

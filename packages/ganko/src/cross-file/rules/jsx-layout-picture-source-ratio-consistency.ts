@@ -40,6 +40,7 @@ export const jsxLayoutPictureSourceRatioConsistency = defineCrossRule({
           createDiagnostic(
             solid.file,
             picture.node,
+            solid.sourceFile,
             jsxLayoutPictureSourceRatioConsistency.id,
             "inconsistentPictureRatio",
             resolveMessage(messages.inconsistentPictureRatio, {

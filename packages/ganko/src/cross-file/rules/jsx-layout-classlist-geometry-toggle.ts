@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SelectorEntity } from "../../css/entities/selector"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { LAYOUT_CLASS_GEOMETRY_PROPERTIES } from "../../css/layout-taxonomy"
@@ -27,12 +27,11 @@ export const jsxLayoutClasslistGeometryToggle = defineCrossRule({
     if (classGeometryIndex.size === 0) return
 
     forEachClassListPropertyAcross(context.solids, (solid, objectProperty) => {
-      if (objectProperty.type !== "Property") return
-      if (objectProperty.computed) return
+      if (!ts.isPropertyAssignment(objectProperty)) return
 
-      const className = objectKeyName(objectProperty.key)
+      const className = objectKeyName(objectProperty.name)
       if (!className) return
-      if (!isDynamicallyToggleable(objectProperty.value)) return
+      if (!isDynamicallyToggleable(objectProperty.initializer)) return
 
       const riskyProperty = classGeometryIndex.get(className)
       if (!riskyProperty || riskyProperty.length === 0) return
@@ -51,7 +50,8 @@ export const jsxLayoutClasslistGeometryToggle = defineCrossRule({
       emit(
         createDiagnostic(
           solid.file,
-          objectProperty.value,
+          objectProperty.initializer,
+          solid.sourceFile,
           jsxLayoutClasslistGeometryToggle.id,
           "classListGeometryToggle",
           resolveMessage(messages.classListGeometryToggle, {
@@ -120,7 +120,7 @@ function firstGeometryProperty(
   return null
 }
 
-function isDynamicallyToggleable(node: T.Node): boolean {
+function isDynamicallyToggleable(node: ts.Node): boolean {
   const truthiness = constantTruthiness(node)
   return truthiness === null
 }

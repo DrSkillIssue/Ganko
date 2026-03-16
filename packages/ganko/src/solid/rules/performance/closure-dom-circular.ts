@@ -24,6 +24,7 @@
  *   // Or use WeakRef / AbortController pattern
  */
 
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -81,11 +82,11 @@ function isNonDomEventTarget(v: VariableEntity): boolean {
     const decl = declarations[i];
     if (!decl) continue;
     const declarator = decl.parent
-    if (declarator?.type !== "VariableDeclarator") continue
-    const init = declarator.init
+    if (!declarator || !ts.isVariableDeclaration(declarator)) continue
+    const init = declarator.initializer
     if (!init) continue
-    if (init.type === "NewExpression" && init.callee.type === "Identifier") {
-      if (NON_DOM_EVENT_TARGETS.has(init.callee.name)) return true
+    if (ts.isNewExpression(init) && ts.isIdentifier(init.expression)) {
+      if (NON_DOM_EVENT_TARGETS.has(init.expression.text)) return true
     }
   }
 
@@ -94,8 +95,8 @@ function isNonDomEventTarget(v: VariableEntity): boolean {
     const assignment = assignments[i];
     if (!assignment) continue;
     const val = assignment.value
-    if (val.type === "NewExpression" && val.callee.type === "Identifier") {
-      if (NON_DOM_EVENT_TARGETS.has(val.callee.name)) return true
+    if (ts.isNewExpression(val) && ts.isIdentifier(val.expression)) {
+      if (NON_DOM_EVENT_TARGETS.has(val.expression.text)) return true
     }
   }
 
@@ -127,17 +128,17 @@ export const closureDomCircular = defineSolidRule({
       if (!pa) continue;
 
       // Must be identifier.onXxx = <closure>
-      if (pa.object.type !== "Identifier") continue
-      if (pa.property.type !== "Identifier") continue
+      if (!ts.isIdentifier(pa.object)) continue
+      if (!ts.isIdentifier(pa.property)) continue
 
-      const propName = pa.property.name.toLowerCase()
+      const propName = pa.property.text.toLowerCase()
       if (!EVENT_HANDLER_PROPS.has(propName)) continue
 
       const value = pa.value
-      if (value.type !== "ArrowFunctionExpression" && value.type !== "FunctionExpression") continue
+      if (!ts.isArrowFunction(value) && !ts.isFunctionExpression(value)) continue
 
       // Resolve the object to the specific variable entity in this scope
-      const objName = pa.object.name
+      const objName = pa.object.text
       const v = getVariableByNameInScope(graph, objName, pa.scope)
       if (!v) continue
 
@@ -146,18 +147,21 @@ export const closureDomCircular = defineSolidRule({
       if (isNonDomEventTarget(v)) continue
 
       // Check if the closure captures the object variable
-      const closureRange = value.range
+      const closureStart = value.getStart()
+      const closureEnd = value.end
       const reads = v.reads
 
       for (let ri = 0, rlen = reads.length; ri < rlen; ri++) {
         const readEntry = reads[ri];
         if (!readEntry) continue;
-        const readRange = readEntry.node.range
-        if (readRange[0] >= closureRange[0] && readRange[1] <= closureRange[1]) {
+        const readStart = readEntry.node.getStart()
+        const readEnd = readEntry.node.end
+        if (readStart >= closureStart && readEnd <= closureEnd) {
           emit(
             createDiagnostic(
               graph.file,
               pa.node,
+              graph.sourceFile,
               "closure-dom-circular",
               "circularRef",
               resolveMessage(messages.circularRef, { param: objName }),

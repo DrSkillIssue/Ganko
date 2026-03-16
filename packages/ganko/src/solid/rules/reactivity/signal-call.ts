@@ -11,7 +11,7 @@
  * - BAD:  <div>{count}</div>      // signal not called
  * - GOOD: <div>{count()}</div>    // signal called
  */
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { TrackingContext } from "../../entities/scope"
 import type { VariableEntity, ReadEntity } from "../../entities/variable"
@@ -81,10 +81,11 @@ function checkSignalRead(
   if (isPassthroughPosition(graph, read.node)) return null
   if (isJSXAccessorPassthrough(graph, read.node)) return null
   const { messageId, data } = getSpecificMessage(variable.name, read.node, context)
-  const fix = createSignalCallFix(read.node, variable.name)
+  const fix = createSignalCallFix(read.node, variable.name, graph.sourceFile)
   return createDiagnostic(
     graph.file,
     read.node,
+    graph.sourceFile,
     "signal-call",
     messageId,
     resolveMessage(messages[messageId as keyof typeof messages], data),
@@ -95,7 +96,7 @@ function checkSignalRead(
 
 function getSpecificMessage(
   name: string,
-  node: T.Node,
+  node: ts.Node,
   context: TrackingContext,
 ): { messageId: string; data: Record<string, string> } {
   const parent = node.parent
@@ -103,41 +104,36 @@ function getSpecificMessage(
     return { messageId: "badSignal", data: { name, where: getContextDescription(context) } }
   }
 
-  switch (parent.type) {
-    case "JSXExpressionContainer": {
-      const grandparent = parent.parent
-      if (grandparent?.type === "JSXAttribute") {
-        return {
-          messageId: "signalInJsxAttribute",
-          data: { name, attr: getAttributeName(grandparent) },
-        }
+  if (ts.isJsxExpression(parent)) {
+    const grandparent = parent.parent
+    if (grandparent && ts.isJsxAttribute(grandparent)) {
+      return {
+        messageId: "signalInJsxAttribute",
+        data: { name, attr: getAttributeName(grandparent) },
       }
-      if (grandparent?.type === "JSXElement" || grandparent?.type === "JSXFragment") {
-        return { messageId: "signalInJsxText", data: { name } }
-      }
-      break
     }
-
-    case "ConditionalExpression":
-      if (parent.test === node) {
-        return { messageId: "signalInTernary", data: { name } }
-      }
-      break
-
-    case "LogicalExpression":
+    if (grandparent && (ts.isJsxElement(grandparent) || ts.isJsxSelfClosingElement(grandparent) || ts.isJsxFragment(grandparent))) {
+      return { messageId: "signalInJsxText", data: { name } }
+    }
+  } else if (ts.isConditionalExpression(parent)) {
+    if (parent.condition === node) {
+      return { messageId: "signalInTernary", data: { name } }
+    }
+  } else if (ts.isBinaryExpression(parent)) {
+    const op = ts.tokenToString(parent.operatorToken.kind) ?? ""
+    if (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+        parent.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+        parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
       return { messageId: "signalInLogical", data: { name } }
-
-    case "BinaryExpression":
-      if (COMPARISON_OPERATORS.has(parent.operator)) {
-        return { messageId: "signalInComparison", data: { name } }
-      }
-      if (ARITHMETIC_OPS.has(parent.operator)) {
-        return { messageId: "signalInArithmetic", data: { name } }
-      }
-      break
-
-    case "TemplateLiteral":
-      return { messageId: "signalInTemplate", data: { name } }
+    }
+    if (COMPARISON_OPERATORS.has(op)) {
+      return { messageId: "signalInComparison", data: { name } }
+    }
+    if (ARITHMETIC_OPS.has(op)) {
+      return { messageId: "signalInArithmetic", data: { name } }
+    }
+  } else if (ts.isTemplateExpression(parent) || ts.isNoSubstitutionTemplateLiteral(parent)) {
+    return { messageId: "signalInTemplate", data: { name } }
   }
 
   if (context.type === "tracked" && context.source) {
@@ -163,7 +159,8 @@ function getContextDescription(context: TrackingContext): string {
   }
 }
 
-function createSignalCallFix(node: T.Node, name: string): Fix {
-  const [start, end] = node.range
+function createSignalCallFix(node: ts.Node, name: string, sourceFile: ts.SourceFile): Fix {
+  const start = node.getStart(sourceFile)
+  const end = node.end
   return [{ range: [start, end], text: `${name}()` }]
 }

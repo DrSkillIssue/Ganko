@@ -18,7 +18,7 @@
  * - GOOD: createEffect(on(() => trigger(), () => refetch()))
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -58,36 +58,36 @@ function getRefetchVariables(graph: SolidGraph): Set<VariableEntity> {
     const parent = call.node.parent;
 
     // Check if assigned via destructuring: const [data, { refetch }] = createResource(...)
-    if (parent?.type !== "VariableDeclarator" || parent.init !== call.node) {
+    if (!parent || !ts.isVariableDeclaration(parent) || parent.initializer !== call.node) {
       continue;
     }
 
-    const pattern = parent.id;
-    if (pattern.type !== "ArrayPattern") {
+    const pattern = parent.name;
+    if (!ts.isArrayBindingPattern(pattern)) {
       continue;
     }
 
     // The second element contains { refetch, mutate }
     const secondElement = pattern.elements[1];
-    if (!secondElement || secondElement.type !== "ObjectPattern") {
+    if (!secondElement || !ts.isBindingElement(secondElement) || !ts.isObjectBindingPattern(secondElement.name)) {
       continue;
     }
 
     // Look for 'refetch' in the object destructuring
-    const properties = secondElement.properties;
+    const properties = secondElement.name.elements;
     for (let j = 0, plen = properties.length; j < plen; j++) {
       const prop = properties[j];
       if (!prop) continue;
-      if (prop.type !== "Property") continue;
+      if (!ts.isBindingElement(prop)) continue;
 
       // Handle both: { refetch } and { refetch: myRefetch }
       let localName: string | null = null;
 
-      if (prop.shorthand && prop.key.type === "Identifier" && prop.key.name === "refetch") {
-        localName = prop.key.name;
-      } else if (prop.key.type === "Identifier" && prop.key.name === "refetch") {
-        if (prop.value.type === "Identifier") {
-          localName = prop.value.name;
+      if (prop.propertyName === undefined && ts.isIdentifier(prop.name) && prop.name.text === "refetch") {
+        localName = prop.name.text;
+      } else if (prop.propertyName && ts.isIdentifier(prop.propertyName) && prop.propertyName.text === "refetch") {
+        if (ts.isIdentifier(prop.name)) {
+          localName = prop.name.text;
         }
       }
 
@@ -114,7 +114,7 @@ function getRefetchVariables(graph: SolidGraph): Set<VariableEntity> {
  * @param readNode - The AST node to check
  * @returns True if the node is inside a createEffect callback
  */
-function isInsideCreateEffect(graph: SolidGraph, readNode: T.Node): boolean {
+function isInsideCreateEffect(graph: SolidGraph, readNode: ts.Node): boolean {
   const enclosingFn = findEnclosingFunction(readNode);
   if (!enclosingFn) {
     return false;
@@ -153,7 +153,7 @@ function isInsideCreateEffect(graph: SolidGraph, readNode: T.Node): boolean {
  * @param readNode - The AST node to check
  * @returns True if the node is inside an on() wrapper
  */
-function isInsideOnWrapper(_graph: SolidGraph, readNode: T.Node): boolean {
+function isInsideOnWrapper(_graph: SolidGraph, readNode: ts.Node): boolean {
   const enclosingFn = findEnclosingFunction(readNode);
   if (!enclosingFn) {
     return false;
@@ -161,12 +161,12 @@ function isInsideOnWrapper(_graph: SolidGraph, readNode: T.Node): boolean {
 
   // Check if this function is passed as an argument to on()
   const fnParent = enclosingFn.parent;
-  if (fnParent?.type !== "CallExpression") {
+  if (!fnParent || !ts.isCallExpression(fnParent)) {
     return false;
   }
 
-  const callee = fnParent.callee;
-  if (callee.type === "Identifier" && callee.name === "on") {
+  const callee = fnParent.expression;
+  if (ts.isIdentifier(callee) && callee.text === "on") {
     return true;
   }
 
@@ -185,18 +185,18 @@ function isInsideOnWrapper(_graph: SolidGraph, readNode: T.Node): boolean {
  * @param readNode - The AST node to check
  * @returns True if the node is inside an untrack() call
  */
-function isInsideUntrack(graph: SolidGraph, readNode: T.Node): boolean {
-  let current: T.Node | undefined = readNode.parent;
+function isInsideUntrack(graph: SolidGraph, readNode: ts.Node): boolean {
+  let current: ts.Node | undefined = readNode.parent;
 
   while (current) {
     if (
-      current.type === "ArrowFunctionExpression" ||
-      current.type === "FunctionExpression" ||
-      current.type === "FunctionDeclaration"
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current)
     ) {
       // Check if this function is an argument to untrack()
       const fnParent = current.parent;
-      if (fnParent?.type === "CallExpression") {
+      if (fnParent && ts.isCallExpression(fnParent)) {
         // Use graph.getCallByNode() for robust primitive detection
         const callEntity = getCallByNode(graph, fnParent);
         if (callEntity?.primitive?.name === "untrack") {
@@ -222,7 +222,7 @@ function isInsideUntrack(graph: SolidGraph, readNode: T.Node): boolean {
  */
 function isRefetchCall(read: ReadEntity): boolean {
   const parent = read.node.parent;
-  return parent?.type === "CallExpression" && parent.callee === read.node;
+  return parent != null && ts.isCallExpression(parent) && parent.expression === read.node;
 }
 
 export const resourceRefetchLoop = defineSolidRule({
@@ -274,6 +274,7 @@ export const resourceRefetchLoop = defineSolidRule({
           createDiagnostic(
             graph.file,
             read.node,
+            graph.sourceFile,
             "resource-refetch-loop",
             "refetchInEffect",
             resolveMessage(messages.refetchInEffect, { name: resourceName }),
@@ -304,13 +305,13 @@ function findResourceName(refetchVariable: VariableEntity): string {
   const decl = declarations[0];
   if (!decl) return "resource";
 
-  let current: T.Node | undefined = decl.parent;
+  let current: ts.Node | undefined = decl.parent;
   while (current) {
-    if (current.type === "ArrayPattern") {
+    if (ts.isArrayBindingPattern(current)) {
 
       const firstElement = current.elements[0];
-      if (firstElement?.type === "Identifier") {
-        return firstElement.name;
+      if (firstElement && ts.isBindingElement(firstElement) && ts.isIdentifier(firstElement.name)) {
+        return firstElement.name.text;
       }
       break;
     }

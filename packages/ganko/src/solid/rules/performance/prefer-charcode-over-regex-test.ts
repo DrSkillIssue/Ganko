@@ -12,7 +12,7 @@
  *   if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) { ... }
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName } from "../../queries"
@@ -40,16 +40,20 @@ export const preferCharcodeOverRegexTest = defineSolidRule({
     for (let i = 0, len = calls.length; i < len; i++) {
       const call = calls[i]
       if (!call) continue;
-      if (call.callee.type !== "MemberExpression") continue
+      if (!ts.isPropertyAccessExpression(call.callee)) continue
 
-      const receiver = call.callee.object
-      if (receiver.type !== "Literal" || !("regex" in receiver)) continue
+      const receiver = call.callee.expression
+      if (!ts.isRegularExpressionLiteral(receiver)) continue
 
-      const regex = receiver.regex
-      if (!regex) continue
+      const regexText = receiver.text
+      // Parse regex pattern and flags from literal text like /pattern/flags
+      const lastSlash = regexText.lastIndexOf("/")
+      if (lastSlash <= 0) continue
+      const pattern = regexText.substring(1, lastSlash)
+      const flags = regexText.substring(lastSlash + 1)
 
       // Only flag character-class-only patterns (no anchors, quantifiers, etc.)
-      if (!isCharClassOnlyPattern(regex.pattern)) continue
+      if (!isCharClassOnlyPattern(pattern)) continue
 
       // The .test() argument should indicate single-character usage
       if (call.arguments.length !== 1) continue
@@ -61,9 +65,10 @@ export const preferCharcodeOverRegexTest = defineSolidRule({
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "prefer-charcode-over-regex-test",
           "regexTest",
-          resolveMessage(messages.regexTest, { pattern: `/${regex.pattern}/${regex.flags}` }),
+          resolveMessage(messages.regexTest, { pattern: `/${pattern}/${flags}` }),
           "warn",
         ),
       )
@@ -97,19 +102,19 @@ function isCharClassOnlyPattern(pattern: string): boolean {
 
 /**
  * Check if a node represents accessing a single character from a string:
- * - str[i] / str[0] (computed member access — bracket notation on a string)
+ * - str[i] / str[0] (element access — bracket notation on a string)
  * - str.charAt(i) (explicit single-char extraction)
  *
  * An arbitrary Identifier is NOT sufficient evidence — the variable could
  * hold a full string. Only structural proof of single-char access qualifies.
  */
-function isSingleCharAccess(node: T.Node): boolean {
-  if (node.type === "MemberExpression" && node.computed) return true
+function isSingleCharAccess(node: ts.Node): boolean {
+  if (ts.isElementAccessExpression(node)) return true
   if (
-    node.type === "CallExpression"
-    && node.callee.type === "MemberExpression"
-    && node.callee.property.type === "Identifier"
-    && node.callee.property.name === "charAt"
+    ts.isCallExpression(node)
+    && ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.name)
+    && node.expression.name.text === "charAt"
   ) return true
   return false
 }

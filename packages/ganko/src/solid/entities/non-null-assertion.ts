@@ -4,7 +4,7 @@
  * Represents a TSNonNullExpression (the `!` operator) in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 
 /**
  * Represents a non-null assertion expression (`expr!`) in the SolidGraph.
@@ -12,7 +12,7 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
 export interface NonNullAssertionEntity {
   readonly id: number;
   /** The TSNonNullExpression node */
-  readonly node: T.TSNonNullExpression;
+  readonly node: ts.NonNullExpression;
   /** The expression being asserted as non-null */
-  readonly expression: T.Expression;
+  readonly expression: ts.Expression;
 }

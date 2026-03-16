@@ -15,7 +15,7 @@
  *   setStore("copy", { ...store });    // spread creates shallow copy (no proxy cycle)
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -49,10 +49,10 @@ export const selfReferencingStore = defineSolidRule({
       const call = storeCalls[i]
       if (!call) continue
       const parent = call.node.parent
-      if (parent?.type !== "VariableDeclarator") continue
+      if (!parent || !ts.isVariableDeclaration(parent)) continue
 
-      const pattern = parent.id
-      if (pattern.type !== "ArrayPattern") continue
+      const pattern = parent.name
+      if (!ts.isArrayBindingPattern(pattern)) continue
 
       const elements = pattern.elements
       if (elements.length < 2) continue
@@ -60,18 +60,18 @@ export const selfReferencingStore = defineSolidRule({
       const storeEl = elements[0]
       const setterEl = elements[1]
 
-      if (!storeEl || storeEl.type !== "Identifier") continue
-      if (!setterEl || setterEl.type !== "Identifier") continue
+      if (!storeEl || !ts.isBindingElement(storeEl) || !ts.isIdentifier(storeEl.name)) continue
+      if (!setterEl || !ts.isBindingElement(setterEl) || !ts.isIdentifier(setterEl.name)) continue
 
-      const storeVar = getVariableByNameInScope(graph, storeEl.name, call.scope)
+      const storeVar = getVariableByNameInScope(graph, storeEl.name.text, call.scope)
       if (!storeVar) continue
 
-      const setterVar = getVariableByNameInScope(graph, setterEl.name, call.scope)
+      const setterVar = getVariableByNameInScope(graph, setterEl.name.text, call.scope)
       if (!setterVar) continue
 
       stores.push({
-        storeName: storeEl.name,
-        setterName: setterEl.name,
+        storeName: storeEl.name.text,
+        setterName: setterEl.name.text,
         storeVar,
         setterVar,
       })
@@ -92,7 +92,7 @@ export const selfReferencingStore = defineSolidRule({
       for (let j = 0, rlen = reads.length; j < rlen; j++) {
         const read = reads[j]
         if (!read) continue
-        if (read.node.parent?.type !== "CallExpression") continue
+        if (!read.node.parent || !ts.isCallExpression(read.node.parent)) continue
         const callNode = read.node.parent
 
         // setStore takes variable path args + value as last arg
@@ -112,6 +112,7 @@ export const selfReferencingStore = defineSolidRule({
             createDiagnostic(
               graph.file,
               callNode,
+              graph.sourceFile,
               "self-referencing-store",
               "selfReference",
               resolveMessage(messages.selfReference, { name: s.storeName }),
@@ -137,20 +138,21 @@ interface StoreDestructure {
  * bodies, returns the last return statement's argument. Returns null if not
  * an updater pattern.
  */
-function getUpdaterBody(node: T.Node): T.Node | null {
-  if (node.type !== "ArrowFunctionExpression" && node.type !== "FunctionExpression") return null
+function getUpdaterBody(node: ts.Node): ts.Node | null {
+  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null
 
-  if (node.type === "ArrowFunctionExpression" && node.expression && node.body.type !== "BlockStatement") {
+  if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) {
     return node.body
   }
 
-  if (node.body.type === "BlockStatement") {
-    const statements = node.body.body
+  const body = ts.isArrowFunction(node) ? node.body : node.body
+  if (ts.isBlock(body)) {
+    const statements = body.statements
     for (let i = statements.length - 1; i >= 0; i--) {
       const stmt = statements[i]
       if (!stmt) continue
-      if (stmt.type === "ReturnStatement") {
-        return stmt.argument ?? null
+      if (ts.isReturnStatement(stmt)) {
+        return stmt.expression ?? null
       }
     }
   }
@@ -172,8 +174,8 @@ function collectAliasNames(storeVar: VariableEntity, storeName: string): Set<str
     const readNode = read.node
     const parent = readNode.parent
     // const alias = store;
-    if (parent?.type === "VariableDeclarator" && parent.init === readNode && parent.id.type === "Identifier") {
-      names.add(parent.id.name)
+    if (parent && ts.isVariableDeclaration(parent) && parent.initializer === readNode && ts.isIdentifier(parent.name)) {
+      names.add(parent.name.text)
     }
   }
 
@@ -183,27 +185,27 @@ function collectAliasNames(storeVar: VariableEntity, storeName: string): Set<str
 /**
  * Check if an expression contains a reference to any name in the set.
  */
-function containsAnyIdentifier(node: T.Node, names: Set<string>): boolean {
-  if (node.type === "Identifier") {
-    return names.has(node.name)
+function containsAnyIdentifier(node: ts.Node, names: Set<string>): boolean {
+  if (ts.isIdentifier(node)) {
+    return names.has(node.text)
   }
 
-  if (node.type === "ObjectExpression") {
+  if (ts.isObjectLiteralExpression(node)) {
     const props = node.properties
     for (let i = 0, len = props.length; i < len; i++) {
       const prop = props[i]
       if (!prop) continue
-      if (prop.type === "Property" && containsAnyIdentifier(prop.value, names)) {
+      if (ts.isPropertyAssignment(prop) && containsAnyIdentifier(prop.initializer, names)) {
         return true
       }
-      if (prop.type === "SpreadElement" && containsAnyIdentifier(prop.argument, names)) {
+      if (ts.isSpreadAssignment(prop) && containsAnyIdentifier(prop.expression, names)) {
         return true
       }
     }
     return false
   }
 
-  if (node.type === "ArrayExpression") {
+  if (ts.isArrayLiteralExpression(node)) {
     const elements = node.elements
     for (let i = 0, len = elements.length; i < len; i++) {
       const el = elements[i]
@@ -213,11 +215,10 @@ function containsAnyIdentifier(node: T.Node, names: Set<string>): boolean {
   }
 
   // MemberExpression like store.count accesses a property value, not the proxy itself.
-  if (node.type === "MemberExpression") {
+  if (ts.isPropertyAccessExpression(node)) {
     return false
   }
 
   return false
 }
-
 

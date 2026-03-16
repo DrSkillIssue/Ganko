@@ -1,5 +1,5 @@
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import type { VariableEntity, ReactiveKind } from "../entities/variable";
@@ -81,7 +81,7 @@ export function runReactivityPhase(graph: SolidGraph, _input: SolidInput): void 
     const declaration = variable.declarations[0];
     if (!declaration) continue;
 
-    const result = typeResolver.getReactiveKindWithType(declaration);
+    const result = typeResolver.getReactiveKindWithType(declaration as any);
     if (result.kind) {
       setVariableReactivity(variable, true, result.kind, result.kind === "signal" || result.kind === "accessor", result.type);
     }
@@ -142,14 +142,14 @@ function buildFunctionsWithReactiveCaptures(graph: SolidGraph): void {
 /**
  * Gets the variable name a call expression is assigned to.
  */
-function getAssignedVariableName(node: T.CallExpression | T.NewExpression): string | null {
+function getAssignedVariableName(node: ts.CallExpression | ts.NewExpression): string | null {
   const parent = node.parent;
-  if (parent?.type !== "VariableDeclarator") return null;
+  if (!parent || !ts.isVariableDeclaration(parent)) return null;
 
-  const id = parent.id;
-  if (id.type === "Identifier") return id.name;
-  if (id.type === "ArrayPattern" && id.elements[0]?.type === "Identifier") {
-    return id.elements[0].name;
+  const name = parent.name;
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isArrayBindingPattern(name) && name.elements[0] && ts.isBindingElement(name.elements[0]) && ts.isIdentifier(name.elements[0].name)) {
+    return name.elements[0].name.text;
   }
   return null;
 }

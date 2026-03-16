@@ -4,26 +4,20 @@
  * Represents a call expression in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 import type { ScopeEntity } from "./scope";
 import type { FunctionEntity } from "./function";
 import type { VariableEntity } from "./variable";
 
 /**
- * Callee type for call expressions.
- * Includes T.Super for super() calls in class constructors.
- */
-export type CalleeExpression = T.Expression | T.Super;
-
-/**
  * Represents a call expression in the SolidGraph.
  */
 export interface CallEntity {
   id: number;
-  node: T.CallExpression | T.NewExpression;
+  node: ts.CallExpression | ts.NewExpression;
   file: FileEntity;
-  callee: CalleeExpression;
+  callee: ts.Expression;
   arguments: ArgumentEntity[];
   scope: ScopeEntity;
   resolvedTarget: FunctionEntity | null;
@@ -51,7 +45,7 @@ export interface CallEntity {
  */
 export interface ArgumentEntity {
   id: number;
-  node: T.Node;
+  node: ts.Node;
   index: number;
   /** Semantic for this argument position, or null if unknown */
   semantic: ArgumentSemantic | null;
@@ -483,7 +477,7 @@ export interface CreateCallArgs {
   id: number;
   node: CallEntity["node"];
   file: FileEntity;
-  callee: CalleeExpression;
+  callee: ts.Expression;
   arguments: ArgumentEntity[];
   scope: ScopeEntity;
   resolvedTargetId: number;

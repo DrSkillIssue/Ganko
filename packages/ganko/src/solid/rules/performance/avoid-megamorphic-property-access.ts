@@ -2,7 +2,7 @@
  * Flags property access on parameters typed as `any` or very wide unions.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { getMemberAccessesOnIdentifier } from "../../queries/entity";
 import { getTypeInfo } from "../../queries/type";
 import type { TypeInfo } from "../../typescript";
@@ -40,11 +40,10 @@ const WIDE_UNION_THRESHOLD = 4;
  * @param node - The parameter AST node
  * @returns True only if the annotation is literally `: any`
  */
-function hasLiteralAnyAnnotation(node: T.Parameter): boolean {
-  if (!("typeAnnotation" in node)) return false
-  const annotation = node.typeAnnotation
-  if (!annotation) return false
-  return annotation.typeAnnotation.type === "TSAnyKeyword"
+function hasLiteralAnyAnnotation(node: ts.ParameterDeclaration): boolean {
+  const typeNode = node.type
+  if (!typeNode) return false
+  return typeNode.kind === ts.SyntaxKind.AnyKeyword
 }
 
 /**
@@ -59,7 +58,7 @@ function hasLiteralAnyAnnotation(node: T.Parameter): boolean {
  * @param node - The parameter AST node
  * @returns True if the type is literally `any` or a heterogeneous wide union
  */
-function isProblematicParamType(typeInfo: TypeInfo | null, node: T.Parameter): boolean {
+function isProblematicParamType(typeInfo: TypeInfo | null, node: ts.ParameterDeclaration): boolean {
   if (!typeInfo) return false;
 
   // Only flag `any` when the developer literally wrote `: any`.
@@ -130,6 +129,7 @@ export const avoidMegamorphicPropertyAccess = defineSolidRule({
             createDiagnostic(
               graph.file,
               access,
+              graph.sourceFile,
               "avoid-megamorphic-property-access",
               "megamorphicAccess",
               messages.megamorphicAccess,

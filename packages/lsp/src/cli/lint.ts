@@ -14,13 +14,14 @@
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import { createProject } from "../core/project";
+import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
-import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
+import { createEmit, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
 import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
@@ -464,7 +465,10 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
-  if (log.enabled) log.trace(`lint: creating project with SolidPlugin only (root=${projectRoot})`);
+  if (log.enabled) log.trace(`lint: creating batch program (root=${projectRoot})`);
+  const batch = createBatchProgram(projectRoot);
+  const program = batch.program;
+
   const project = createProject({
     rootPath: projectRoot,
     plugins: [SolidPlugin],
@@ -486,7 +490,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
     const allDiagnostics: Diagnostic[] = [];
 
-    /* FIX #3: Read CSS files once, build a content map for cross-file reuse. */
+    /* Read CSS files once, build a content map for cross-file reuse. */
     const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
     const cssContentMap = new Map<string, string>();
     for (let i = 0, len = allCSSFiles.length; i < len; i++) {
@@ -504,48 +508,26 @@ export async function runLint(args: readonly string[]): Promise<void> {
     const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
     if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
 
-    /* FIX #1: Build SolidGraph once per file, run single-file rules, then cache
+    /* Build SolidGraph once per file, run single-file rules, then cache
        the graph for cross-file reuse — eliminates double parse + double graph build. */
     const cache = new GraphCache(log);
     const t0 = performance.now();
-
-    const firstSolidFile = fileIndex.solidFiles.values().next();
-    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
-      const tWarm = performance.now();
-      project.warmProgram(firstSolidFile.value);
-      if (log.enabled) log.info(`ts warmup: ${(performance.now() - tWarm).toFixed(0)}ms`);
-    }
 
     for (let i = 0, len = filesToLint.length; i < len; i++) {
       const path = filesToLint[i];
       if (!path) continue;
       if (classifyFile(path) === "css") continue;
       const key = canonicalPath(path);
-      let program = project.getProgram(key);
-      let content = program?.getSourceFile(key)?.text;
 
-      if (content === undefined) {
-        try {
-          content = readFileSync(path, "utf-8");
-        } catch {
-          if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
-          continue;
-        }
-        project.updateFile(key, content);
-        program = project.getProgram(key);
-      }
-
-      if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key} (${content.length} chars)`);
-      if (log.enabled) log.trace(`lint: ${key} program=${program !== null ? "yes" : "NO"}`);
-      const input = parseWithOptionalProgram(key, content, program, log);
+      if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key}`);
+      const input = createSolidInput(key, program, log);
       const graph = buildSolidGraph(input);
 
-      const version = project.getScriptVersion(key)
-        ?? `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
+      const version = `hash:${createHash("sha256").update(input.sourceFile.text).digest("hex").slice(0, 16)}`;
       cache.setSolidGraph(key, version, graph);
 
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(graph, input.sourceCode, emit);
+      runSolidRules(graph, input.sourceFile, emit);
       if (log.enabled) log.trace(`lint: ${key} → ${results.length} single-file diags`);
       for (let j = 0, dLen = results.length; j < dLen; j++) {
         const result = results[j];
@@ -558,7 +540,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
 
     if (options.crossFile) {
-      /* FIX #3 (cont.): Serve CSS content from the pre-read map instead of re-reading from disk. */
+      /* Serve CSS content from the pre-read map instead of re-reading from disk. */
       const readContent = (path: string): string | null => {
         const cached = cssContentMap.get(path);
         if (cached !== undefined) return cached;
@@ -626,6 +608,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
   } finally {
+    batch.dispose();
     project.dispose();
     if (fileHandle !== undefined) await fileHandle.close();
   }

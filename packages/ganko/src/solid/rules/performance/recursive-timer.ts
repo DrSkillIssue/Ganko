@@ -17,7 +17,7 @@
  *   }
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { Emit } from "../../../graph"
 import type { SolidGraph } from "../../impl"
 import type { CallEntity, FunctionEntity } from "../../entities"
@@ -49,7 +49,7 @@ export const recursiveTimer = defineSolidRule({
       const call = calls[i]
       if (!call) continue;
       const callee = call.callee
-      if (callee.type !== "Identifier" || callee.name !== "setTimeout") continue
+      if (!ts.isIdentifier(callee) || callee.text !== "setTimeout") continue
 
       const firstArg = call.arguments[0]
       if (!firstArg) continue
@@ -65,15 +65,15 @@ export const recursiveTimer = defineSolidRule({
       if (!enclosingName) continue
 
       // Case 1: setTimeout(fnName, delay) — direct reference
-      if (argNode.type === "Identifier" && referencesFunction(enclosing, argNode.name)) {
+      if (ts.isIdentifier(argNode) && referencesFunction(enclosing, argNode.text)) {
         emitDiagnostic(graph, emit, call, enclosingName)
         continue
       }
 
       // Case 2: setTimeout(() => fnName(...), delay) — call inside callback
       if (
-        argNode.type === "ArrowFunctionExpression" ||
-        argNode.type === "FunctionExpression"
+        ts.isArrowFunction(argNode) ||
+        ts.isFunctionExpression(argNode)
       ) {
         if (callbackCallsFunction(graph, argNode, enclosing)) {
           emitDiagnostic(graph, emit, call, enclosingName)
@@ -88,6 +88,7 @@ function emitDiagnostic(graph: SolidGraph, emit: Emit, call: CallEntity, name: s
     createDiagnostic(
       graph.file,
       call.node,
+      graph.sourceFile,
       "recursive-timer",
       "recursiveTimer",
       resolveMessage(messages.recursiveTimer, { name }),
@@ -110,9 +111,7 @@ function hasTerminationCondition(fn: FunctionEntity): boolean {
   return false
 }
 
-function getNamedEnclosingFunction(graph: SolidGraph, node: T.Node): FunctionEntity | null {
-  if (!node.range) return null
-
+function getNamedEnclosingFunction(graph: SolidGraph, node: ts.Node): FunctionEntity | null {
   let best: FunctionEntity | null = null
   let bestSize = Infinity
   for (let i = 0, len = graph.functions.length; i < len; i++) {
@@ -120,11 +119,10 @@ function getNamedEnclosingFunction(graph: SolidGraph, node: T.Node): FunctionEnt
     if (!fn) continue;
     if (!fn.name && !fn.variableName) continue
 
-    const range = fn.node.range
-    if (!range) continue
-    if (!isNodeRangeInside(node.range, range)) continue
+    const fnNode = fn.node
+    if (node.pos < fnNode.pos || node.end > fnNode.end) continue
 
-    const size = range[1] - range[0]
+    const size = fnNode.end - fnNode.pos
     if (size >= bestSize) continue
     best = fn
     bestSize = size
@@ -133,20 +131,13 @@ function getNamedEnclosingFunction(graph: SolidGraph, node: T.Node): FunctionEnt
   return best
 }
 
-function isNodeRangeInside(
-  inner: readonly [number, number],
-  outer: readonly [number, number],
-): boolean {
-  return inner[0] >= outer[0] && inner[1] <= outer[1]
-}
-
 /**
  * Check if a callback body calls a function by name, using the graph's
  * existing call entities rather than walking the AST.
  */
 function callbackCallsFunction(
   graph: SolidGraph,
-  callback: T.ArrowFunctionExpression | T.FunctionExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
   fn: FunctionEntity,
 ): boolean {
   const calls = graph.calls
@@ -154,8 +145,8 @@ function callbackCallsFunction(
     const call = calls[i]
     if (!call) continue;
     const callee = call.callee
-    if (callee.type !== "Identifier") continue
-    if (!referencesFunction(fn, callee.name)) continue
+    if (!ts.isIdentifier(callee)) continue
+    if (!referencesFunction(fn, callee.text)) continue
     if (isInsideNode(call.node, callback)) return true
   }
   return false

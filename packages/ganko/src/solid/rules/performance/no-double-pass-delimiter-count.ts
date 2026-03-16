@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getCallsByMethodName, getContainingFunction } from "../../queries"
@@ -14,7 +14,7 @@ const options = {}
 interface SplitUsage {
   count: number
   hasCountingSplit: boolean
-  node: T.Node
+  node: ts.Node
 }
 
 export const noDoublePassDelimiterCount = defineSolidRule({
@@ -35,14 +35,14 @@ export const noDoublePassDelimiterCount = defineSolidRule({
     for (let i = 0; i < splitCalls.length; i++) {
       const call = splitCalls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
       if (!isLikelyStringParsingContext(graph, call.node)) continue
 
-      const callee = call.node.callee
-      if (callee.type !== "MemberExpression") continue
-      if (!isStringLikeReceiver(graph, callee.object, call.calleeRootVariable)) continue
+      const callee = call.node.expression
+      if (!ts.isPropertyAccessExpression(callee)) continue
+      if (!isStringLikeReceiver(graph, callee.expression, call.calleeRootVariable)) continue
 
-      const receiver = receiverKey(callee.object, call.calleeRootVariable?.id ?? null)
+      const receiver = receiverKey(callee.expression, call.calleeRootVariable?.id ?? null)
       if (!receiver) continue
       const delimiter = delimiterKey(call.node.arguments[0])
       if (!delimiter) continue
@@ -72,6 +72,7 @@ export const noDoublePassDelimiterCount = defineSolidRule({
         createDiagnostic(
           graph.file,
           usage.node,
+          graph.sourceFile,
           "no-double-pass-delimiter-count",
           "doublePassDelimiterCount",
           messages.doublePassDelimiterCount,
@@ -82,32 +83,33 @@ export const noDoublePassDelimiterCount = defineSolidRule({
   },
 })
 
-function receiverKey(node: T.Node, variableId: number | null): string | null {
+function receiverKey(node: ts.Node, variableId: number | null): string | null {
   if (variableId !== null) return `var:${variableId}`
-  if (node.type === "Identifier") return `id:${node.name}`
-  if (node.type === "Literal" && typeof node.value === "string") return `lit:${node.value}`
+  if (ts.isIdentifier(node)) return `id:${node.text}`
+  if (ts.isStringLiteral(node)) return `lit:${node.text}`
   return null
 }
 
-function delimiterKey(node: T.CallExpression["arguments"][number] | undefined): string | null {
-  if (!node || node.type === "SpreadElement") return null
-  if (node.type === "Literal") {
-    if (typeof node.value === "string") return `str:${node.value}`
-    return null
+function delimiterKey(node: ts.Node | undefined): string | null {
+  if (!node || ts.isSpreadElement(node)) return null
+  if (ts.isStringLiteral(node)) return `str:${node.text}`
+  if (ts.isNumericLiteral(node)) return null
+
+  if (ts.isNoSubstitutionTemplateLiteral(node)) {
+    return `tpl:${node.text}`
   }
 
-  if (node.type === "TemplateLiteral") {
-    if (node.expressions.length > 0) return null
-    return `tpl:${node.quasis[0]?.value.cooked ?? ""}`
+  if (ts.isTemplateExpression(node)) {
+    if (node.templateSpans.length > 0) return null
+    return `tpl:${node.head.text}`
   }
 
   return null
 }
 
-function isLengthAccess(node: T.CallExpression): boolean {
+function isLengthAccess(node: ts.CallExpression): boolean {
   const parent = node.parent
-  if (!parent || parent.type !== "MemberExpression") return false
-  if (parent.object !== node) return false
-  if (parent.computed) return false
-  return parent.property.type === "Identifier" && parent.property.name === "length"
+  if (!parent || !ts.isPropertyAccessExpression(parent)) return false
+  if (parent.expression !== node) return false
+  return ts.isIdentifier(parent.name) && parent.name.text === "length"
 }

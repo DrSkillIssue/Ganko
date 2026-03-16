@@ -9,11 +9,12 @@
  * - `key` prop on DOM elements (React holdover, not needed in Solid)
  */
 
+import ts from "typescript";
 import type { SolidGraph, JSXElementEntity, JSXAttributeEntity } from "../../impl"
 import type { Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
-import { getJSXAttributeValue, getSourceCode } from "../../queries"
+import { getJSXAttributeValue } from "../../queries"
 
 const messages = {
   prefer: "Prefer the `{{to}}` prop over the deprecated `{{from}}` prop.",
@@ -48,9 +49,9 @@ function generatePropReplaceFix(
 
   const node = attr.node
   // Spread attributes don't have a name property
-  if (node.type !== "JSXAttribute") return undefined
+  if (!ts.isJsxAttribute(node)) return undefined
 
-  return [{ range: [node.name.range[0], node.name.range[1]], text: to }]
+  return [{ range: [node.name.getStart(graph.sourceFile), node.name.end], text: to }]
 }
 
 /**
@@ -61,15 +62,20 @@ function createRemoveAttrFix(
   attr: JSXAttributeEntity,
 ): Fix {
   const node = attr.node
-  const sourceCode = getSourceCode(graph)
-  const tokenBefore = sourceCode.getTokenBefore(node)
-
-  // Include preceding whitespace if possible
-  if (tokenBefore) {
-    return [{ range: [tokenBefore.range[1], node.range[1]], text: "" }]
+  const sourceText = graph.sourceFile.text;
+  // Find the token before by scanning backwards from node start
+  const nodeStart = node.getStart(graph.sourceFile);
+  let tokenEnd = nodeStart - 1;
+  // Skip whitespace backwards
+  while (tokenEnd >= 0 && (sourceText[tokenEnd] === ' ' || sourceText[tokenEnd] === '\t' || sourceText[tokenEnd] === '\n' || sourceText[tokenEnd] === '\r')) {
+    tokenEnd--;
   }
 
-  return [{ range: [node.range[0], node.range[1]], text: "" }]
+  if (tokenEnd >= 0) {
+    return [{ range: [tokenEnd + 1, node.end], text: "" }]
+  }
+
+  return [{ range: [nodeStart, node.end], text: "" }]
 }
 
 const options = {}
@@ -109,6 +115,7 @@ export const noReactSpecificProps = defineSolidRule({
             createDiagnostic(
               graph.file,
               attr.node,
+              graph.sourceFile,
               "no-react-specific-props",
               "prefer",
               resolveMessage(messages.prefer, { from: attrName, to: replacement }),
@@ -127,6 +134,7 @@ export const noReactSpecificProps = defineSolidRule({
           createDiagnostic(
             graph.file,
             attr.node,
+            graph.sourceFile,
             "no-react-specific-props",
             "noUselessKey",
             messages.noUselessKey,

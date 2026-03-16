@@ -2,6 +2,7 @@
  * Flags closures created inside loops that capture loop variables.
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 import { isInLoop } from "../../util";
@@ -28,7 +29,7 @@ export const avoidFunctionAllocationInHotLoop = defineSolidRule({
       const fnNode = fn.node;
 
       // Skip named function declarations - they're hoisted
-      if (fnNode.type === "FunctionDeclaration") continue;
+      if (ts.isFunctionDeclaration(fnNode)) continue;
 
       // Must be inside a loop
       if (!isInLoop(fnNode)) continue;
@@ -57,10 +58,9 @@ export const avoidFunctionAllocationInHotLoop = defineSolidRule({
       if (!capturesLoopVariable) continue;
 
       emit(
-        createDiagnostic(graph.file, fnNode, "avoid-function-allocation-in-hot-loop", "closureInLoop", messages.closureInLoop, "warn"),
+        createDiagnostic(graph.file, fnNode, graph.sourceFile, "avoid-function-allocation-in-hot-loop", "closureInLoop", messages.closureInLoop, "warn"),
       )
     }
   },
 });
-
 

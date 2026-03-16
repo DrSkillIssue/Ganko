@@ -200,17 +200,6 @@ export async function handleInitialized(
     state.project = project;
     context.setProject(project);
 
-    const firstSolidFile = fileIndex.solidFiles.values().next();
-    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
-      const sentinel = firstSolidFile.value;
-      setTimeout(() => {
-        if (state.project !== project) return;
-        const tWarm = performance.now();
-        project.warmProgram(sentinel);
-        if (log.enabled) log.info(`ts warmup: ${(performance.now() - tWarm).toFixed(0)}ms`);
-      }, 0);
-    }
-
     state.initialized = true;
     context.resolveReady();
 

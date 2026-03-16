@@ -1,22 +1,23 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { SpreadAttributeContext, FixableSpreadPattern, SpreadSourceKind, ObjectSpreadEntity } from "../../../entities/spread";
 import { isEmptyObject } from "../helpers";
 import { getPropertyKeyName } from "../../../util/pattern-detection";
 import { isDomElement } from "@drskillissue/ganko-shared";
+import { unwrapParenthesized } from "../../../util/expression";
 
-export function handleRestDestructure(ctx: VisitorContext, 
-  rest: T.RestElement,
-  pattern: T.ObjectPattern,
-  init: T.Expression | null,
+export function handleRestDestructure(ctx: VisitorContext,
+  rest: ts.BindingElement,
+  pattern: ts.ObjectBindingPattern,
+  init: ts.Expression | null,
 ): void {
   const graph = ctx.graph;
-  
+
   // Get source name from init expression (e.g., "props" from const { a, ...rest } = props)
   let sourceName: string | null = null;
-  if (init?.type === "Identifier") {
-    sourceName = init.name;
-  } else if (init?.type === "MemberExpression") {
+  if (init && ts.isIdentifier(init)) {
+    sourceName = init.text;
+  } else if (init && ts.isPropertyAccessExpression(init)) {
     sourceName = getSpreadSourceName(ctx, init);
   }
 
@@ -29,7 +30,7 @@ export function handleRestDestructure(ctx: VisitorContext,
     parentPattern: pattern,
     isInJSX: false,
     spreadCount: 1,
-    propertyCount: pattern.properties.length - 1, // Minus the rest element
+    propertyCount: pattern.elements.length - 1, // Minus the rest element
     attributeContext: "other",
     targetTag: null,
     targetIsDom: false,
@@ -40,13 +41,13 @@ export function handleRestDestructure(ctx: VisitorContext,
   graph.addObjectSpread(entity);
 }
 
-export function handleConditionalSpread(ctx: VisitorContext, spread: T.SpreadElement, parentObject: T.ObjectExpression): void {
-  const arg = spread.argument;
+export function handleConditionalSpread(ctx: VisitorContext, spread: ts.SpreadAssignment, parentObject: ts.ObjectLiteralExpression): void {
+  const arg = unwrapParenthesized(spread.expression);
   const graph = ctx.graph;
 
   // Check for ternary: ...(cond ? {...} : {})
-  if (arg.type === "ConditionalExpression") {
-    const { consequent, alternate } = arg;
+  if (ts.isConditionalExpression(arg)) {
+    const { whenTrue: consequent, whenFalse: alternate } = arg;
     const conseqIsEmpty = isEmptyObject(consequent);
     const altIsEmpty = isEmptyObject(alternate);
 
@@ -71,9 +72,9 @@ export function handleConditionalSpread(ctx: VisitorContext, spread: T.SpreadEle
   }
 
   // Check for logical AND: ...(cond && {...})
-  if (arg.type === "LogicalExpression" && arg.operator === "&&") {
-    const right = arg.right;
-    if (right.type === "ObjectExpression") {
+  if (ts.isBinaryExpression(arg) && arg.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+    const right = unwrapParenthesized(arg.right);
+    if (ts.isObjectLiteralExpression(right)) {
       const isInJSX = isInJSXAttribute(ctx, parentObject);
       const attributeContext = getSpreadAttributeContext(ctx, parentObject);
       const fixablePattern = extractLogicalAndFixablePattern(ctx, arg);
@@ -92,9 +93,9 @@ export function handleConditionalSpread(ctx: VisitorContext, spread: T.SpreadEle
   }
 }
 
-export function handleObjectSpread(ctx: VisitorContext, spread: T.SpreadElement, parent: T.ObjectExpression): void {
+export function handleObjectSpread(ctx: VisitorContext, spread: ts.SpreadAssignment, parent: ts.ObjectLiteralExpression): void {
   const graph = ctx.graph;
-  const arg = spread.argument;
+  const arg = spread.expression;
   const isInJSX = isInJSXAttribute(ctx, parent);
   const parentJSX = isInJSX ? findParentJSXElement(ctx, parent) : null;
 
@@ -103,7 +104,7 @@ export function handleObjectSpread(ctx: VisitorContext, spread: T.SpreadElement,
   for (let i = 0, len = parent.properties.length; i < len; i++) {
     const prop = parent.properties[i];
     if (!prop) continue;
-    if (prop.type === "SpreadElement") spreadCount++;
+    if (ts.isSpreadAssignment(prop)) spreadCount++;
     else propertyCount++;
   }
 
@@ -131,9 +132,9 @@ export function handleObjectSpread(ctx: VisitorContext, spread: T.SpreadElement,
   graph.addObjectSpread(entity);
 }
 
-export function handleJSXSpread(ctx: VisitorContext, 
-  attr: T.JSXSpreadAttribute,
-  openingElement: T.JSXOpeningElement,
+export function handleJSXSpread(ctx: VisitorContext,
+  attr: ts.JsxSpreadAttribute,
+  openingElement: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
   tag: string | null,
 ): void {
   const graph = ctx.graph;
@@ -152,130 +153,131 @@ export function handleJSXSpread(ctx: VisitorContext,
     attributeContext: "props",
     targetTag: tag,
     targetIsDom,
-    sourceName: getSpreadSourceName(ctx, attr.argument),
-    sourceKind: getSpreadSourceKind(ctx, attr.argument),
+    sourceName: getSpreadSourceName(ctx, attr.expression),
+    sourceKind: getSpreadSourceKind(ctx, attr.expression),
   };
 
   graph.addObjectSpread(entity);
 }
 
-export function isInJSXAttribute(_ctx: VisitorContext, node: T.ObjectExpression): boolean {
-  let current: T.Node | undefined = node.parent;
+export function isInJSXAttribute(_ctx: VisitorContext, node: ts.ObjectLiteralExpression): boolean {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "JSXAttribute" || current.type === "JSXSpreadAttribute") return true;
-    if (current.type === "JSXElement" || current.type === "JSXFragment") return true;
+    if (ts.isJsxAttribute(current) || ts.isJsxSpreadAttribute(current)) return true;
+    if (ts.isJsxElement(current) || ts.isJsxFragment(current)) return true;
     current = current.parent;
   }
   return false;
 }
 
-export function getSpreadAttributeContext(_ctx: VisitorContext, node: T.ObjectExpression): SpreadAttributeContext {
-  let current: T.Node | undefined = node.parent;
+export function getSpreadAttributeContext(_ctx: VisitorContext, node: ts.ObjectLiteralExpression): SpreadAttributeContext {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "JSXAttribute") {
+    if (ts.isJsxAttribute(current)) {
       const name = current.name;
-      if (name.type === "JSXIdentifier") {
-        if (name.name === "classList") return "classList";
-        if (name.name === "style") return "style";
+      if (ts.isIdentifier(name)) {
+        if (name.text === "classList") return "classList";
+        if (name.text === "style") return "style";
       }
       return "props";
     }
-    if (current.type === "JSXSpreadAttribute") return "props";
-    if (current.type === "JSXElement" || current.type === "JSXFragment") break;
+    if (ts.isJsxSpreadAttribute(current)) return "props";
+    if (ts.isJsxElement(current) || ts.isJsxFragment(current)) break;
     current = current.parent;
   }
   return "other";
 }
 
-export function findParentJSXElement(_ctx: VisitorContext, node: T.ObjectExpression): T.JSXOpeningElement | null {
-  let current: T.Node | undefined = node.parent;
+export function findParentJSXElement(_ctx: VisitorContext, node: ts.ObjectLiteralExpression): ts.JsxOpeningElement | null {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "JSXOpeningElement") return current;
-    if (current.type === "JSXElement") return current.openingElement;
+    if (ts.isJsxOpeningElement(current)) return current;
+    if (ts.isJsxElement(current)) return current.openingElement;
     current = current.parent;
   }
   return null;
 }
 
-export function extractFixablePattern(ctx: VisitorContext, cond: T.ConditionalExpression, conseqIsEmpty: boolean): FixableSpreadPattern | null {
-  const nonEmptyBranch = conseqIsEmpty ? cond.alternate : cond.consequent;
-  if (nonEmptyBranch.type !== "ObjectExpression") return null;
+export function extractFixablePattern(ctx: VisitorContext, cond: ts.ConditionalExpression, conseqIsEmpty: boolean): FixableSpreadPattern | null {
+  const nonEmptyBranch = unwrapParenthesized(conseqIsEmpty ? cond.whenFalse : cond.whenTrue);
+  if (!ts.isObjectLiteralExpression(nonEmptyBranch)) return null;
   if (nonEmptyBranch.properties.length !== 1) return null;
 
   const prop = nonEmptyBranch.properties[0];
-  if (!prop || prop.type !== "Property") return null;
+  if (!prop || !ts.isPropertyAssignment(prop)) return null;
 
-  const key = prop.key;
-  const value = prop.value;
-  const keyText = getKeyText(ctx, key, prop.computed);
+  const key = prop.name;
+  const value = prop.initializer;
+  const isComputed = key !== undefined && ts.isComputedPropertyName(key);
+  const keyText = key ? getKeyText(ctx, key, isComputed) : null;
   const valueText = getNodeText(ctx, value);
   if (!keyText || !valueText) return null;
 
-  const conditionText = getNodeText(ctx, cond.test);
-  const conditionMatchesKey = prop.computed && conditionText === keyText;
+  const conditionText = getNodeText(ctx, cond.condition);
+  const conditionMatchesKey = isComputed && conditionText === keyText;
 
   return {
     truthyBranch: !conseqIsEmpty,
     property: {
       key: keyText,
-      keyRange: key.range ?? [0, 0],
-      computed: prop.computed,
+      keyRange: [key!.pos, key!.end],
+      computed: isComputed,
       value: valueText,
-      valueRange: value.range ?? [0, 0],
-      isBooleanTrue: value.type === "Literal" && value.value === true,
+      valueRange: [value.pos, value.end],
+      isBooleanTrue: value.kind === ts.SyntaxKind.TrueKeyword,
     },
-    conditionRange: cond.test.range ?? [0, 0],
+    conditionRange: [cond.condition.pos, cond.condition.end],
     conditionMatchesKey,
   };
 }
 
-export function extractLogicalAndFixablePattern(ctx: VisitorContext, expr: T.LogicalExpression): FixableSpreadPattern | null {
-  const right = expr.right;
-  if (right.type !== "ObjectExpression") return null;
+export function extractLogicalAndFixablePattern(ctx: VisitorContext, expr: ts.BinaryExpression): FixableSpreadPattern | null {
+  const right = unwrapParenthesized(expr.right);
+  if (!ts.isObjectLiteralExpression(right)) return null;
   if (right.properties.length !== 1) return null;
 
   const prop = right.properties[0];
-  if (!prop || prop.type !== "Property") return null;
+  if (!prop || !ts.isPropertyAssignment(prop)) return null;
 
-  const key = prop.key;
-  const value = prop.value;
-  const keyText = getKeyText(ctx, key, prop.computed);
+  const key = prop.name;
+  const value = prop.initializer;
+  const isComputed = key !== undefined && ts.isComputedPropertyName(key);
+  const keyText = key ? getKeyText(ctx, key, isComputed) : null;
   const valueText = getNodeText(ctx, value);
   if (!keyText || !valueText) return null;
 
   const conditionText = getNodeText(ctx, expr.left);
-  const conditionMatchesKey = prop.computed && conditionText === keyText;
+  const conditionMatchesKey = isComputed && conditionText === keyText;
 
   return {
     truthyBranch: true,
     property: {
       key: keyText,
-      keyRange: key.range ?? [0, 0],
-      computed: prop.computed,
+      keyRange: [key!.pos, key!.end],
+      computed: isComputed,
       value: valueText,
-      valueRange: value.range ?? [0, 0],
-      isBooleanTrue: value.type === "Literal" && value.value === true,
+      valueRange: [value.pos, value.end],
+      isBooleanTrue: value.kind === ts.SyntaxKind.TrueKeyword,
     },
-    conditionRange: expr.left.range ?? [0, 0],
+    conditionRange: [expr.left.pos, expr.left.end],
     conditionMatchesKey,
   };
 }
 
-export function getKeyText(ctx: VisitorContext, key: T.Node, computed: boolean): string | null {
+export function getKeyText(_ctx: VisitorContext, key: ts.Node, computed: boolean): string | null {
   const name = getPropertyKeyName(key);
   if (name !== null) return name;
-  if (computed && key.range) {
-    return ctx.graph.sourceCode.getText(key);
+  if (computed) {
+    return key.getText?.() ?? null;
   }
   return null;
 }
 
-export function getNodeText(ctx: VisitorContext, node: T.Node): string | null {
-  if (!node.range) return null;
-  return ctx.graph.sourceCode.getText(node);
+export function getNodeText(_ctx: VisitorContext, node: ts.Node): string | null {
+  return node.getText?.() ?? null;
 }
 
-export function getObjectSpreadKind(_ctx: VisitorContext, 
+export function getObjectSpreadKind(_ctx: VisitorContext,
   spreadCount: number,
   propertyCount: number,
   _isInJSX: boolean,
@@ -287,56 +289,54 @@ export function getObjectSpreadKind(_ctx: VisitorContext,
   return "object-copy";
 }
 
-export function getJSXOpeningElementTag(_ctx: VisitorContext, node: T.JSXOpeningElement): string | null {
-  const name = node.name;
-  if (name.type === "JSXIdentifier") return name.name;
-  if (name.type === "JSXNamespacedName") return `${name.namespace.name}:${name.name.name}`;
-  if (name.type === "JSXMemberExpression") {
+export function getJSXOpeningElementTag(_ctx: VisitorContext, node: ts.JsxOpeningElement): string | null {
+  const name = node.tagName;
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isPropertyAccessExpression(name)) {
     const parts: string[] = [];
-    let current: T.JSXMemberExpression["object"] = name;
-    while (current.type === "JSXMemberExpression") {
-      parts.unshift(current.property.name);
-      current = current.object;
+    let current: ts.Expression = name;
+    while (ts.isPropertyAccessExpression(current)) {
+      parts.unshift(current.name.text);
+      current = current.expression;
     }
-    if (current.type === "JSXIdentifier") parts.unshift(current.name);
+    if (ts.isIdentifier(current)) parts.unshift(current.text);
     return parts.join(".");
   }
   return null;
 }
 
-export function getSpreadSourceName(_ctx: VisitorContext, node: T.Expression): string | null {
-  if (node.type === "Identifier") return node.name;
-  if (node.type === "MemberExpression") {
+export function getSpreadSourceName(_ctx: VisitorContext, node: ts.Expression): string | null {
+  if (ts.isIdentifier(node)) return node.text;
+  if (ts.isPropertyAccessExpression(node)) {
     // Build full member expression path: props.nested.deep.classes
     const parts: string[] = [];
-    let current: T.Expression = node;
-    while (current.type === "MemberExpression") {
-      const prop = current.property;
-      if (prop.type === "Identifier") parts.unshift(prop.name);
-      else return null; // computed property, bail
-      current = current.object;
+    let current: ts.Expression = node;
+    while (ts.isPropertyAccessExpression(current)) {
+      parts.unshift(current.name.text);
+      current = current.expression;
     }
-    if (current.type === "Identifier") {
-      parts.unshift(current.name);
+    if (ts.isIdentifier(current)) {
+      parts.unshift(current.text);
       return parts.join(".");
     }
     return null;
   }
-  if (node.type === "CallExpression") {
-    const callee = node.callee;
-    if (callee.type === "Identifier") return callee.name + "()";
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    if (ts.isIdentifier(callee)) return callee.text + "()";
   }
   return null;
 }
 
-export function getSpreadSourceKind(_ctx: VisitorContext, node: T.Expression): SpreadSourceKind {
-  switch (node.type) {
-    case "Identifier": return "identifier";
-    case "MemberExpression": return "member";
-    case "CallExpression": return "call";
-    case "ObjectExpression": return "literal";
-    case "LogicalExpression": return "logical";
-    case "ConditionalExpression": return "conditional";
-    default: return "other";
+export function getSpreadSourceKind(_ctx: VisitorContext, node: ts.Expression): SpreadSourceKind {
+  if (ts.isIdentifier(node)) return "identifier";
+  if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return "member";
+  if (ts.isCallExpression(node)) return "call";
+  if (ts.isObjectLiteralExpression(node)) return "literal";
+  if (ts.isBinaryExpression(node)) {
+    const op = node.operatorToken.kind;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) return "logical";
   }
+  if (ts.isConditionalExpression(node)) return "conditional";
+  return "other";
 }

@@ -1,13 +1,13 @@
 /**
  * JSX context and element query functions
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { JSXElementEntity, JSXAttributeEntity, JSXContext } from "../entities/jsx";
 import type { JSXAttributeKind } from "../util/jsx";
 import { getStaticNumericValue, getStaticStringFromJSXValue } from "../util/static-value";
 
-export function getJSXContext(graph: SolidGraph, node: T.Node): JSXContext | null {
+export function getJSXContext(graph: SolidGraph, node: ts.Node): JSXContext | null {
   const cached = graph.jsxContextCache.get(node);
   if (cached !== undefined) return cached;
   const context = findJSXContext(graph, node);
@@ -15,9 +15,9 @@ export function getJSXContext(graph: SolidGraph, node: T.Node): JSXContext | nul
   return context;
 }
 
-export function findJSXContext(graph: SolidGraph, node: T.Node): JSXContext | null {
+export function findJSXContext(graph: SolidGraph, node: ts.Node): JSXContext | null {
   if (!node.parent) return null;
-  let current: T.Node | undefined = node.parent;
+  let current: ts.Node | undefined = node.parent;
   let depth = 0;
 
   while (current && depth < 20) {
@@ -27,20 +27,21 @@ export function findJSXContext(graph: SolidGraph, node: T.Node): JSXContext | nu
       return parentCached;
     }
 
-    if (current.type === "JSXAttribute" || current.type === "JSXSpreadAttribute") {
+    if (ts.isJsxAttribute(current) || ts.isJsxSpreadAttribute(current)) {
       const openingElement = current.parent;
-      if (openingElement?.type !== "JSXOpeningElement") {
+      if (!openingElement || !ts.isJsxAttributes(openingElement)) {
         current = current.parent;
         depth++;
         continue;
       }
-      const jsxElement = openingElement.parent;
-      if (jsxElement?.type !== "JSXElement") {
+      const jsxOpeningOrSelf = openingElement.parent;
+      if (!jsxOpeningOrSelf || (!ts.isJsxOpeningElement(jsxOpeningOrSelf) && !ts.isJsxSelfClosingElement(jsxOpeningOrSelf))) {
         current = current.parent;
         depth++;
         continue;
       }
-      const element = graph.jsxByNode.get(jsxElement);
+      const jsxElement = ts.isJsxOpeningElement(jsxOpeningOrSelf) ? jsxOpeningOrSelf.parent : jsxOpeningOrSelf;
+      const element = graph.jsxByNode.get(jsxElement as any);
       if (!element) {
         current = current.parent;
         depth++;
@@ -59,31 +60,31 @@ export function findJSXContext(graph: SolidGraph, node: T.Node): JSXContext | nu
       return { element, attribute, kind: "attribute", containerNode: null };
     }
 
-    if (current.type === "JSXExpressionContainer") {
+    if (ts.isJsxExpression(current)) {
       const containerParent = current.parent;
-      if (containerParent?.type !== "JSXElement" && containerParent?.type !== "JSXFragment") {
+      if (!containerParent || (!ts.isJsxElement(containerParent) && !ts.isJsxFragment(containerParent))) {
         current = current.parent;
         depth++;
         continue;
       }
-      const element = graph.jsxByNode.get(containerParent);
+      const element = graph.jsxByNode.get(containerParent as any);
       if (!element) {
         current = current.parent;
         depth++;
         continue;
       }
-      return { element, attribute: null, kind: "child", containerNode: current };
+      return { element, attribute: null, kind: "child", containerNode: current as any };
     }
 
-    if (current.type === "JSXElement" || current.type === "JSXFragment") {
-      const element = graph.jsxByNode.get(current);
+    if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current)) {
+      const element = graph.jsxByNode.get(current as any);
       if (!element) {
         current = current.parent;
         depth++;
         continue;
       }
       const elementParent = current.parent;
-      const containerNode = elementParent?.type === "JSXExpressionContainer" ? elementParent : null;
+      const containerNode = (elementParent && ts.isJsxExpression(elementParent)) ? elementParent as any : null;
       return { element, attribute: null, kind: "expression", containerNode };
     }
 
@@ -111,7 +112,7 @@ export function findEnclosingDOMElement(graph: SolidGraph, element: JSXElementEn
   return findAncestorElement(graph, element, el => el.isDomElement);
 }
 
-export function getJSXAttributeValue(graph: SolidGraph, element: JSXElementEntity, attrName: string): T.Node | null {
+export function getJSXAttributeValue(graph: SolidGraph, element: JSXElementEntity, attrName: string): ts.Node | null {
   const attribute = getJSXAttributeEntity(graph, element, attrName);
   if (!attribute) return null;
   return attribute.valueNode;
@@ -145,8 +146,8 @@ export function getStaticNumericJSXAttributeValue(graph: SolidGraph, element: JS
     return numeric;
   }
 
-  if (attribute.valueNode.type !== "JSXExpressionContainer") return null;
-  if (attribute.valueNode.expression.type === "JSXEmptyExpression") return null;
+  if (!ts.isJsxExpression(attribute.valueNode)) return null;
+  if (!attribute.valueNode.expression) return null;
   return getStaticNumericValue(attribute.valueNode.expression);
 }
 

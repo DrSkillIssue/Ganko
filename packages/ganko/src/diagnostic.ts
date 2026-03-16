@@ -1,5 +1,6 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import type ts from "typescript"
 import type { RuleSeverityOverride } from "@drskillissue/ganko-shared"
+import { nodeToSourceLocation } from "./ast-utils"
 
 export type MessageId = string
 export type Message = string
@@ -50,11 +51,14 @@ export interface Diagnostic {
   readonly suggest?: readonly Suggestion[]
 }
 
-/** Comment token with location/range info */
-export interface CommentToken {
+/** Comment entry extracted from TypeScript scanner */
+export interface CommentEntry {
+  readonly pos: number
+  readonly end: number
   readonly value: string
-  readonly range: readonly [number, number]
-  readonly loc: SourceLocation
+  readonly line: number
+  readonly endLine: number
+  readonly kind: ts.SyntaxKind.SingleLineCommentTrivia | ts.SyntaxKind.MultiLineCommentTrivia
 }
 
 /**
@@ -113,11 +117,11 @@ export function createDiagnosticFromLoc(
 }
 
 /**
- * Create a diagnostic from a comment token.
+ * Create a diagnostic from a comment entry.
  */
 export function createDiagnosticFromComment(
   file: string,
-  comment: CommentToken,
+  comment: CommentEntry,
   rule: string,
   messageId: string,
   message: string,
@@ -125,15 +129,20 @@ export function createDiagnosticFromComment(
   fix?: Fix,
   suggest?: readonly Suggestion[],
 ): Diagnostic {
-  return createDiagnosticFromLoc(file, comment.loc, rule, messageId, message, severity, fix, suggest)
+  const loc: SourceLocation = {
+    start: { line: comment.line, column: 0 },
+    end: { line: comment.endLine, column: 0 },
+  }
+  return createDiagnosticFromLoc(file, loc, rule, messageId, message, severity, fix, suggest)
 }
 
 /**
- * Create a diagnostic from an AST node.
+ * Create a diagnostic from a TypeScript AST node.
  */
 export function createDiagnostic(
   file: string,
-  node: T.Node | T.Comment,
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
   rule: string,
   messageId: string,
   message: string,
@@ -141,5 +150,5 @@ export function createDiagnostic(
   fix?: Fix,
   suggest?: readonly Suggestion[],
 ): Diagnostic {
-  return createDiagnosticFromLoc(file, node.loc, rule, messageId, message, severity, fix, suggest)
+  return createDiagnosticFromLoc(file, nodeToSourceLocation(node, sourceFile), rule, messageId, message, severity, fix, suggest)
 }

@@ -4,7 +4,7 @@
  * Represents a variable binding in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 import type { ScopeEntity } from "./scope";
 import type { TypeInfo } from "../typescript";
@@ -17,7 +17,9 @@ export interface VariableEntity {
   name: string;
   file: FileEntity;
   scope: ScopeEntity;
-  declarations: T.Node[];
+  declarations: ts.Node[];
+  /** The initializer expression from the variable declaration (e.g. `expr` in `const x = expr`). */
+  initializer: ts.Expression | null;
   assignments: AssignmentEntity[];
   reads: ReadEntity[];
   type: TypeInfo | null;
@@ -43,16 +45,16 @@ export type ReactiveKind =
   | "resource"; /* Created via createResource() */
 
 /** Assignment operator type extracted from AssignmentExpression */
-export type AssignmentOperator = T.AssignmentExpression["operator"];
+export type AssignmentOperator = ts.SyntaxKind;
 
 /**
  * Represents an assignment to a variable.
  */
 export interface AssignmentEntity {
   id: number;
-  node: T.Node;
+  node: ts.Node;
   /** The assigned value expression */
-  value: T.Expression;
+  value: ts.Expression;
   /** The assignment operator ("=" for simple, "+=" etc for compound) */
   operator: AssignmentOperator | null;
   /** Whether this assignment is inside a loop */
@@ -66,7 +68,7 @@ export interface AssignmentEntity {
  */
 export interface ReadEntity {
   id: number;
-  node: T.Node;
+  node: ts.Node;
   scope: ScopeEntity;
   isProperAccess: boolean;
   /** Whether this read is inside a loop */
@@ -80,7 +82,8 @@ export interface CreateVariableArgs {
   name: string;
   file: FileEntity;
   scope: ScopeEntity;
-  declarations: T.Node[];
+  declarations: ts.Node[];
+  initializer?: ts.Expression | null;
 }
 
 /**
@@ -93,6 +96,7 @@ export function createVariable(args: CreateVariableArgs): VariableEntity {
     file: args.file,
     scope: args.scope,
     declarations: args.declarations,
+    initializer: args.initializer ?? null,
     assignments: [],
     reads: [],
     type: null,

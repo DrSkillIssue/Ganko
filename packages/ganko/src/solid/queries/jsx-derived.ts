@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../impl"
 import type { JSXAttributeEntity, JSXElementEntity } from "../entities/jsx"
 import { getPropertyKeyName } from "../util/pattern-detection"
@@ -13,10 +13,10 @@ export interface JSXAttributeEntry {
  * @param node JSX attribute value node
  * @returns Object literal for classList or null
  */
-export function classListObject(node: T.Node | null): T.ObjectExpression | null {
-  if (!node || node.type !== "JSXExpressionContainer") return null
+export function classListObject(node: ts.Node | null): ts.ObjectLiteralExpression | null {
+  if (!node || !ts.isJsxExpression(node)) return null
   const expression = node.expression
-  if (expression.type !== "ObjectExpression") return null
+  if (!expression || !ts.isObjectLiteralExpression(expression)) return null
   return expression
 }
 
@@ -25,10 +25,10 @@ export function classListObject(node: T.Node | null): T.ObjectExpression | null 
  * @param node JSX attribute value node
  * @returns Object literal for style or null
  */
-export function styleObject(node: T.Node | null): T.ObjectExpression | null {
-  if (!node || node.type !== "JSXExpressionContainer") return null
+export function styleObject(node: ts.Node | null): ts.ObjectLiteralExpression | null {
+  if (!node || !ts.isJsxExpression(node)) return null
   const expression = node.expression
-  if (expression.type !== "ObjectExpression") return null
+  if (!expression || !ts.isObjectLiteralExpression(expression)) return null
   return expression
 }
 
@@ -101,7 +101,7 @@ export function hasOnlyStaticClassLiterals(graph: SolidGraph): boolean {
  */
 export function forEachClassListProperty(
   graph: SolidGraph,
-  visitor: (property: T.ObjectLiteralElementLike) => void,
+  visitor: (property: ts.ObjectLiteralElementLike) => void,
 ): void {
   const properties = graph.classListProperties
   for (let i = 0; i < properties.length; i++) {
@@ -118,7 +118,7 @@ export function forEachClassListProperty(
  */
 export function forEachClassListPropertyAcross(
   graphs: readonly SolidGraph[],
-  visitor: (graph: SolidGraph, property: T.ObjectLiteralElementLike) => void,
+  visitor: (graph: SolidGraph, property: ts.ObjectLiteralElementLike) => void,
 ): void {
   for (let i = 0; i < graphs.length; i++) {
     const graph = graphs[i]
@@ -139,7 +139,7 @@ export function forEachClassListPropertyAcross(
  */
 export function forEachStyleProperty(
   graph: SolidGraph,
-  visitor: (property: T.ObjectLiteralElementLike, element: JSXElementEntity) => void,
+  visitor: (property: ts.ObjectLiteralElementLike, element: JSXElementEntity) => void,
 ): void {
   const properties = graph.styleProperties
   for (let i = 0; i < properties.length; i++) {
@@ -156,7 +156,7 @@ export function forEachStyleProperty(
  */
 export function forEachStylePropertyAcross(
   graphs: readonly SolidGraph[],
-  visitor: (graph: SolidGraph, property: T.ObjectLiteralElementLike, element: JSXElementEntity) => void,
+  visitor: (graph: SolidGraph, property: ts.ObjectLiteralElementLike, element: JSXElementEntity) => void,
 ): void {
   for (let i = 0; i < graphs.length; i++) {
     const graph = graphs[i]

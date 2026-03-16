@@ -7,7 +7,7 @@
  * substring search pattern (e.g., scanning for multiple characters).
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -30,10 +30,10 @@ const THRESHOLD = 3
  * @param node - CallExpression node
  * @returns The identifier name of the receiver, or null
  */
-function receiverName(node: T.CallExpression | T.NewExpression): string | null {
-  if (node.callee.type !== "MemberExpression") return null
-  const obj = node.callee.object
-  if (obj.type === "Identifier") return obj.name
+function receiverName(node: ts.CallExpression | ts.NewExpression): string | null {
+  if (!ts.isPropertyAccessExpression(node.expression)) return null
+  const obj = node.expression.expression
+  if (ts.isIdentifier(obj)) return obj.text
   return null
 }
 
@@ -48,9 +48,9 @@ function receiverName(node: T.CallExpression | T.NewExpression): string | null {
 
 interface GroupEntry {
   readonly name: string
-  readonly receiver: T.Node
+  readonly receiver: ts.Node
   readonly variable: VariableEntity | null
-  readonly nodes: T.Node[]
+  readonly nodes: ts.Node[]
 }
 
 export const avoidRepeatedIndexofCheck = defineSolidRule({
@@ -79,8 +79,8 @@ export const avoidRepeatedIndexofCheck = defineSolidRule({
       const fn = getContainingFunction(graph, call.node)
       if (!fn) continue
 
-      const callee = call.node.callee
-      const receiver = callee.type === "MemberExpression" ? callee.object : call.node
+      const callee = call.node.expression
+      const receiver = ts.isPropertyAccessExpression(callee) ? callee.expression : call.node
       const variable = call.calleeRootVariable
       const receiverKey = variable ? `var:${variable.id}` : `name:${name}`
       const key = `${fn.id}:${receiverKey}`
@@ -104,7 +104,7 @@ export const avoidRepeatedIndexofCheck = defineSolidRule({
 
       // Skip string receivers — repeated .indexOf() on strings is valid
       // (scanning for multiple different substrings)
-      if (isStringLikeReceiver(graph, entry.receiver, entry.variable)) continue
+      if (isStringLikeReceiver(graph, entry.receiver as never, entry.variable)) continue
 
       const indexDiagNode = entry.nodes[0]
       if (!indexDiagNode) continue
@@ -113,6 +113,7 @@ export const avoidRepeatedIndexofCheck = defineSolidRule({
         createDiagnostic(
           graph.file,
           indexDiagNode,
+          graph.sourceFile,
           "avoid-repeated-indexof-check",
           "repeatedIndexOf",
           resolveMessage(messages.repeatedIndexOf, {

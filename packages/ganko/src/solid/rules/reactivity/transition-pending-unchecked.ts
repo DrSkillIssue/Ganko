@@ -13,6 +13,7 @@
  * - GOOD: <button disabled={isPending()}>{isPending() ? "Loading..." : "Update"}</button>
  */
 
+import ts from "typescript";
 import type { CallEntity, VariableEntity } from "../../entities";
 import { getCallsByPrimitive, getVariableByNameInScope } from "../../queries";
 import { defineSolidRule } from "../../rule";
@@ -37,12 +38,12 @@ function getFirstDestructuredName(call: CallEntity): string | null {
   const callNode = call.node;
   const parent = callNode.parent;
 
-  if (parent?.type !== "VariableDeclarator") {
+  if (!parent || !ts.isVariableDeclaration(parent) || parent.initializer !== callNode) {
     return null;
   }
 
-  const pattern = parent.id;
-  if (pattern.type !== "ArrayPattern") {
+  const pattern = parent.name;
+  if (!ts.isArrayBindingPattern(pattern)) {
     return null;
   }
 
@@ -52,11 +53,11 @@ function getFirstDestructuredName(call: CallEntity): string | null {
   }
 
   const firstElement = elements[0];
-  if (!firstElement || firstElement.type !== "Identifier") {
+  if (!firstElement || !ts.isBindingElement(firstElement) || !ts.isIdentifier(firstElement.name)) {
     return null;
   }
 
-  return firstElement.name;
+  return firstElement.name.text;
 }
 
 /**
@@ -111,6 +112,7 @@ export const transitionPendingUnchecked = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "transition-pending-unchecked",
             "pendingUnchecked",
             messages.pendingUnchecked,

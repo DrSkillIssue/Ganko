@@ -13,7 +13,7 @@
  *
  * Context determines whether signal reads are tracked for reactivity.
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import type { ScopeEntity, TrackingContext } from "../entities/scope";
@@ -56,17 +56,17 @@ export function runContextPhase(graph: SolidGraph, _input: SolidInput): void {
 
         // Find the function argument at this position
         const argNode = arg.node;
-        if (argNode.type === "SpreadElement") continue;
+        if (ts.isSpreadElement(argNode)) continue;
 
         // Handle function expressions directly passed as arguments
-        if (argNode.type === "ArrowFunctionExpression" || argNode.type === "FunctionExpression") {
+        if (ts.isArrowFunction(argNode) || ts.isFunctionExpression(argNode)) {
           setFunctionContext(argNode, semType, call, graph);
           continue;
         }
 
         // Handle identifier references to functions
-        if (argNode.type === "Identifier") {
-          const fns = graph.functionsByName.get(argNode.name);
+        if (ts.isIdentifier(argNode)) {
+          const fns = graph.functionsByName.get(argNode.text);
           if (fns && fns.length === 1) {
             const resolvedFn = fns[0];
             if (!resolvedFn) continue;
@@ -94,12 +94,12 @@ export function runContextPhase(graph: SolidGraph, _input: SolidInput): void {
  * @param graph - The solid graph
  */
 function setFunctionContext(
-  node: T.ArrowFunctionExpression | T.FunctionExpression,
+  node: ts.ArrowFunction | ts.FunctionExpression,
   type: "tracked" | "deferred" | "untracked",
   call: CallEntity,
   graph: SolidGraph,
 ): void {
-  const fnScope = getScopeFor(graph, node);
+  const fnScope = getScopeFor(graph, node as any);
   const primitiveName = call.primitive?.name ?? "unknown";
   const context: TrackingContext = { type, source: primitiveName };
   fnScope._resolvedContext = context;
@@ -174,22 +174,23 @@ function setEventHandlerContexts(graph: SolidGraph): void {
     const valueNode = attr.valueNode;
     if (!valueNode) continue;
 
-    // Unwrap JSXExpressionContainer to get the actual expression
-    const expr = valueNode.type === "JSXExpressionContainer" 
-      ? valueNode.expression 
+    // Unwrap JsxExpression to get the actual expression
+    const expr = ts.isJsxExpression(valueNode)
+      ? valueNode.expression
       : valueNode;
+    if (!expr) continue;
 
     // Handle inline function expressions: onClick={() => ...}
-    if (expr.type === "ArrowFunctionExpression" || expr.type === "FunctionExpression") {
-      const fnScope = getScopeFor(graph, expr);
+    if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
+      const fnScope = getScopeFor(graph, expr as any);
       fnScope._resolvedContext = deferredContext;
       propagateContextToChildren(fnScope, deferredContext);
       continue;
     }
 
     // Handle identifier references: onClick={handleClick}
-    if (expr.type === "Identifier") {
-      const fns = graph.functionsByName.get(expr.name);
+    if (ts.isIdentifier(expr)) {
+      const fns = graph.functionsByName.get(expr.text);
       if (fns && fns.length === 1) {
         const resolvedFn = fns[0];
         if (resolvedFn) {
@@ -248,7 +249,7 @@ function setFlowComponentContexts(graph: SolidGraph): void {
 
       const fnNode = findFunctionChildExpression(element.children);
       if (fnNode) {
-        const fnScope = getScopeFor(graph, fnNode);
+        const fnScope = getScopeFor(graph, fnNode as any);
         fnScope._resolvedContext = semantic.children;
         propagateContextToChildren(fnScope, semantic.children);
       }
@@ -282,11 +283,12 @@ function setFallbackPropContext(
     if (attrEntry.name !== "fallback") continue;
     const value = attrEntry.valueNode;
     if (!value) break;
-    const expr = value.type === "JSXExpressionContainer"
+    const expr = ts.isJsxExpression(value)
       ? value.expression
       : value;
-    if (expr.type === "ArrowFunctionExpression" || expr.type === "FunctionExpression") {
-      const fnScope = getScopeFor(graph, expr);
+    if (!expr) break;
+    if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
+      const fnScope = getScopeFor(graph, expr as any);
       fnScope._resolvedContext = context;
       propagateContextToChildren(fnScope, context);
     }

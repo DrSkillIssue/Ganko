@@ -4,7 +4,7 @@
  * Represents a class property in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { ClassEntity } from "./class";
 
 /**
@@ -12,12 +12,12 @@ import type { ClassEntity } from "./class";
  */
 export interface PropertyEntity {
   id: number;
-  node: T.PropertyDefinition;
+  node: ts.PropertyDeclaration;
   class: ClassEntity;
   name: string | null;
   accessibility: "public" | "private" | "protected" | undefined;
   static: boolean;
   readonly: boolean;
   /** The declaration node for JSDoc attachment (same as node for properties) */
-  declarationNode: T.Node;
+  declarationNode: ts.Node;
 }

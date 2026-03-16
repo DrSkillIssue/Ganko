@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { iterateVariables, getContainingFunction } from "../../queries"
@@ -28,7 +28,7 @@ export const noRestSliceLoop = defineSolidRule({
         const assignment = variable.assignments[i]
         if (!assignment) continue;
         if (!assignment.isInLoop) continue
-        if (assignment.operator !== "=" && assignment.operator !== null) continue
+        if (assignment.operator !== ts.SyntaxKind.EqualsToken && assignment.operator !== null) continue
         if (!isSelfSliceOrSubstring(variable.name, assignment.value)) continue
         candidateAssignments.push(assignment)
       }
@@ -40,7 +40,7 @@ export const noRestSliceLoop = defineSolidRule({
       for (let i = 0; i < candidateAssignments.length; i++) {
         const candidate = candidateAssignments[i]
         if (!candidate) continue
-        if (candidate.value.type === "CallExpression") {
+        if (ts.isCallExpression(candidate.value)) {
           callAssignment = candidate
           break
         }
@@ -61,12 +61,13 @@ export const noRestSliceLoop = defineSolidRule({
       }
       if (countInFunction < 2) continue
 
-      const method = call && call.type === "CallExpression" ? (callMethodName(call) ?? "slice") : "slice"
+      const method = call && ts.isCallExpression(call) ? (callMethodName(call) ?? "slice") : "slice"
       const restDiagNode = callAssignment?.node ?? first.node
       emit(
         createDiagnostic(
           graph.file,
           restDiagNode,
+          graph.sourceFile,
           "no-rest-slice-loop",
           "restSliceLoop",
           resolveMessage(messages.restSliceLoop, {
@@ -80,35 +81,38 @@ export const noRestSliceLoop = defineSolidRule({
   },
 })
 
-function isSelfSliceOrSubstring(name: string, value: T.Expression): boolean {
-  if (value.type === "CallExpression") {
-    const callee = value.callee
-    if (callee.type !== "MemberExpression") return false
-    if (callee.object.type !== "Identifier" || callee.object.name !== name) return false
+function isSelfSliceOrSubstring(name: string, value: ts.Expression): boolean {
+  if (ts.isCallExpression(value)) {
+    const callee = value.expression
+    if (!ts.isPropertyAccessExpression(callee)) return false
+    if (!ts.isIdentifier(callee.expression) || callee.expression.text !== name) return false
     const method = memberPropertyName(callee)
     return method === "slice" || method === "substring"
   }
 
-  if (value.type === "ConditionalExpression") {
-    return isSelfSliceOrSubstring(name, value.consequent) || isSelfSliceOrSubstring(name, value.alternate)
+  if (ts.isConditionalExpression(value)) {
+    return isSelfSliceOrSubstring(name, value.whenTrue) || isSelfSliceOrSubstring(name, value.whenFalse)
   }
 
-  if (value.type === "LogicalExpression") {
+  if (ts.isBinaryExpression(value) && (
+    value.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+    value.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    value.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+  )) {
     return isSelfSliceOrSubstring(name, value.left) || isSelfSliceOrSubstring(name, value.right)
   }
 
   return false
 }
 
-function callMethodName(node: T.CallExpression): string | null {
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return null
+function callMethodName(node: ts.CallExpression): string | null {
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return null
   return memberPropertyName(callee)
 }
 
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
+function memberPropertyName(node: ts.PropertyAccessExpression): string | null {
+  const property = node.name
+  if (ts.isIdentifier(property)) return property.text
   return null
 }

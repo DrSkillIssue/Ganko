@@ -19,16 +19,14 @@
  * - Use `innerText` or `textContent` for plain text
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
-import { ASTUtils } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { isHtml } from "@drskillissue/ganko-shared";
 import type { Diagnostic } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic } from "../../../diagnostic";
 import type { JSXElementEntity, JSXAttributeEntity } from "../../entities/jsx";
 import { getJSXAttributesByKind } from "../../queries/jsx";
-
-const { getStringIfConstant } = ASTUtils;
+import { getStaticStringValue } from "../../util/static-value";
 
 const messages = {
   dangerous: "Using innerHTML with dynamic content is a security risk. Unsanitized user input can lead to cross-site scripting (XSS) attacks. Use a sanitization library or render content safely.",
@@ -43,24 +41,23 @@ const options = {}
  * Check if a JSX attribute is the React-style dangerouslySetInnerHTML prop
  * with the expected `{ __html: value }` structure.
  * @param node - The JSX attribute node to check
+ * @param sourceFile - The source file for position calculations
  * @returns The expression value if found, null otherwise
  */
-function getDangerouslySetInnerHTMLValue(node: T.JSXAttribute): T.Expression | null {
-  if (node.value?.type !== "JSXExpressionContainer") return null;
+function getDangerouslySetInnerHTMLValue(node: ts.JsxAttribute): ts.Expression | null {
+  if (!node.initializer || !ts.isJsxExpression(node.initializer)) return null;
 
-  const expr = node.value.expression;
-  if (expr.type !== "ObjectExpression") return null;
+  const expr = node.initializer.expression;
+  if (!expr || !ts.isObjectLiteralExpression(expr)) return null;
   if (expr.properties.length !== 1) return null;
 
   const htmlProp = expr.properties[0];
   if (!htmlProp) return null;
-  if (htmlProp.type !== "Property") return null;
-  if (htmlProp.key.type !== "Identifier") return null;
-  if (htmlProp.key.name !== "__html") return null;
-  const value = htmlProp.value;
-  if (value.type === "AssignmentPattern" || value.type === "TSEmptyBodyFunctionExpression") return null;
+  if (!ts.isPropertyAssignment(htmlProp)) return null;
+  if (!ts.isIdentifier(htmlProp.name)) return null;
+  if (htmlProp.name.text !== "__html") return null;
 
-  return value;
+  return htmlProp.initializer;
 }
 
 /**
@@ -76,20 +73,21 @@ function hasConflictingChildren(element: JSXElementEntity): boolean {
  * Build diagnostic for React's dangerouslySetInnerHTML prop.
  * @param file - The file path
  * @param node - The JSX attribute node
+ * @param sourceFile - The source file for position calculations
  * @returns A diagnostic for the attribute
  */
-function buildDangerouslySetInnerHTMLDiagnostic(file: string, node: T.JSXAttribute): Diagnostic {
+function buildDangerouslySetInnerHTMLDiagnostic(file: string, node: ts.JsxAttribute, sourceFile: ts.SourceFile): Diagnostic {
   const htmlValue = getDangerouslySetInnerHTMLValue(node);
 
   if (htmlValue) {
     const fix = [
-      { range: [node.range[0], htmlValue.range[0]] as const, text: "innerHTML={" },
-      { range: [htmlValue.range[1], node.range[1]] as const, text: "}" },
+      { range: [node.getStart(sourceFile), htmlValue.getStart(sourceFile)] as const, text: "innerHTML={" },
+      { range: [htmlValue.end, node.end] as const, text: "}" },
     ];
-    return createDiagnostic(file, node, "no-innerhtml", "dangerouslySetInnerHTML", messages.dangerouslySetInnerHTML, "error", fix);
+    return createDiagnostic(file, node, sourceFile, "no-innerhtml", "dangerouslySetInnerHTML", messages.dangerouslySetInnerHTML, "error", fix);
   }
 
-  return createDiagnostic(file, node, "no-innerhtml", "dangerouslySetInnerHTML", messages.dangerouslySetInnerHTML, "error");
+  return createDiagnostic(file, node, sourceFile, "no-innerhtml", "dangerouslySetInnerHTML", messages.dangerouslySetInnerHTML, "error");
 }
 
 /**
@@ -99,38 +97,40 @@ function buildDangerouslySetInnerHTMLDiagnostic(file: string, node: T.JSXAttribu
  * @param attr - The attribute entity from the graph
  * @param element - The parent JSX element entity
  * @param allowStatic - Whether static innerHTML is allowed
+ * @param sourceFile - The source file for position calculations
  * @returns A diagnostic or null if no issue
  */
 function buildInnerHTMLDiagnostic(
   file: string,
-  node: T.JSXAttribute,
+  node: ts.JsxAttribute,
   attr: JSXAttributeEntity,
   element: JSXElementEntity,
   allowStatic: boolean,
+  sourceFile: ts.SourceFile,
 ): Diagnostic | null {
   if (!allowStatic) {
-    return createDiagnostic(file, node, "no-innerhtml", "dangerous", messages.dangerous, "error");
+    return createDiagnostic(file, node, sourceFile, "no-innerhtml", "dangerous", messages.dangerous, "error");
   }
 
   const innerHtmlExpr = attr.valueNode;
   if (!innerHtmlExpr) {
-    return createDiagnostic(file, node, "no-innerhtml", "dangerous", messages.dangerous, "error");
+    return createDiagnostic(file, node, sourceFile, "no-innerhtml", "dangerous", messages.dangerous, "error");
   }
-  const innerHtmlValue = getStringIfConstant(innerHtmlExpr);
+  const innerHtmlValue = getStaticStringValue(innerHtmlExpr);
 
   if (typeof innerHtmlValue !== "string") {
-    return createDiagnostic(file, node, "no-innerhtml", "dangerous", messages.dangerous, "error");
+    return createDiagnostic(file, node, sourceFile, "no-innerhtml", "dangerous", messages.dangerous, "error");
   }
 
   if (isHtml(innerHtmlValue)) {
     if (hasConflictingChildren(element)) {
-      return createDiagnostic(file, element.node, "no-innerhtml", "conflict", messages.conflict, "error");
+      return createDiagnostic(file, element.node, sourceFile, "no-innerhtml", "conflict", messages.conflict, "error");
     }
     return null;
   }
 
-  const fix = [{ range: node.name.range, text: "innerText" }];
-  return createDiagnostic(file, node, "no-innerhtml", "notHtml", messages.notHtml, "error", fix);
+  const fix = [{ range: [node.name.getStart(sourceFile), node.name.end] as const, text: "innerText" }];
+  return createDiagnostic(file, node, sourceFile, "no-innerhtml", "notHtml", messages.notHtml, "error", fix);
 }
 
 export const noInnerhtml = defineSolidRule({
@@ -150,15 +150,17 @@ export const noInnerhtml = defineSolidRule({
     const propAttrs = getJSXAttributesByKind(graph, "prop");
     if (propAttrs.length === 0) return;
 
+    const sourceFile = graph.sourceFile;
+
     for (let i = 0, len = propAttrs.length; i < len; i++) {
       const entry = propAttrs[i];
       if (!entry) continue;
       const { attr, element } = entry;
       const attrName = attr.name;
-      if (attr.node.type !== "JSXAttribute") continue;
+      if (!ts.isJsxAttribute(attr.node)) continue;
 
       if (attrName === "dangerouslySetInnerHTML") {
-        emit(buildDangerouslySetInnerHTMLDiagnostic(graph.file, attr.node));
+        emit(buildDangerouslySetInnerHTMLDiagnostic(graph.file, attr.node, sourceFile));
         continue;
       }
 
@@ -169,6 +171,7 @@ export const noInnerhtml = defineSolidRule({
           attr,
           element,
           allowStatic,
+          sourceFile,
         );
         if (issue) {
           emit(issue);

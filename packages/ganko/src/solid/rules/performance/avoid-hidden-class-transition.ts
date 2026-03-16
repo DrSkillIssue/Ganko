@@ -6,7 +6,7 @@
  * the property exists on the object's declared type.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 import { getHiddenClassTransitions } from "../../queries"
@@ -20,35 +20,42 @@ const messages = {
 const options = {}
 
 /**
- * Get the property name from a MemberExpression property node.
+ * Get the property name from a PropertyAssignmentEntity property node.
  *
  * @param property - The property node
  * @param computed - Whether the property access is computed
  * @returns The property name string, or a placeholder for dynamic access
  */
-function getPropertyName(property: T.Expression | T.PrivateIdentifier, computed: boolean): string {
+function getPropertyName(property: ts.Expression | ts.PrivateIdentifier, computed: boolean): string {
   if (!computed) {
-    if (property.type === "Identifier") return property.name;
-    if (property.type === "PrivateIdentifier") return property.name;
+    if (ts.isIdentifier(property)) return property.text;
+    if (ts.isPrivateIdentifier(property)) return property.text;
   }
-  if (property.type === "Literal" && typeof property.value === "string") {
-    return property.value;
+  if (ts.isStringLiteral(property)) {
+    return property.text;
   }
   return "[dynamic]";
 }
 
 /**
- * Get the object name from a MemberExpression object node.
+ * Get the object name from a PropertyAssignmentEntity object node.
  *
  * @param object - The object expression node
  * @returns The object name string, or a placeholder for complex expressions
  */
-function getObjectName(object: T.Expression): string {
-  if (object.type === "Identifier") return object.name;
-  if (object.type === "ThisExpression") return "this";
-  if (object.type === "MemberExpression") {
-    const objPart = getObjectName(object.object);
-    const propPart = getPropertyName(object.property, object.computed);
+function getObjectName(object: ts.Expression): string {
+  if (ts.isIdentifier(object)) return object.text;
+  if (object.kind === ts.SyntaxKind.ThisKeyword) return "this";
+  if (ts.isPropertyAccessExpression(object)) {
+    const objPart = getObjectName(object.expression);
+    const propPart = object.name.text;
+    return `${objPart}.${propPart}`;
+  }
+  if (ts.isElementAccessExpression(object)) {
+    const objPart = getObjectName(object.expression);
+    const propPart = ts.isStringLiteral(object.argumentExpression)
+      ? object.argumentExpression.text
+      : "[dynamic]";
     return `${objPart}.${propPart}`;
   }
   return "object";
@@ -94,6 +101,7 @@ export const avoidHiddenClassTransition = defineSolidRule({
         createDiagnostic(
           graph.file,
           pa.target,
+          graph.sourceFile,
           "avoid-hidden-class-transition",
           "hiddenClassTransition",
           message,

@@ -4,7 +4,7 @@
  * Represents a function in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { FileEntity } from "./file";
 import type { ScopeEntity } from "./scope";
 import type { VariableEntity } from "./variable";
@@ -24,7 +24,7 @@ export interface FunctionEntity {
   name: string | null;
   variableName: string | null;
   params: ParameterEntity[];
-  body: T.BlockStatement | T.Expression;
+  body: ts.Block | ts.Expression | undefined;
   async: boolean;
   generator: boolean;
   scope: ScopeEntity;
@@ -39,7 +39,7 @@ export interface FunctionEntity {
   /** True if body contains at least one return with JSX */
   hasJSXReturn: boolean;
   /** The declaration node for JSDoc attachment (export wrapper, variable decl, or self) */
-  declarationNode: T.Node;
+  declarationNode: ts.Node;
   /** All return statements in this function */
   returnStatements: ReturnStatementEntity[];
   /** @internal Cached reactive captures for iteration */
@@ -49,7 +49,7 @@ export interface FunctionEntity {
   /** @internal Reachability flags (bitmask) */
   _reachability: number;
   /** @internal Cached member accesses indexed by object identifier name */
-  _memberAccessesByIdentifier: Map<string, T.MemberExpression[]> | null;
+  _memberAccessesByIdentifier: Map<string, ts.PropertyAccessExpression[]> | null;
 }
 
 /**
@@ -57,7 +57,7 @@ export interface FunctionEntity {
  */
 export interface ParameterEntity {
   id: number;
-  node: T.Parameter;
+  node: ts.ParameterDeclaration;
   name: string | null;
   index: number;
 }
@@ -72,7 +72,7 @@ export interface CreateFunctionArgs {
   captures: VariableEntity[];
   scope: ScopeEntity;
   fnVariable: VariableEntity | null;
-  declarationNode: T.Node;
+  declarationNode: ts.Node;
   hasNonVoidReturn: boolean;
   hasJSXReturn: boolean;
 }
@@ -89,8 +89,8 @@ export function createFunction(args: CreateFunctionArgs): FunctionEntity {
     variableName: args.variableName,
     params: args.params,
     body: args.node.body,
-    async: args.node.async,
-    generator: args.node.generator ?? false,
+    async: args.node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false,
+    generator: !!(args.node as ts.FunctionDeclaration | ts.FunctionExpression).asteriskToken,
     scope: args.scope,
     captures: args.captures,
     callSites: [],

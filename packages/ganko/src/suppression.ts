@@ -12,7 +12,8 @@
  * When no rule IDs follow the directive, ALL rules are suppressed for that scope.
  */
 
-import type { TSESLint } from "@typescript-eslint/utils"
+import ts from "typescript"
+import type { CommentEntry } from "./diagnostic"
 
 const SEPARATOR = /[\s,]+/
 import type { Emit } from "./graph"
@@ -65,10 +66,38 @@ function parseRuleIds(body: string, prefix: string): Set<string> | "all" {
 }
 
 /**
+ * Extract all comments from a TypeScript source file using the scanner.
+ */
+export function extractAllComments(sourceFile: ts.SourceFile): readonly CommentEntry[] {
+  const comments: CommentEntry[] = []
+  const text = sourceFile.text
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest, false, sourceFile.languageVariant, text,
+  )
+  let token = scanner.scan()
+  while (token !== ts.SyntaxKind.EndOfFileToken) {
+    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+      const pos = scanner.getTokenStart()
+      const end = scanner.getTokenEnd()
+      const raw = text.slice(pos, end)
+      const value = token === ts.SyntaxKind.SingleLineCommentTrivia ? raw.slice(2) : raw.slice(2, -2)
+      comments.push({
+        pos, end, value,
+        line: sourceFile.getLineAndCharacterOfPosition(pos).line + 1,
+        endLine: sourceFile.getLineAndCharacterOfPosition(end).line + 1,
+        kind: token,
+      })
+    }
+    token = scanner.scan()
+  }
+  return comments
+}
+
+/**
  * Build the suppression map from all comments in the source file.
  */
-export function parseSuppression(sourceCode: TSESLint.SourceCode): Suppressions {
-  const comments = sourceCode.getAllComments()
+export function parseSuppression(sourceFile: ts.SourceFile): Suppressions {
+  const comments = extractAllComments(sourceFile)
   if (comments.length === 0) return EMPTY
 
   let lines: Map<number, LineSuppression> | undefined
@@ -81,7 +110,7 @@ export function parseSuppression(sourceCode: TSESLint.SourceCode): Suppressions 
 
     if (trimmed.startsWith(PREFIX_DISABLE_NEXT_LINE)) {
       const ids = parseRuleIds(trimmed, PREFIX_DISABLE_NEXT_LINE)
-      const targetLine = comment.loc.end.line + 1
+      const targetLine = comment.endLine + 1
       if (!lines) lines = new Map()
       mergeLine(lines, targetLine, ids)
       continue
@@ -89,7 +118,7 @@ export function parseSuppression(sourceCode: TSESLint.SourceCode): Suppressions 
 
     if (trimmed.startsWith(PREFIX_DISABLE_LINE)) {
       const ids = parseRuleIds(trimmed, PREFIX_DISABLE_LINE)
-      const targetLine = comment.loc.start.line
+      const targetLine = comment.line
       if (!lines) lines = new Map()
       mergeLine(lines, targetLine, ids)
       continue
@@ -147,11 +176,11 @@ function isSuppressed(suppressions: Suppressions, d: Diagnostic): boolean {
 /**
  * Create an emit wrapper that filters suppressed diagnostics.
  *
- * Call this once per file analysis, passing the file's sourceCode.
+ * Call this once per file analysis, passing the file's sourceFile.
  * The returned emit skips diagnostics matching suppression directives.
  */
-export function createSuppressionEmit(sourceCode: TSESLint.SourceCode, target: Emit): Emit {
-  const suppressions = parseSuppression(sourceCode)
+export function createSuppressionEmit(sourceFile: ts.SourceFile, target: Emit): Emit {
+  const suppressions = parseSuppression(sourceFile)
   if (suppressions === EMPTY) return target
   return (d) => {
     if (!isSuppressed(suppressions, d)) target(d)

@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { NonNullAssertionEntity } from "../../../entities/non-null-assertion";
 import type { TypeAssertionEntity, TypeAssertionKind, TypePredicateEntity, UnsafeGenericAssertionEntity, UnsafeTypeAnnotationEntity, UnsafeAnnotationKind, UnsafeAnnotationPosition } from "../../../entities/type-assertion";
@@ -6,7 +6,7 @@ import type { FunctionEntity } from "../../../entities/function";
 import { getScopeFor } from "../../../queries/scope";
 import { getFunctionName } from "../../../util/function";
 
-export function handleNonNullAssertion(ctx: VisitorContext, node: T.TSNonNullExpression): void {
+export function handleNonNullAssertion(ctx: VisitorContext, node: ts.NonNullExpression): void {
   const entity: NonNullAssertionEntity = {
     id: ctx.graph.nextMiscId(),
     node,
@@ -15,14 +15,13 @@ export function handleNonNullAssertion(ctx: VisitorContext, node: T.TSNonNullExp
   ctx.graph.addNonNullAssertion(entity);
 }
 
-export function handleTypeAssertion(ctx: VisitorContext, node: T.TSAsExpression | T.TSTypeAssertion): void {
+export function handleTypeAssertion(ctx: VisitorContext, node: ts.AsExpression | ts.TypeAssertion): void {
   const graph = ctx.graph;
-  const scope = getScopeFor(graph, node);
+  const scope = getScopeFor(graph, node as any);
   const kind = getTypeAssertionKind(ctx, node);
   const expr = node.expression;
 
-  const onImport = expr.type === "ImportExpression" ||
-    (expr.type === "CallExpression" && expr.callee.type === "Identifier" && expr.callee.name === "require");
+  const onImport = ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === "require";
 
   const innerAssertion = findInnerAssertion(ctx, expr);
 
@@ -30,7 +29,7 @@ export function handleTypeAssertion(ctx: VisitorContext, node: T.TSAsExpression 
     id: graph.nextMiscId(),
     node,
     expression: expr,
-    typeAnnotation: node.typeAnnotation,
+    typeAnnotation: node.type,
     kind,
     inLoop: ctx.loopDepth > 0,
     onImport,
@@ -49,29 +48,29 @@ export function handleTypeAssertion(ctx: VisitorContext, node: T.TSAsExpression 
   }
 }
 
-export function getTypeAssertionKind(_ctx: VisitorContext, node: T.TSAsExpression | T.TSTypeAssertion): TypeAssertionKind {
-  const typeAnnotation = node.typeAnnotation;
+export function getTypeAssertionKind(_ctx: VisitorContext, node: ts.AsExpression | ts.TypeAssertion): TypeAssertionKind {
+  const typeAnnotation = node.type;
 
-  if (typeAnnotation.type === "TSTypeReference") {
+  if (ts.isTypeReferenceNode(typeAnnotation)) {
     const typeName = typeAnnotation.typeName;
-    if (typeName.type === "Identifier") {
-      if (typeName.name === "const") return "const-assertion";
+    if (ts.isIdentifier(typeName)) {
+      if (typeName.text === "const") return "const-assertion";
     }
   }
 
-  if (typeAnnotation.type === "TSAnyKeyword") return "cast-to-any";
-  if (typeAnnotation.type === "TSUnknownKeyword") return "cast-to-unknown";
+  if (typeAnnotation.kind === ts.SyntaxKind.AnyKeyword) return "cast-to-any";
+  if (typeAnnotation.kind === ts.SyntaxKind.UnknownKeyword) return "cast-to-unknown";
 
   const inner = node.expression;
-  if (inner.type === "TSAsExpression" || inner.type === "TSTypeAssertion") {
+  if (ts.isAsExpression(inner) || ts.isTypeAssertionExpression(inner)) {
     return "double";
   }
 
   return "simple";
 }
 
-export function findInnerAssertion(ctx: VisitorContext, expr: T.Expression): TypeAssertionEntity | null {
-  if (expr.type !== "TSAsExpression" && expr.type !== "TSTypeAssertion") return null;
+export function findInnerAssertion(ctx: VisitorContext, expr: ts.Expression): TypeAssertionEntity | null {
+  if (!ts.isAsExpression(expr) && !ts.isTypeAssertionExpression(expr)) return null;
 
   const existing = ctx.graph.typeAssertions;
   if (existing.length === 0) return null;
@@ -84,26 +83,26 @@ export function findInnerAssertion(ctx: VisitorContext, expr: T.Expression): Typ
   return null;
 }
 
-export function checkUnsafeGenericAssertion(ctx: VisitorContext, 
+export function checkUnsafeGenericAssertion(ctx: VisitorContext,
   fn: FunctionEntity,
-  assertion: T.TSAsExpression | T.TSTypeAssertion,
+  assertion: ts.AsExpression | ts.TypeAssertion,
 ): void {
   const fnNode = fn.node;
-  const typeParams = fnNode.typeParameters;
-  if (!typeParams || typeParams.params.length === 0) return;
+  const typeParams = (fnNode as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction).typeParameters;
+  if (!typeParams || typeParams.length === 0) return;
 
-  const targetType = assertion.typeAnnotation;
-  if (targetType.type !== "TSTypeReference") return;
+  const targetType = assertion.type;
+  if (!ts.isTypeReferenceNode(targetType)) return;
 
   const typeName = targetType.typeName;
-  if (typeName.type !== "Identifier") return;
+  if (!ts.isIdentifier(typeName)) return;
 
-  const typeParamName = typeName.name;
+  const typeParamName = typeName.text;
   let found = false;
-  for (let i = 0, len = typeParams.params.length; i < len; i++) {
-    const tp = typeParams.params[i];
+  for (let i = 0, len = typeParams.length; i < len; i++) {
+    const tp = typeParams[i];
     if (!tp) continue;
-    if (tp.name.name === typeParamName) {
+    if (tp.name.text === typeParamName) {
       found = true;
       break;
     }
@@ -119,20 +118,20 @@ export function checkUnsafeGenericAssertion(ctx: VisitorContext,
   ctx.graph.addUnsafeGenericAssertion(entity);
 }
 
-export function handleTypePredicate(ctx: VisitorContext, 
-  fnNode: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression,
-  predicate: T.TSTypePredicate,
+export function handleTypePredicate(ctx: VisitorContext,
+  fnNode: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction,
+  predicate: ts.TypePredicateNode,
 ): void {
   const paramName = predicate.parameterName;
-  if (paramName.type !== "Identifier") return;
+  if (!ts.isIdentifier(paramName)) return;
 
-  const typeAnnotation = predicate.typeAnnotation?.typeAnnotation;
+  const typeAnnotation = predicate.type;
   if (!typeAnnotation) return;
 
   const entity: TypePredicateEntity = {
     id: ctx.graph.nextMiscId(),
     node: fnNode,
-    parameterName: paramName.name,
+    parameterName: paramName.text,
     typeAnnotation,
   };
   ctx.graph.addTypePredicate(entity);
@@ -151,8 +150,8 @@ export function handleTypePredicate(ctx: VisitorContext,
  * - Index signatures (`[key: string]: unknown`) — structural constraint
  * - Mapped types, conditional types — type-level
  */
-export function handleUnsafeTypeAnnotation(ctx: VisitorContext, node: T.TSAnyKeyword | T.TSUnknownKeyword): void {
-  const kind: UnsafeAnnotationKind = node.type === "TSAnyKeyword" ? "any" : "unknown"
+export function handleUnsafeTypeAnnotation(ctx: VisitorContext, node: ts.KeywordTypeNode): void {
+  const kind: UnsafeAnnotationKind = node.kind === ts.SyntaxKind.AnyKeyword ? "any" : "unknown"
 
   const resolved = resolveAnnotationPosition(node)
   if (!resolved) return
@@ -183,38 +182,78 @@ interface ResolvedPosition {
  * Returns null for positions that should be exempt (type-level, catch clauses,
  * generic type arguments, index signatures).
  */
-function resolveAnnotationPosition(node: T.TSAnyKeyword | T.TSUnknownKeyword): ResolvedPosition | null {
-  // Walk up to find the TSTypeAnnotation wrapper
-  // Typical chain: TSAnyKeyword → TSTypeAnnotation → <context node>
-  // But could be deeper: TSAnyKeyword → TSArrayType → TSTypeAnnotation → <context node>
-  // Or nested in union/intersection: TSAnyKeyword → TSUnionType → TSTypeAnnotation → <context node>
-
-  let current: T.Node | undefined = node.parent
+function resolveAnnotationPosition(node: ts.KeywordTypeNode): ResolvedPosition | null {
+  let current: ts.Node | undefined = node.parent
   let depth = 0
 
   while (current && depth < 20) {
-    // TSTypeAnnotation is the boundary between type-space and value-space
-    if (current.type === "TSTypeAnnotation") {
-      return resolveFromTypeAnnotation(current)
+    // Parameter node is the boundary between type-space and value-space
+    if (ts.isParameter(current)) {
+      return resolveFromParameter(current)
+    }
+
+    // Return type on a function
+    if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) || ts.isArrowFunction(current)) {
+      // If our node is in the return type position
+      if (current.type && isDescendantOf(node, current.type)) {
+        return {
+          position: "return",
+          name: getFunctionName(current),
+          functionName: getFunctionName(current),
+        }
+      }
+      return null
+    }
+
+    // Variable declaration with type annotation
+    if (ts.isVariableDeclaration(current)) {
+      if (current.type && isDescendantOf(node, current.type)) {
+        const name = ts.isIdentifier(current.name) ? current.name.text : null
+        return {
+          position: "variable",
+          name,
+          functionName: null,
+        }
+      }
+      return null
+    }
+
+    // Property declaration with type annotation
+    if (ts.isPropertyDeclaration(current)) {
+      if (current.type && isDescendantOf(node, current.type)) {
+        const key = current.name
+        return {
+          position: "property",
+          name: ts.isIdentifier(key) ? key.text : null,
+          functionName: null,
+        }
+      }
+      return null
     }
 
     // If we hit a type-level declaration, this is exempt
     if (isTypeLevelDeclaration(current)) return null
 
-    // If we're inside a type argument list (e.g., `Record<string, unknown>`), exempt
-    if (current.type === "TSTypeParameterInstantiation") return null
+    // If we're inside a type argument list, exempt
+    if (ts.isTypeReferenceNode(current) && current.typeArguments && isDescendantOfAny(node, current.typeArguments)) return null
 
     // If we're inside an index signature, exempt
-    if (current.type === "TSIndexSignature") return null
+    if (ts.isIndexSignatureDeclaration(current)) return null
 
     // If we're inside a mapped type, exempt
-    if (current.type === "TSMappedType") return null
+    if (ts.isMappedTypeNode(current)) return null
 
     // If we're inside a conditional type, exempt
-    if (current.type === "TSConditionalType") return null
+    if (ts.isConditionalTypeNode(current)) return null
 
     // If we're inside an infer type, exempt
-    if (current.type === "TSInferType") return null
+    if (ts.isInferTypeNode(current)) return null
+
+    // Property signature in interface — exempt
+    if (ts.isPropertySignature(current)) return null
+
+    // Method signature — exempt
+    if (ts.isMethodSignature(current)) return null
 
     current = current.parent
     depth++
@@ -224,143 +263,83 @@ function resolveAnnotationPosition(node: T.TSAnyKeyword | T.TSUnknownKeyword): R
 }
 
 /**
- * Given a TSTypeAnnotation node, determine the position from its parent.
+ * Given a parameter node, determine the position.
  */
-function resolveFromTypeAnnotation(typeAnnotation: T.TSTypeAnnotation): ResolvedPosition | null {
-  const parent = typeAnnotation.parent
-  if (!parent) return null
+function resolveFromParameter(param: ts.ParameterDeclaration): ResolvedPosition | null {
+  const parent = param.parent
 
-  // Parameter: TSTypeAnnotation → Identifier (param) → FunctionDeclaration/Expression/Arrow
-  if (parent.type === "Identifier") {
-    const grandparent = parent.parent
-    if (!grandparent) return null
+  // Catch clause: `catch (e: unknown)` — exempt
+  if (ts.isCatchClause(parent)) return null
 
-    // Catch clause: `catch (e: unknown)` — exempt
-    if (grandparent.type === "CatchClause") return null
+  // Function parameter
+  if (ts.isFunctionDeclaration(parent) || ts.isFunctionExpression(parent) || ts.isArrowFunction(parent)) {
+    // Promise .catch() callback exempt
+    if (isCatchCallback(parent)) return null
 
-    // Function parameter
-    if (grandparent.type === "FunctionDeclaration" || grandparent.type === "FunctionExpression" || grandparent.type === "ArrowFunctionExpression") {
-      // Promise .catch() callback: `promise.catch((err: unknown) => ...)`
-      // The rejection reason is untyped by specification — same semantics as catch clause bindings
-      if (isCatchCallback(grandparent)) return null
-
-      return {
-        position: "parameter",
-        name: parent.name,
-        functionName: getFunctionName(grandparent),
-      }
-    }
-
-    // Variable declarator: `const x: any = ...`
-    if (grandparent.type === "VariableDeclarator") {
-      return {
-        position: "variable",
-        name: parent.name,
-        functionName: null,
-      }
-    }
-
-    // Rest/assignment parameter in function
-    // TSTypeAnnotation → Identifier → RestElement → FunctionDeclaration
-    // TSTypeAnnotation → Identifier → AssignmentPattern → FunctionDeclaration
-    if (grandparent.type === "RestElement" || grandparent.type === "AssignmentPattern") {
-      const fnNode = grandparent.parent
-      if (fnNode && (fnNode.type === "FunctionDeclaration" || fnNode.type === "FunctionExpression" || fnNode.type === "ArrowFunctionExpression")) {
-        return {
-          position: "parameter",
-          name: parent.name,
-          functionName: getFunctionName(fnNode),
-        }
-      }
-    }
-
-    // TSParameterProperty: `constructor(public x: any)`
-    if (grandparent.type === "TSParameterProperty") {
-      const fnNode = grandparent.parent
-      if (fnNode && (fnNode.type === "FunctionDeclaration" || fnNode.type === "FunctionExpression" || fnNode.type === "ArrowFunctionExpression")) {
-        return {
-          position: "parameter",
-          name: parent.name,
-          functionName: getFunctionName(fnNode),
-        }
-      }
-    }
-  }
-
-  // Return type: TSTypeAnnotation → FunctionDeclaration/Expression/Arrow
-  if (parent.type === "FunctionDeclaration" || parent.type === "FunctionExpression" || parent.type === "ArrowFunctionExpression") {
+    const paramName = ts.isIdentifier(param.name) ? param.name.text : null
     return {
-      position: "return",
-      name: getFunctionName(parent),
+      position: "parameter",
+      name: paramName,
       functionName: getFunctionName(parent),
     }
   }
 
-  // Object/array destructuring pattern with type annotation
-  if (parent.type === "ObjectPattern" || parent.type === "ArrayPattern") {
-    const patternParent = parent.parent
-    if (patternParent?.type === "VariableDeclarator") {
-      return {
-        position: "variable",
-        name: null,
-        functionName: null,
-      }
-    }
-    // Destructured parameter: ObjectPattern → FunctionDeclaration
-    if (patternParent && (patternParent.type === "FunctionDeclaration" || patternParent.type === "FunctionExpression" || patternParent.type === "ArrowFunctionExpression")) {
-      return {
-        position: "parameter",
-        name: null,
-        functionName: getFunctionName(patternParent),
-      }
-    }
-  }
-
-  // Class property: TSTypeAnnotation → PropertyDefinition
-  if (parent.type === "PropertyDefinition") {
-    const key = parent.key
+  // Constructor parameter
+  if (ts.isConstructorDeclaration(parent)) {
+    const paramName = ts.isIdentifier(param.name) ? param.name.text : null
     return {
-      position: "property",
-      name: key.type === "Identifier" ? key.name : null,
-      functionName: null,
+      position: "parameter",
+      name: paramName,
+      functionName: "constructor",
     }
   }
 
-  // TSPropertySignature inside type literal used in a value context
-  // This is tricky — could be in an interface (exempt) or inline type annotation
-  // We exempt these since they're structural
-  if (parent.type === "TSPropertySignature") return null
-
-  // Type-level method signatures — exempt
-  if (parent.type === "TSMethodSignature") return null
+  // Method parameter
+  if (ts.isMethodDeclaration(parent)) {
+    const paramName = ts.isIdentifier(param.name) ? param.name.text : null
+    const methodName = ts.isIdentifier(parent.name) ? parent.name.text : null
+    return {
+      position: "parameter",
+      name: paramName,
+      functionName: methodName,
+    }
+  }
 
   return null
 }
 
 /**
  * Detect if a function node is the callback argument of a `.catch()` call.
- *
- * Promise `.catch()` callbacks receive the rejection reason, which is `unknown`
- * by TypeScript specification — semantically identical to catch clause bindings.
- *
- * AST shape: FunctionExpression/ArrowFunctionExpression → CallExpression.arguments
- *            where CallExpression.callee is MemberExpression with property "catch"
  */
-function isCatchCallback(fn: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression): boolean {
+function isCatchCallback(fn: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction): boolean {
   const call = fn.parent
-  if (!call || call.type !== "CallExpression") return false
+  if (!call || !ts.isCallExpression(call)) return false
 
-  const callee = call.callee
-  if (callee.type !== "MemberExpression") return false
+  const callee = call.expression
+  if (!ts.isPropertyAccessExpression(callee)) return false
 
-  const prop = callee.property
-  return prop.type === "Identifier" && prop.name === "catch"
+  return callee.name.text === "catch"
 }
 
-function isTypeLevelDeclaration(node: T.Node): boolean {
-  return node.type === "TSTypeAliasDeclaration" ||
-    node.type === "TSInterfaceDeclaration" ||
-    node.type === "TSDeclareFunction" ||
-    node.type === "TSEnumDeclaration" ||
-    node.type === "TSModuleDeclaration"
+function isTypeLevelDeclaration(node: ts.Node): boolean {
+  return ts.isTypeAliasDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isEnumDeclaration(node) ||
+    ts.isModuleDeclaration(node)
+}
+
+function isDescendantOf(child: ts.Node, ancestor: ts.Node): boolean {
+  let current: ts.Node | undefined = child
+  while (current) {
+    if (current === ancestor) return true
+    current = current.parent
+  }
+  return false
+}
+
+function isDescendantOfAny(child: ts.Node, nodes: ts.NodeArray<ts.Node>): boolean {
+  for (const n of nodes) {
+    if (isDescendantOf(child, n)) return true
+  }
+  return false
 }

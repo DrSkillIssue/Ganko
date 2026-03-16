@@ -1,5 +1,5 @@
 export { SolidPlugin, analyzeInput, buildSolidGraph, runSolidRules } from "./plugin"
-export { parseFile, parseContent, parseContentWithProgram } from "./parse"
+export { createSolidInput } from "./create-input"
 export { SolidGraph } from "./impl"
 export type { SolidInput } from "./input"
 export type { ScopeEntity, TrackingContext } from "./entities/scope"

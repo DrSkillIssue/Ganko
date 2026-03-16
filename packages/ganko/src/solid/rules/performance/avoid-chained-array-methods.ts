@@ -4,7 +4,7 @@
  * or when filter().map() pattern is detected (common bottleneck).
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
@@ -89,7 +89,7 @@ function shouldDeferToMultipassSplitRule(methods: readonly string[]): boolean {
  * @param node - The root node of the chain to check
  * @returns True if the type is a tuple
  */
-function isTupleType(graph: SolidGraph, node: T.Node | null): boolean {
+function isTupleType(graph: SolidGraph, node: ts.Node | null): boolean {
   if (!node) return false;
 
   const typeInfo = getTypeInfo(graph, node);
@@ -197,7 +197,7 @@ export const avoidChainedArrayMethods = defineSolidRule({
               chain: chainStr + "()",
             });
           emit(
-            createDiagnostic(graph.file, call.node, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
+            createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
           );
         }
       }
@@ -246,7 +246,7 @@ export const avoidChainedArrayMethods = defineSolidRule({
               chain: chainStr + "()",
             });
           emit(
-            createDiagnostic(graph.file, call.node, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
+            createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
           );
         }
       }
