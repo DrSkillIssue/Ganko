@@ -3,6 +3,9 @@
  *
  * Each worker builds its own ts.Program from the tsconfig compiler options,
  * using the assigned file list as rootNames (not tsconfig file discovery).
+ * Uses ts.createIncrementalProgram to benefit from .tsbuildinfo caching
+ * (reads only — workers do NOT write .tsbuildinfo to avoid corruption
+ * from concurrent writes).
  * Returns Diagnostic[] via postMessage.
  */
 import { parentPort } from "node:worker_threads";
@@ -11,6 +14,7 @@ import { buildSolidGraph, runSolidRules, createSolidInput, createOverrideEmit } 
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
+import { buildInfoPath } from "../core/batch-program";
 
 const port = parentPort;
 if (!port) {
@@ -30,10 +34,28 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
     task.rootPath,
   );
 
+  const tsBuildInfoFile = buildInfoPath(task.rootPath);
+
+  const incrementalOptions: ts.CompilerOptions = {
+    ...parsedConfig.options,
+    incremental: true,
+    tsBuildInfoFile,
+    declaration: false,
+    declarationMap: false,
+    sourceMap: false,
+    emitDeclarationOnly: false,
+  };
+
   /* Use task.files as rootNames — the main thread already discovered
      the actual files via FileIndex. The tsconfig may have `files: []`
      in monorepo setups where packages have their own tsconfigs. */
-  const program = ts.createProgram(task.files, parsedConfig.options);
+  const host = ts.createIncrementalCompilerHost(incrementalOptions, ts.sys);
+  const builderProgram = ts.createIncrementalProgram({
+    rootNames: [...task.files],
+    options: incrementalOptions,
+    host,
+  });
+  const program = builderProgram.getProgram();
 
   const hasOverrides = Object.keys(task.overrides).length > 0;
 

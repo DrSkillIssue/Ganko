@@ -671,6 +671,9 @@ export async function runLint(args: readonly string[]): Promise<void> {
         }
       }
 
+      /* Save .tsbuildinfo for future warm starts. The main thread is the
+         sole writer — workers read but never write to avoid corruption. */
+      batch.saveBuildInfo();
       if (ownsBatch) batch.dispose();
     }
 
@@ -696,7 +699,12 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
   } finally {
-    serialBatch?.dispose();
+    /* Save .tsbuildinfo from the serial batch if cross-file didn't already
+       save it (cross-file creates its own batch when parallel path was used). */
+    if (serialBatch) {
+      if (!options.crossFile) serialBatch.saveBuildInfo();
+      serialBatch.dispose();
+    }
     if (fileHandle !== undefined) await fileHandle.close();
   }
 
