@@ -69,12 +69,13 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
     },
   }
 
-  const program = ts.createProgram({
+  const opts: ts.CreateProgramOptions = {
     rootNames: [...fileMap.keys()],
     options: compilerOptions,
     host,
-    oldProgram: lastProgram ?? undefined,
-  })
+  }
+  if (lastProgram) opts.oldProgram = lastProgram
+  const program = ts.createProgram(opts)
   lastProgram = program
   return program
 }
