@@ -4,10 +4,10 @@
  * Helper functions for working with function nodes.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import { COMPONENT_PATTERN, isUpperAlpha } from "@drskillissue/ganko-shared";
 
-export type FunctionNode = T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression;
+export type FunctionNode = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration;
 
 /**
  * Check if a node is a function node (declaration or expression).
@@ -15,11 +15,11 @@ export type FunctionNode = T.FunctionDeclaration | T.FunctionExpression | T.Arro
  * @param node - The AST node to check
  * @returns True if the node is a FunctionDeclaration, FunctionExpression, or ArrowFunctionExpression
  */
-export function isFunctionNode(node: T.Node): boolean {
+export function isFunctionNode(node: ts.Node): boolean {
   return (
-    node.type === "FunctionDeclaration" ||
-    node.type === "FunctionExpression" ||
-    node.type === "ArrowFunctionExpression"
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node)
   );
 }
 
@@ -38,8 +38,8 @@ export function isFunctionNode(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a FunctionExpression or ArrowFunctionExpression
  */
-export function isFunctionExpression(node: T.Node): boolean {
-  return node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression";
+export function isFunctionExpression(node: ts.Node): boolean {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node);
 }
 
 /**
@@ -51,22 +51,28 @@ export function isFunctionExpression(node: T.Node): boolean {
  * @param node - The function node
  * @returns The function name, or null if unnamed and not in assignable context
  */
-export function getFunctionName(node: FunctionNode): string | null {
-  if (node.type === "FunctionDeclaration" && node.id) {
-    return node.id.name;
+export function getFunctionName(node: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(node) && node.name) {
+    return node.name.text;
   }
-  if (node.type === "FunctionExpression" && node.id) {
-    return node.id.name;
+  if (ts.isFunctionExpression(node) && node.name) {
+    return node.name.text;
+  }
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  if (ts.isConstructorDeclaration(node)) {
+    return "constructor";
   }
   const parent = node.parent;
-  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") {
-    return parent.id.name;
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
-  if (parent?.type === "Property" && parent.key.type === "Identifier") {
-    return parent.key.name;
+  if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
-  if (parent?.type === "MethodDefinition" && parent.key.type === "Identifier") {
-    return parent.key.name;
+  if (parent && ts.isMethodDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
   return null;
 }
@@ -80,14 +86,9 @@ export function getFunctionName(node: FunctionNode): string | null {
  * @param node - The parameter node
  * @returns The parameter name, or null if unnamed or destructured
  */
-export function getParameterName(node: T.Parameter): string | null {
-  if (node.type === "Identifier") return node.name;
-  if (node.type === "AssignmentPattern" && node.left.type === "Identifier") {
-    return node.left.name;
-  }
-  if (node.type === "RestElement" && node.argument.type === "Identifier") {
-    return node.argument.name;
-  }
+export function getParameterName(node: ts.ParameterDeclaration): string | null {
+  const name = node.name;
+  if (ts.isIdentifier(name)) return name.text;
   return null;
 }
 
@@ -111,22 +112,24 @@ export function getFunctionVariableName(node: FunctionNode): string | null {
   const parent = node.parent;
 
   // const foo = () => {} or const foo = function() {}
-  if (parent?.type === "VariableDeclarator" && parent.id.type === "Identifier") {
-    return parent.id.name;
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
 
   // { foo: () => {} } or { foo: function() {} }
-  if (parent?.type === "Property" && parent.key.type === "Identifier" && !parent.computed) {
-    return parent.key.name;
+  if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+    return parent.name.text;
   }
 
   // foo = () => {}
   if (
-    parent?.type === "AssignmentExpression" &&
-    parent.left.type === "Identifier" &&
+    parent &&
+    ts.isBinaryExpression(parent) &&
+    parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    ts.isIdentifier(parent.left) &&
     parent.right === node
   ) {
-    return parent.left.name;
+    return parent.left.text;
   }
 
   return null;
@@ -140,9 +143,9 @@ export function getFunctionVariableName(node: FunctionNode): string | null {
  * @param node - The node to check
  * @returns True if this function is immediately invoked, false otherwise
  */
-export function isIIFE(node: T.Node): boolean {
+export function isIIFE(node: ts.Node): boolean {
   const parent = node.parent;
-  return parent?.type === "CallExpression" && parent.callee === node;
+  return parent !== undefined && ts.isCallExpression(parent) && parent.expression === node;
 }
 
 /**
@@ -153,9 +156,9 @@ export function isIIFE(node: T.Node): boolean {
  * @param read - An object containing the node to check
  * @returns True if the read is the callee of a call expression, false otherwise
  */
-export function isCalleeRead(read: { node: T.Node }): boolean {
+export function isCalleeRead(read: { node: ts.Node }): boolean {
   const parent = read.node.parent;
-  return parent?.type === "CallExpression" && parent.callee === read.node;
+  return parent !== undefined && ts.isCallExpression(parent) && parent.expression === read.node;
 }
 
 /**
@@ -165,34 +168,38 @@ export function isCalleeRead(read: { node: T.Node }): boolean {
  * @param node - The AST node to check
  * @returns True if the node is or contains JSX
  */
-export function containsJSX(node: T.Node | null | undefined): boolean {
+export function containsJSX(node: ts.Node | null | undefined): boolean {
   if (!node) return false;
 
-  switch (node.type) {
-    case "JSXElement":
-    case "JSXFragment":
-      return true;
-
-    case "BlockStatement":
-      return hasJSXReturn(node);
-
-    case "ConditionalExpression":
-      return containsJSX(node.consequent) || containsJSX(node.alternate);
-
-    case "LogicalExpression":
-      return containsJSX(node.left) || containsJSX(node.right);
-
-    case "SequenceExpression": {
-      const exprs = node.expressions;
-      for (let i = 0; i < exprs.length; i++) {
-        if (containsJSX(exprs[i])) return true;
-      }
-      return false;
-    }
-
-    default:
-      return false;
+  if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+    return true;
   }
+
+  if (ts.isBlock(node)) {
+    return hasJSXReturn(node);
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    return containsJSX(node.whenTrue) || containsJSX(node.whenFalse);
+  }
+
+  if (ts.isBinaryExpression(node) && (
+    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+    node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+  )) {
+    return containsJSX(node.left) || containsJSX(node.right);
+  }
+
+  if (ts.isCommaListExpression(node)) {
+    const exprs = node.elements;
+    for (let i = 0; i < exprs.length; i++) {
+      if (containsJSX(exprs[i])) return true;
+    }
+    return false;
+  }
+
+  return false;
 }
 
 /**
@@ -202,8 +209,8 @@ export function containsJSX(node: T.Node | null | undefined): boolean {
  * @param body - The block statement to check
  * @returns True if any return statement in the block contains JSX
  */
-function hasJSXReturn(body: T.BlockStatement): boolean {
-  const statements = body.body;
+function hasJSXReturn(body: ts.Block): boolean {
+  const statements = body.statements;
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
     if (!stmt) continue;
@@ -219,57 +226,57 @@ function hasJSXReturn(body: T.BlockStatement): boolean {
  * @param stmt - The statement to check
  * @returns True if the statement contains a return with JSX
  */
-function checkStatementForJSXReturn(stmt: T.Statement): boolean {
-  switch (stmt.type) {
-    case "ReturnStatement":
-      return containsJSX(stmt.argument);
-
-    case "IfStatement": {
-      if (stmt.consequent.type === "BlockStatement") {
-        if (hasJSXReturn(stmt.consequent)) return true;
-      } else if (stmt.consequent.type === "ReturnStatement" && containsJSX(stmt.consequent.argument)) {
-        return true;
-      }
-      // Check alternate
-      if (stmt.alternate) {
-        if (stmt.alternate.type === "BlockStatement") {
-          if (hasJSXReturn(stmt.alternate)) return true;
-        } else if (stmt.alternate.type === "ReturnStatement" && containsJSX(stmt.alternate.argument)) {
-          return true;
-        } else if (stmt.alternate.type === "IfStatement") {
-          if (checkStatementForJSXReturn(stmt.alternate)) return true;
-        }
-      }
-      return false;
-    }
-
-    case "SwitchStatement": {
-      const cases = stmt.cases;
-      for (let i = 0; i < cases.length; i++) {
-        const caseClause = cases[i];
-        if (!caseClause) continue;
-        const consequent = caseClause.consequent;
-        for (let j = 0; j < consequent.length; j++) {
-          const caseStmt = consequent[j];
-          if (!caseStmt) continue;
-          if (checkStatementForJSXReturn(caseStmt)) return true;
-        }
-      }
-      return false;
-    }
-
-    case "TryStatement":
-      if (hasJSXReturn(stmt.block)) return true;
-      if (stmt.handler && hasJSXReturn(stmt.handler.body)) return true;
-      if (stmt.finalizer && hasJSXReturn(stmt.finalizer)) return true;
-      return false;
-
-    case "BlockStatement":
-      return hasJSXReturn(stmt);
-
-    default:
-      return false;
+function checkStatementForJSXReturn(stmt: ts.Statement): boolean {
+  if (ts.isReturnStatement(stmt)) {
+    return containsJSX(stmt.expression);
   }
+
+  if (ts.isIfStatement(stmt)) {
+    if (ts.isBlock(stmt.thenStatement)) {
+      if (hasJSXReturn(stmt.thenStatement)) return true;
+    } else if (ts.isReturnStatement(stmt.thenStatement) && containsJSX(stmt.thenStatement.expression)) {
+      return true;
+    }
+    // Check alternate
+    if (stmt.elseStatement) {
+      if (ts.isBlock(stmt.elseStatement)) {
+        if (hasJSXReturn(stmt.elseStatement)) return true;
+      } else if (ts.isReturnStatement(stmt.elseStatement) && containsJSX(stmt.elseStatement.expression)) {
+        return true;
+      } else if (ts.isIfStatement(stmt.elseStatement)) {
+        if (checkStatementForJSXReturn(stmt.elseStatement)) return true;
+      }
+    }
+    return false;
+  }
+
+  if (ts.isSwitchStatement(stmt)) {
+    const clauses = stmt.caseBlock.clauses;
+    for (let i = 0; i < clauses.length; i++) {
+      const clause = clauses[i];
+      if (!clause) continue;
+      const stmts = clause.statements;
+      for (let j = 0; j < stmts.length; j++) {
+        const caseStmt = stmts[j];
+        if (!caseStmt) continue;
+        if (checkStatementForJSXReturn(caseStmt)) return true;
+      }
+    }
+    return false;
+  }
+
+  if (ts.isTryStatement(stmt)) {
+    if (hasJSXReturn(stmt.tryBlock)) return true;
+    if (stmt.catchClause && hasJSXReturn(stmt.catchClause.block)) return true;
+    if (stmt.finallyBlock && hasJSXReturn(stmt.finallyBlock)) return true;
+    return false;
+  }
+
+  if (ts.isBlock(stmt)) {
+    return hasJSXReturn(stmt);
+  }
+
+  return false;
 }
 
 /**
@@ -287,12 +294,13 @@ function checkStatementForJSXReturn(stmt: T.Statement): boolean {
  */
 export function isComponentFunction(node: FunctionNode): boolean {
   const body = node.body;
+  if (!body) return false;
 
   // Arrow function with JSX expression body is always a component
   if (containsJSX(body)) return true;
 
   // For block bodies, require PascalCase name AND JSX return
-  if (body.type !== "BlockStatement") return false;
+  if (!ts.isBlock(body)) return false;
 
   const name = getFunctionName(node);
   if (!name || !COMPONENT_PATTERN.test(name)) return false;

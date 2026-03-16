@@ -8,7 +8,6 @@
 import type { Fix } from "../../../diagnostic"
 import { createDiagnosticFromComment } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule"
-import { getSourceCode } from "../../queries/get"
 import {
   CHAR_NEWLINE,
   CHAR_SPACE,
@@ -112,7 +111,7 @@ export const noBannerComments = defineSolidRule({
   check(graph, emit) {
     if (options.minLength <= 0) return
 
-    const comments = getSourceCode(graph).getAllComments()
+    const comments = graph.comments
     if (comments.length === 0) return
 
     for (const comment of comments) {
@@ -120,7 +119,7 @@ export const noBannerComments = defineSolidRule({
       if (!hasBannerPattern(comment.value, options.minLength)) continue
 
       const fix: Fix = [{
-        range: [comment.range[0], comment.range[1]],
+        range: [comment.pos, comment.end],
         text: "",
       }]
       emit(

@@ -1,3 +1,4 @@
+import ts from "typescript";
 import type { CSSGraph } from "../css/impl";
 import type { SolidGraph } from "../solid/impl";
 import { getPropertyKeyName } from "../solid/util/pattern-detection";
@@ -112,9 +113,9 @@ export function getUndefinedVariableUsagesInJSX(
       const entry = props[i];
       if (!entry) continue;
       const prop = entry.property;
-      if (prop.type !== "Property") continue;
-      if (prop.computed) continue;
-      const keyName = getPropertyKeyName(prop.key);
+      if (!ts.isPropertyAssignment(prop)) continue;
+      if (ts.isComputedPropertyName(prop.name)) continue;
+      const keyName = getPropertyKeyName(prop.name);
       if (keyName === null) continue;
       if (keyName.charCodeAt(0) !== CHAR_HYPHEN || keyName.charCodeAt(1) !== CHAR_HYPHEN) continue;
       if (seen.has(keyName)) continue;

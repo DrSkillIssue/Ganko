@@ -1,30 +1,41 @@
 /**
  * Scope and context query functions
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { ScopeEntity, TrackingContext } from "../entities/scope";
 import type { VariableEntity } from "../entities/variable";
 import { UNKNOWN_CONTEXT } from "../entities/scope";
 
-export function getScopeFor(graph: SolidGraph, node: T.Node): ScopeEntity {
+/**
+ * Returns true if the node is a scope-creating node (function or block boundary).
+ */
+function isScopeNode(node: ts.Node): boolean {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isBlock(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node) ||
+    ts.isCaseBlock(node) ||
+    ts.isCatchClause(node) ||
+    ts.isSourceFile(node)
+  );
+}
+
+export function getScopeFor(graph: SolidGraph, node: ts.Node): ScopeEntity {
   const cached = graph.scopeForCache.get(node);
   if (cached) return cached;
 
-  const scopeManager = graph.sourceCode.scopeManager;
-  // Use inner=true to get innermost scope (e.g., module scope for Program node)
-  const eslintScope = scopeManager?.acquire(node, true);
-  if (eslintScope) {
-    const scopeEntity = graph.eslintScopeMap.get(eslintScope);
-    if (scopeEntity) {
-      graph.scopeForCache.set(node, scopeEntity);
-      return scopeEntity;
-    }
-  }
-
-  let pathNodes: T.Node[] | null = null;
+  let pathNodes: ts.Node[] | null = null;
   let foundScope: ScopeEntity | null = null;
-  let current: T.Node | undefined = node.parent;
+  let current: ts.Node | undefined = node.parent;
 
   while (current) {
     const cachedParent = graph.scopeForCache.get(current);
@@ -33,15 +44,19 @@ export function getScopeFor(graph: SolidGraph, node: T.Node): ScopeEntity {
       break;
     }
 
-    // Use inner=true to get innermost scope
-    const scope = scopeManager?.acquire(current, true);
-    if (scope) {
-      const scopeEntity = graph.eslintScopeMap.get(scope);
-      if (scopeEntity) {
-        foundScope = scopeEntity;
-        graph.scopeForCache.set(current, scopeEntity);
-        break;
+    if (isScopeNode(current)) {
+      // Find matching scope entity by node reference
+      const scopes = graph.scopes;
+      for (let i = 0, len = scopes.length; i < len; i++) {
+        const scope = scopes[i];
+        if (!scope) continue;
+        if (scope.node === current) {
+          foundScope = scope;
+          graph.scopeForCache.set(current, scope);
+          break;
+        }
       }
+      if (foundScope) break;
     }
 
     if (pathNodes === null) pathNodes = [current];

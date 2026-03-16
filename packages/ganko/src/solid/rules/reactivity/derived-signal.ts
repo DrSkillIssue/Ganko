@@ -22,7 +22,7 @@
  * - GOOD: const fn = () => count(); return <div>{fn()}</div>; // called in JSX
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { FunctionEntity, ReadEntity, TrackingContext } from "../../entities";
 import {
@@ -58,9 +58,9 @@ function isBoundaryFunction(graph: SolidGraph, fn: FunctionEntity): boolean {
   if (ctx?.type === "untracked") return true;
 
   const fnParent = fn.node.parent;
-  if (fnParent?.type === "JSXExpressionContainer") return true;
+  if (fnParent && ts.isJsxExpression(fnParent)) return true;
 
-  if (fnParent?.type === "CallExpression" && fnParent.callee !== fn.node) {
+  if (fnParent && ts.isCallExpression(fnParent) && fnParent.expression !== fn.node) {
     const call = graph.callsByNode.get(fnParent);
     if (call?.primitive) return true;
   }
@@ -151,7 +151,7 @@ export const derivedSignal = defineSolidRule({
         const { messageId, data } = getSpecificMessage(graph, read, variable.name, formattedVars);
         const msg = resolveMessage(messages[messageId], data);
 
-        emit(createDiagnostic(graph.file, read.node, "derived-signal", messageId, msg, "error"));
+        emit(createDiagnostic(graph.file, read.node, graph.sourceFile, "derived-signal", messageId, msg, "error"));
       }
     }
   },
@@ -234,14 +234,14 @@ function getSpecificMessage(
  * @returns Error message info
  */
 function getModuleScopeMessage(
-  _node: T.Node,
-  _callExpr: T.Node | undefined,
-  callParent: T.Node | undefined,
+  _node: ts.Node,
+  _callExpr: ts.Node | undefined,
+  callParent: ts.Node | undefined,
   fnName: string,
   vars: string,
 ): MessageInfo {
   // Check if assigned to a variable: const x = fn();
-  if (callParent?.type === "VariableDeclarator") {
+  if (callParent && ts.isVariableDeclaration(callParent)) {
     const varName = getDeclaratorName(callParent);
     if (varName) {
       return {
@@ -277,15 +277,15 @@ function getModuleScopeMessage(
  * @returns Error message info
  */
 function getComponentTopLevelMessage(
-  _node: T.Node,
-  _callExpr: T.Node | undefined,
-  callParent: T.Node | undefined,
+  _node: ts.Node,
+  _callExpr: ts.Node | undefined,
+  callParent: ts.Node | undefined,
   fnName: string,
   vars: string,
   componentName: string,
 ): MessageInfo {
   // Check if assigned to a variable: const x = fn();
-  if (callParent?.type === "VariableDeclarator") {
+  if (callParent && ts.isVariableDeclaration(callParent)) {
     const varName = getDeclaratorName(callParent);
     if (varName) {
       return {

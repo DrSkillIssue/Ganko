@@ -18,7 +18,7 @@
  *
  * Requires: scopes, entities, context, wiring, reactivity phases.
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import type { CallEntity } from "../entities/call";
@@ -94,7 +94,7 @@ function resolveCallback(call: CallEntity): FunctionEntity | null {
   if (!arg) return null;
 
   const node = arg.node;
-  if (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression") {
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     // The function entity is registered by the entities phase; resolve via scope
     // The resolvedTarget on the call won't help since this is an inline argument.
     // We need to find the FunctionEntity whose node matches.
@@ -108,7 +108,7 @@ function resolveCallback(call: CallEntity): FunctionEntity | null {
  * Finds the FunctionEntity for an inline function argument.
  * Uses the call's file's functions array for lookup.
  */
-function findFunctionByNode(call: CallEntity, node: T.Node): FunctionEntity | null {
+function findFunctionByNode(call: CallEntity, node: ts.Node): FunctionEntity | null {
   const functions = call.file.functions;
   for (let i = 0, len = functions.length; i < len; i++) {
     const fn = functions[i];
@@ -126,15 +126,15 @@ function findFunctionByNode(call: CallEntity, node: T.Node): FunctionEntity | nu
  */
 function resolveVariable(graph: SolidGraph, call: CallEntity): VariableEntity | null {
   const parent = call.node.parent;
-  if (!parent || parent.type !== "VariableDeclarator") return null;
+  if (!parent || !ts.isVariableDeclaration(parent)) return null;
 
-  const id = parent.id;
+  const id = parent.name;
   let name: string | null = null;
 
-  if (id.type === "Identifier") {
-    name = id.name;
-  } else if (id.type === "ArrayPattern" && id.elements[0]?.type === "Identifier") {
-    name = id.elements[0].name;
+  if (ts.isIdentifier(id)) {
+    name = id.text;
+  } else if (ts.isArrayBindingPattern(id) && id.elements[0] && ts.isBindingElement(id.elements[0]) && ts.isIdentifier(id.elements[0].name)) {
+    name = id.elements[0].name.text;
   }
 
   if (!name) return null;
@@ -292,23 +292,19 @@ function buildOwnershipEdges(graph: SolidGraph): void {
  * `store[idx]` → null (dynamic)
  * `store.foo[0].bar` → null (dynamic segment)
  */
-function extractPropertyPath(node: T.Node): readonly string[] | null {
+function extractPropertyPath(node: ts.Node): readonly string[] | null {
   const first = node.parent;
-  if (!first || first.type !== "MemberExpression") return null;
-  if (first.object !== node) return null;
+  if (!first || !ts.isPropertyAccessExpression(first)) return null;
+  if (first.expression !== node) return null;
 
   const path: string[] = [];
-  let member: T.MemberExpression = first;
+  let member: ts.PropertyAccessExpression = first;
 
   for (;;) {
-    if (member.computed) return null;
-
-    const prop = member.property;
-    if (prop.type !== "Identifier") return null;
-    path.push(prop.name);
+    path.push(member.name.text);
 
     const next = member.parent;
-    if (next && next.type === "MemberExpression" && next.object === member) {
+    if (next && ts.isPropertyAccessExpression(next) && next.expression === member) {
       member = next;
     } else {
       break;

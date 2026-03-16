@@ -39,6 +39,7 @@
  * ```
  */
 
+import ts from "typescript";
 import { HTML_VOID_ELEMENTS } from "@drskillissue/ganko-shared";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -108,12 +109,12 @@ function canSelfClose(children: readonly JSXChildEntity[]): boolean {
   const child = children[0];
   if (!child) return false;
   if (child.kind !== "text") return false;
-  if (child.node.type !== "JSXText") return false;
+  if (!ts.isJsxText(child.node)) return false;
 
-  if (child.node.value.indexOf("\n") === -1) return false;
+  if (child.node.text.indexOf("\n") === -1) return false;
 
   // Check if it's only whitespace (excluding non-breaking spaces)
-  return child.node.value.replace(NON_NBSP_WHITESPACE_G, "") === "";
+  return child.node.text.replace(NON_NBSP_WHITESPACE_G, "") === "";
 }
 
 const options = {
@@ -174,8 +175,8 @@ export const selfClosingComp = defineSolidRule({
         continue;
       }
 
-      // element.node must be JSXElement when tag is present
-      if (element.node.type !== "JSXElement") continue;
+      // element.node must be JsxElement when tag is present
+      if (!ts.isJsxElement(element.node)) continue;
       const jsxElement = element.node;
       const openingElement = jsxElement.openingElement;
 
@@ -191,26 +192,16 @@ export const selfClosingComp = defineSolidRule({
       const shouldSelfClose = shouldBeSelfClosed(elementType);
 
       // Case 1: Should be self-closing but isn't
-      // When !selfClosing, closingElement is guaranteed to exist by JSX grammar
-      if (shouldSelfClose && !openingElement.selfClosing) {
+      // JsxElement always has opening and closing elements
+      if (shouldSelfClose) {
         const closingElement = jsxElement.closingElement;
-        if (closingElement) {
-          const message = resolveMessage(messages.selfClose, { name: tagName });
-          const fix = [{
-            range: [openingElement.range[1] - 1, closingElement.range[1]] as const,
-            text: " />",
-          }];
-          emit(
-            createDiagnostic(graph.file, openingElement, "self-closing-comp", "selfClose", message, "warn", fix),
-          );
-        }
-      }
-
-      // Case 2: Shouldn't be self-closing but is
-      if (!shouldSelfClose && openingElement.selfClosing) {
-        const message = resolveMessage(messages.dontSelfClose, { name: tagName });
+        const message = resolveMessage(messages.selfClose, { name: tagName });
+        const fix = [{
+          range: [openingElement.end - 1, closingElement.end] as const,
+          text: " />",
+        }];
         emit(
-          createDiagnostic(graph.file, openingElement, "self-closing-comp", "dontSelfClose", message, "warn"),
+          createDiagnostic(graph.file, openingElement, graph.sourceFile, "self-closing-comp", "selfClose", message, "warn", fix),
         );
       }
     }

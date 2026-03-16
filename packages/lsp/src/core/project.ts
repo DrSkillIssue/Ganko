@@ -7,7 +7,7 @@
 import { createRunner, type Runner, type Diagnostic, type Plugin } from "@drskillissue/ganko";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
-import { createTypeScriptProjectService, type TypeScriptProjectService, type ProjectServiceOptions } from "./project-service";
+import { createIncrementalProgram, type IncrementalTypeScriptService } from "./incremental-program";
 import type { Logger } from "./logger";
 
 /** Project configuration */
@@ -27,26 +27,28 @@ export interface Project {
   /** Run plugins on files and get diagnostics */
   run(files: readonly string[]): readonly Diagnostic[]
 
-  /** Get TypeScript language service for cross-file features */
-  getLanguageService(path: string): ts.LanguageService | null
+  /** Get the current TypeScript program. */
+  getProgram(): ts.Program
 
-  /** Get script version string for cache invalidation */
-  getScriptVersion(path: string): string | null
+  /** Get a TypeScript source file by path. */
+  getSourceFile(path: string): ts.SourceFile | undefined
+
+  /** Get TypeScript language service for cross-file features */
+  getLanguageService(): ts.LanguageService
 
   /** Update in-memory file content for unsaved buffers */
   updateFile(path: string, content: string): void
-
-  /** Close a file in the TypeScript project service, releasing its resources. */
-  closeFile(path: string): void
-
-  /** Return the set of currently open file paths in the TypeScript project service. */
-  openFiles(): ReadonlySet<string>
 
   /** Update plugins configuration */
   setPlugins(plugins: readonly Plugin<string>[]): void
 
   /** Update rule severity overrides. Takes effect on next run(). */
   setRuleOverrides(overrides: RuleOverrides): void
+
+  /** Resolves when the underlying TypeScript program's initial build completes.
+   *  For IncrementalTypeScriptService (LSP), this defers the build by one
+   *  event loop tick to allow Tier 1 single-file diagnostics to fire first. */
+  watchProgramReady(): Promise<void>
 
   /** Dispose resources */
   dispose(): void
@@ -63,9 +65,7 @@ export function createProject(config: ProjectConfig): Project {
     ? createRunner({ plugins: config.plugins, rules: config.rules })
     : createRunner({ plugins: config.plugins });
 
-  const tsOptions: ProjectServiceOptions = { tsconfigRootDir: config.rootPath };
-  if (log !== undefined) tsOptions.log = log;
-  const tsService: TypeScriptProjectService = createTypeScriptProjectService(tsOptions);
+  const tsService: IncrementalTypeScriptService = createIncrementalProgram(config.rootPath);
 
   if (log?.enabled) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
 
@@ -77,24 +77,20 @@ export function createProject(config: ProjectConfig): Project {
       return result;
     },
 
-    getLanguageService(path) {
-      return tsService.getLanguageServiceForFile(path);
+    getProgram() {
+      return tsService.getProgram();
     },
 
-    getScriptVersion(path) {
-      return tsService.getScriptVersionForFile(path);
+    getSourceFile(path) {
+      return tsService.getProgram().getSourceFile(path);
+    },
+
+    getLanguageService() {
+      return tsService.getLanguageService();
     },
 
     updateFile(path, content) {
       tsService.updateFile(path, content);
-    },
-
-    closeFile(path) {
-      tsService.closeFile(path);
-    },
-
-    openFiles() {
-      return tsService.openFiles();
     },
 
     setPlugins(plugins) {
@@ -105,6 +101,10 @@ export function createProject(config: ProjectConfig): Project {
     setRuleOverrides(overrides) {
       if (log?.enabled) log.trace(`project.setRuleOverrides: ${Object.keys(overrides).length} overrides`);
       runner.setRuleOverrides(overrides);
+    },
+
+    watchProgramReady() {
+      return tsService.ready();
     },
 
     dispose() {

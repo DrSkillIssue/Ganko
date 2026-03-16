@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { VariableEntity } from "../../entities"
 import { getContainingFunction, getScopeFor, getVariableByNameInScope, typeIncludesString } from "../../queries"
@@ -29,7 +29,7 @@ const PARSE_PATH_HINTS = [
 
 const ASCII_HINTS = ["ascii", "latin1"] as const
 
-export function isLikelyStringParsingContext(graph: SolidGraph, node: T.Node): boolean {
+export function isLikelyStringParsingContext(graph: SolidGraph, node: ts.Node): boolean {
   if (hasAnyHint(graph.file.toLowerCase(), PARSE_PATH_HINTS)) return true
 
   const fn = getContainingFunction(graph, node)
@@ -38,7 +38,7 @@ export function isLikelyStringParsingContext(graph: SolidGraph, node: T.Node): b
   return hasAnyHint(name, PARSE_NAME_HINTS)
 }
 
-export function isAsciiParsingContext(graph: SolidGraph, node: T.Node): boolean {
+export function isAsciiParsingContext(graph: SolidGraph, node: ts.Node): boolean {
   const path = graph.file.toLowerCase()
   if (hasAnyHint(path, ASCII_HINTS)) return true
 
@@ -54,18 +54,18 @@ export function isStringLikeVariable(_graph: SolidGraph, variable: VariableEntit
   for (let i = 0; i < variable.declarations.length; i++) {
     const declaration = variable.declarations[i]
     if (!declaration) continue;
-    if (declaration.type !== "Identifier") continue
+    if (!ts.isIdentifier(declaration)) continue
 
     if (hasStringAnnotation(declaration)) return true
 
     const parent = declaration.parent
     if (!parent) continue
 
-    if (parent.type === "VariableDeclarator" && parent.init && isStringExpression(parent.init)) {
+    if (ts.isVariableDeclaration(parent) && parent.initializer && isStringExpression(parent.initializer)) {
       return true
     }
 
-    if (parent.type === "AssignmentPattern" && isStringExpression(parent.right)) {
+    if (ts.isParameter(parent) && parent.initializer && isStringExpression(parent.initializer)) {
       return true
     }
   }
@@ -82,41 +82,47 @@ export function isStringLikeVariable(_graph: SolidGraph, variable: VariableEntit
 
 export function isStringLikeReceiver(
   graph: SolidGraph,
-  node: T.Node,
+  node: ts.Node,
   variable: VariableEntity | null,
 ): boolean {
   if (variable && isStringLikeVariable(graph, variable)) return true
-  if (node.type === "Identifier") {
+  if (ts.isIdentifier(node)) {
     const resolved = resolveVariableForIdentifier(graph, node)
     if (resolved && isStringLikeVariable(graph, resolved)) return true
   }
   if (typeIncludesString(graph, node)) return true
-  if (node.type === "Literal" && typeof node.value === "string") return true
-  if (node.type === "TemplateLiteral") return true
+  if (ts.isStringLiteral(node)) return true
+  if (ts.isTemplateExpression(node) || ts.isNoSubstitutionTemplateLiteral(node)) return true
 
   return false
 }
 
 export function resolveVariableForIdentifier(
   graph: SolidGraph,
-  node: T.Identifier,
+  node: ts.Identifier,
 ): VariableEntity | null {
   const scope = getScopeFor(graph, node)
-  return getVariableByNameInScope(graph, node.name, scope)
+  return getVariableByNameInScope(graph, node.text, scope)
 }
 
-function hasStringAnnotation(node: T.Identifier): boolean {
-  const annotation = node.typeAnnotation
-  if (!annotation) return false
-  const typeNode = annotation.typeAnnotation
+function hasStringAnnotation(node: ts.Identifier): boolean {
+  const parent = node.parent
+  if (!parent) return false
 
-  if (typeNode.type === "TSStringKeyword") return true
-  if (typeNode.type !== "TSUnionType") return false
+  // Check for type annotation on variable declaration or parameter
+  let typeNode: ts.TypeNode | undefined
+  if (ts.isVariableDeclaration(parent) || ts.isParameter(parent)) {
+    typeNode = parent.type
+  }
+  if (!typeNode) return false
+
+  if (typeNode.kind === ts.SyntaxKind.StringKeyword) return true
+  if (!ts.isUnionTypeNode(typeNode)) return false
 
   for (let i = 0; i < typeNode.types.length; i++) {
     const t = typeNode.types[i];
     if (!t) continue;
-    if (t.type === "TSStringKeyword") return true
+    if (t.kind === ts.SyntaxKind.StringKeyword) return true
   }
   return false
 }

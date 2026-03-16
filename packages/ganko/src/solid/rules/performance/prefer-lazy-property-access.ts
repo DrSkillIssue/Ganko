@@ -4,7 +4,7 @@
  * is not read before or within the first early return context.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { SolidGraph } from "../../impl"
@@ -22,39 +22,33 @@ const messages = {
 const options = {};
 
 /**
- * Extracts the property name from a variable's MemberExpression assignment.
+ * Extracts the property name from a variable's PropertyAccessExpression assignment.
  *
  * @param variable - The VariableEntity to extract from
  * @returns The property name as a string, or "property" if not extractable
  */
 function getPropertyName(variable: VariableEntity): string {
-  if (variable.assignments.length === 0) return "property"
+  const value = variable.initializer
+  if (!value || !ts.isPropertyAccessExpression(value)) return "property"
 
-  const first = variable.assignments[0]
-  if (!first) return "property"
-
-  const value = first.value
-  if (value.type !== "MemberExpression") return "property"
-
-  const property = value.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
+  const property = value.name
+  if (ts.isIdentifier(property)) return property.text
 
   return "property"
 }
 
-function getContainingIfStatement(ret: T.ReturnStatement): T.IfStatement | null {
+function getContainingIfStatement(ret: ts.ReturnStatement): ts.IfStatement | null {
   const parent = ret.parent
   if (!parent) return null
 
-  if (parent.type === "IfStatement" && parent.consequent === ret) {
+  if (ts.isIfStatement(parent) && parent.thenStatement === ret) {
     return parent
   }
 
-  if (parent.type !== "BlockStatement") return null
+  if (!ts.isBlock(parent)) return null
   const maybeIf = parent.parent
-  if (!maybeIf || maybeIf.type !== "IfStatement") return null
-  if (maybeIf.consequent !== parent) return null
+  if (!maybeIf || !ts.isIfStatement(maybeIf)) return null
+  if (maybeIf.thenStatement !== parent) return null
   return maybeIf
 }
 
@@ -80,21 +74,20 @@ function hasReadInEarlyReturnContext(
     const ret = earlyReturns[i];
     if (!ret) continue;
     const ifStmt = getContainingIfStatement(ret.node)
-    if (ifStmt && ifStmt.range) {
-      ifRanges.push(ifStmt.range)
-      if (ifStmt.range[0] < earliest) earliest = ifStmt.range[0]
+    if (ifStmt) {
+      const range: readonly [number, number] = [ifStmt.pos, ifStmt.end]
+      ifRanges.push(range)
+      if (ifStmt.pos < earliest) earliest = ifStmt.pos
     } else {
-      const range = ret.node.range
-      if (range && range[0] < earliest) earliest = range[0]
+      const pos = ret.node.pos
+      if (pos < earliest) earliest = pos
     }
   }
 
   for (let i = 0, len = reads.length; i < len; i++) {
     const read = reads[i];
     if (!read) continue;
-    const range = read.node.range
-    if (!range) continue
-    const pos = range[0]
+    const pos = read.node.pos
 
     if (pos > assignmentPos && pos < earliest) return true
 
@@ -113,18 +106,14 @@ function hasReadInEarlyReturnContext(
  * be relocated — intermediate code mutates the source before later use.
  */
 function isThisMemberAccess(variable: VariableEntity): boolean {
-  if (variable.assignments.length === 0) return false
-  const first = variable.assignments[0]
-  if (!first) return false
-  const value = first.value
-  return value.type === "MemberExpression" && value.object.type === "ThisExpression"
+  const value = variable.initializer
+  return value !== null && ts.isPropertyAccessExpression(value) && value.expression.kind === ts.SyntaxKind.ThisKeyword
 }
 
 function getContainingFunctionForVariable(variable: VariableEntity, graph: SolidGraph): FunctionEntity | null {
-  if (variable.assignments.length === 0) return null
-  const first = variable.assignments[0]
-  if (!first) return null
-  return getContainingFunction(graph, first.node)
+  const decl = variable.declarations[0]
+  if (!decl) return null
+  return getContainingFunction(graph, decl)
 }
 
 export const preferLazyPropertyAccess = defineSolidRule({
@@ -143,10 +132,7 @@ export const preferLazyPropertyAccess = defineSolidRule({
 
     for (const variable of candidates) {
       if (variable.reads.length === 0) continue
-      if (variable.assignments.length === 0) continue
-
-      const first = variable.assignments[0]
-      if (!first) continue
+      if (!variable.initializer) continue
 
       if (isThisMemberAccess(variable)) continue
 
@@ -156,16 +142,17 @@ export const preferLazyPropertyAccess = defineSolidRule({
       const earlyReturns = getEarlyReturns(fn)
       if (earlyReturns.length === 0) continue
 
-      const assignmentRange = first.node.range
-      if (!assignmentRange) continue
-      const assignmentPos = assignmentRange[0]
+      const decl = variable.declarations[0]
+      if (!decl) continue
+      const assignmentPos = decl.pos
+      if (assignmentPos === undefined) continue
 
       let firstReturnPos = Infinity
       for (let i = 0, len = earlyReturns.length; i < len; i++) {
         const er = earlyReturns[i];
         if (!er) continue;
-        const range = er.node.range
-        if (range && range[0] < firstReturnPos) firstReturnPos = range[0]
+        const pos = er.node.pos
+        if (pos < firstReturnPos) firstReturnPos = pos
       }
       if (firstReturnPos === Infinity) continue
       if (assignmentPos >= firstReturnPos) continue
@@ -177,7 +164,8 @@ export const preferLazyPropertyAccess = defineSolidRule({
       emit(
         createDiagnostic(
           graph.file,
-          first.node,
+          decl,
+          graph.sourceFile,
           "prefer-lazy-property-access",
           "preferLazyPropertyAccess",
           resolveMessage(messages.preferLazyPropertyAccess, {

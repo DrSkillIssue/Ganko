@@ -9,7 +9,7 @@
  */
 
 // Diagnostic model
-export type { Diagnostic, Fix, FixOperation } from "./diagnostic"
+export type { Diagnostic, Fix, FixOperation, CommentEntry } from "./diagnostic"
 
 // Plugin contract
 export type { Plugin } from "./graph"
@@ -23,7 +23,7 @@ export { GraphCache } from "./cache"
 
 // Solid plugin
 export { SolidPlugin, analyzeInput, buildSolidGraph, runSolidRules } from "./solid"
-export { parseFile, parseContent, parseContentWithProgram } from "./solid"
+export { createSolidInput } from "./solid"
 export type { SolidGraph, SolidInput } from "./solid"
 export type { VariableEntity, ReactiveKind, ReadEntity } from "./solid"
 export type { ComputationEntity, DependencyEdge } from "./solid"

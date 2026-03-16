@@ -8,7 +8,6 @@
  * - Mark variables as reactive based on their types
  */
 
-import { TSESTree as T, type ParserServices } from "@typescript-eslint/utils";
 import ts from "typescript";
 import type { Logger } from "@drskillissue/ganko-shared";
 import { noopLogger } from "@drskillissue/ganko-shared";
@@ -70,46 +69,17 @@ const COMPONENT_TYPE_NAMES = new Set([
 ]);
 
 /**
- * Parser services with type information
- */
-interface TypedParserServices {
-  program: ts.Program;
-  getTypeAtLocation: (node: T.Node) => ts.Type;
-  getSymbolAtLocation: (node: T.Node) => ts.Symbol | undefined;
-}
-
-/**
  * Service for resolving TypeScript types from ESLint parser services.
  */
 export class TypeResolver {
-  private services: TypedParserServices | null = null;
-  private typeChecker: ts.TypeChecker | null = null;
-  private typeCache = new WeakMap<T.Node, TypeInfo | null>();
+  private readonly checker: ts.TypeChecker;
+  private typeCache = new WeakMap<ts.Node, TypeInfo | null>();
   private solidSymbolCache = new Map<ts.Symbol, boolean>();
   readonly logger: Logger;
 
-  constructor(logger?: Logger) {
+  constructor(checker: ts.TypeChecker, logger?: Logger) {
+    this.checker = checker;
     this.logger = logger ?? noopLogger;
-  }
-
-  /**
-   * Configure the type resolver with ESLint parser services.
-   *
-   * Returns true if TypeScript services are available, false otherwise.
-   * When false, all type queries will return null/false gracefully.
-   */
-  initialize(parserServices: Partial<ParserServices> | undefined): boolean {
-    const typedServices = getTypedParserServices(parserServices);
-    if (!typedServices) {
-      this.services = null;
-      this.typeChecker = null;
-      return false;
-    }
-
-    this.services = typedServices;
-    this.typeChecker = typedServices.program.getTypeChecker();
-    this.solidSymbolCache.clear();
-    return true;
   }
 
 
@@ -147,7 +117,7 @@ export class TypeResolver {
    * Check if TypeScript services are available.
    */
   hasTypeInfo(): boolean {
-    return this.services !== null;
+    return true;
   }
 
   /**
@@ -156,19 +126,20 @@ export class TypeResolver {
    * Returns null if TypeScript services are not available or if the type
    * cannot be determined.
    */
-  getType(node: T.Node): TypeInfo | null {
-    if (!this.services || !this.typeChecker) {
-      return null;
-    }
-
+  getType(node: ts.Node): TypeInfo | null {
     const cached = this.typeCache.get(node);
     if (cached !== undefined) {
       return cached;
     }
 
     try {
-      const tsType = this.services.getTypeAtLocation(node);
-      const typeInfo = this.analyzeType(tsType, this.typeChecker);
+      const tsType = this.checker.getTypeAtLocation(node);
+      const flags = tsType.getFlags();
+      if (flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) {
+        this.typeCache.set(node, null);
+        return null;
+      }
+      const typeInfo = this.analyzeType(tsType, this.checker);
 
       this.typeCache.set(node, typeInfo);
       return typeInfo;
@@ -181,7 +152,7 @@ export class TypeResolver {
   /**
    * Check if a node's type is an Accessor type (Accessor<T>).
    */
-  isAccessorType(node: T.Node): boolean {
+  isAccessorType(node: ts.Node): boolean {
     const typeInfo = this.getType(node);
     return typeInfo?.isAccessor ?? false;
   }
@@ -189,7 +160,7 @@ export class TypeResolver {
   /**
    * Check if a node's type is a Signal type (Signal<T>).
    */
-  isSignalType(node: T.Node): boolean {
+  isSignalType(node: ts.Node): boolean {
     const typeInfo = this.getType(node);
     return typeInfo?.isSignal ?? false;
   }
@@ -197,7 +168,7 @@ export class TypeResolver {
   /**
    * Check if a node's type is a Store type (Store<T>).
    */
-  isStoreType(node: T.Node): boolean {
+  isStoreType(node: ts.Node): boolean {
     const typeInfo = this.getType(node);
     return typeInfo?.isStore ?? false;
   }
@@ -205,7 +176,7 @@ export class TypeResolver {
   /**
    * Check if a node's type is a Component type (Component<P>).
    */
-  isComponentType(node: T.Node): boolean {
+  isComponentType(node: ts.Node): boolean {
     const typeInfo = this.getType(node);
     return typeInfo?.isComponent ?? false;
   }
@@ -215,7 +186,7 @@ export class TypeResolver {
    *
    * Returns null if the type is not reactive.
    */
-  getReactiveKind(node: T.Node): ReactiveKind | null {
+  getReactiveKind(node: ts.Node): ReactiveKind | null {
     const typeInfo = this.getType(node);
     if (!typeInfo) return null;
 
@@ -229,7 +200,7 @@ export class TypeResolver {
   /**
    * Get both reactive kind AND type info in a single call.
    */
-  getReactiveKindWithType(node: T.Node): { kind: ReactiveKind | null; type: TypeInfo | null } {
+  getReactiveKindWithType(node: ts.Node): { kind: ReactiveKind | null; type: TypeInfo | null } {
     const typeInfo = this.getType(node);
     if (!typeInfo) return NULL_REACTIVE_RESULT;
 
@@ -248,14 +219,10 @@ export class TypeResolver {
    * @param node The array expression node (e.g., props.users in `<For each={props.users}>`)
    * @returns "primitive" | "object" | "unknown"
    */
-  getArrayElementKind(node: T.Node): "primitive" | "object" | "unknown" {
-    if (!this.services || !this.typeChecker) {
-      return "unknown";
-    }
-
+  getArrayElementKind(node: ts.Node): "primitive" | "object" | "unknown" {
     try {
-      const tsType = this.services.getTypeAtLocation(node);
-      const elementType = getArrayElementType(tsType, this.typeChecker);
+      const tsType = this.checker.getTypeAtLocation(node);
+      const elementType = getArrayElementType(tsType, this.checker);
 
       if (!elementType) {
         return "unknown";
@@ -271,13 +238,9 @@ export class TypeResolver {
    * Check if a node's type is an array type.
    * Detects Array<T>, T[], ReadonlyArray<T>, and tuple types.
    */
-  isArrayType(node: T.Node): boolean {
-    if (!this.services || !this.typeChecker) {
-      return false;
-    }
-
+  isArrayType(node: ts.Node): boolean {
     try {
-      const tsType = this.services.getTypeAtLocation(node);
+      const tsType = this.checker.getTypeAtLocation(node);
       return this.checkIsArrayType(tsType);
     } catch {
       return false;
@@ -300,10 +263,8 @@ export class TypeResolver {
       }
 
       // Check for array-like via type checker
-      if (this.typeChecker) {
-        const indexType = this.typeChecker.getIndexTypeOfType(tsType, ts.IndexKind.Number);
-        if (indexType) return true;
-      }
+      const indexType = this.checker.getIndexTypeOfType(tsType, ts.IndexKind.Number);
+      if (indexType) return true;
     }
 
     // Union types - check if any constituent is array
@@ -320,13 +281,9 @@ export class TypeResolver {
    * Check if a node's type is callable (has call signatures).
    * Detects functions, arrow functions, and callable objects.
    */
-  isCallableType(node: T.Node): boolean {
-    if (!this.services || !this.typeChecker) {
-      return false;
-    }
-
+  isCallableType(node: ts.Node): boolean {
     try {
-      const tsType = this.services.getTypeAtLocation(node);
+      const tsType = this.checker.getTypeAtLocation(node);
       const signatures = tsType.getCallSignatures();
       return signatures.length > 0;
     } catch {
@@ -346,14 +303,10 @@ export class TypeResolver {
    * @param targetType - The TypeNode being cast to
    * @returns true if the cast is unnecessary, false otherwise
    */
-  isUnnecessaryCast(expression: T.Expression, targetType: T.TypeNode): boolean {
-    if (!this.services || !this.typeChecker) {
-      return false;
-    }
-
+  isUnnecessaryCast(expression: ts.Expression, targetType: ts.TypeNode): boolean {
     try {
-      const exprTsType = this.services.getTypeAtLocation(expression);
-      const targetTsType = this.services.getTypeAtLocation(targetType);
+      const exprTsType = this.checker.getTypeAtLocation(expression);
+      const targetTsType = this.checker.getTypeAtLocation(targetType);
 
       // `any` is assignable to everything — casting FROM `any` is a narrowing
       // operation that adds type safety, and casting TO `any` makes every
@@ -363,11 +316,11 @@ export class TypeResolver {
 
       // Check if expression type is assignable to target type
       // If assignable, the cast is unnecessary
-      const result = this.typeChecker.isTypeAssignableTo(exprTsType, targetTsType);
+      const result = this.checker.isTypeAssignableTo(exprTsType, targetTsType);
 
       if (this.logger.enabled) {
-        const exprStr = this.typeChecker.typeToString(exprTsType);
-        const targetStr = this.typeChecker.typeToString(targetTsType);
+        const exprStr = this.checker.typeToString(exprTsType);
+        const targetStr = this.checker.typeToString(targetTsType);
         this.logger.debug(`isUnnecessaryCast: expr="${exprStr.slice(0, 120)}" target="${targetStr.slice(0, 120)}" assignable=${result} exprFlags=${exprTsType.flags} targetFlags=${targetTsType.flags}`);
       }
 
@@ -381,14 +334,10 @@ export class TypeResolver {
    * Get a human-readable string for a TypeScript type at a node.
    * Returns null if type info is unavailable.
    */
-  getTypeString(node: T.Node): string | null {
-    if (!this.services || !this.typeChecker) {
-      return null;
-    }
-
+  getTypeString(node: ts.Node): string | null {
     try {
-      const tsType = this.services.getTypeAtLocation(node);
-      return this.typeChecker.typeToString(tsType);
+      const tsType = this.checker.getTypeAtLocation(node);
+      return this.checker.typeToString(tsType);
     } catch {
       return null;
     }
@@ -402,13 +351,9 @@ export class TypeResolver {
    * @param propertyName The property name to look for
    * @returns true if property exists on type, false otherwise
    */
-  hasPropertyOnType(objectNode: T.Node, propertyName: string): boolean {
-    if (!this.services || !this.typeChecker) {
-      return false;
-    }
-
+  hasPropertyOnType(objectNode: ts.Node, propertyName: string): boolean {
     try {
-      const tsType = this.services.getTypeAtLocation(objectNode);
+      const tsType = this.checker.getTypeAtLocation(objectNode);
       return this.checkPropertyOnType(tsType, propertyName);
     } catch {
       // When type resolution fails (ESTree↔TSNode mapping gaps, stale program state),
@@ -448,13 +393,9 @@ export class TypeResolver {
    * @param includeCallable Include function-typed properties (for JSX props)
    * @returns Array of property info or null if not expandable
    */
-  getObjectProperties(node: T.Node, maxProperties = 10, includeCallable = false): readonly ObjectPropertyInfo[] | null {
-    if (!this.services || !this.typeChecker) {
-      return null;
-    }
-
+  getObjectProperties(node: ts.Node, maxProperties = 10, includeCallable = false): readonly ObjectPropertyInfo[] | null {
     try {
-      const tsType = this.services.getTypeAtLocation(node);
+      const tsType = this.checker.getTypeAtLocation(node);
       return this.extractObjectProperties(tsType, maxProperties, includeCallable);
     } catch {
       return null;
@@ -472,8 +413,6 @@ export class TypeResolver {
    * @param includeCallable Whether to include function-typed properties
    */
   private extractObjectProperties(tsType: ts.Type, maxProperties: number, includeCallable: boolean): readonly ObjectPropertyInfo[] | null {
-    if (!this.typeChecker) return null;
-
     // Skip union types - too complex to expand safely
     if (tsType.isUnion()) return null;
 
@@ -484,8 +423,8 @@ export class TypeResolver {
     if (!(tsType.flags & (524288 | 2097152))) return null; // TypeFlags.Object | TypeFlags.Intersection
 
     // Check for index signatures - can't expand dynamic keys
-    const stringIndex = this.typeChecker.getIndexTypeOfType(tsType, ts.IndexKind.String);
-    const numberIndex = this.typeChecker.getIndexTypeOfType(tsType, ts.IndexKind.Number);
+    const stringIndex = this.checker.getIndexTypeOfType(tsType, ts.IndexKind.String);
+    const numberIndex = this.checker.getIndexTypeOfType(tsType, ts.IndexKind.Number);
     if (stringIndex || numberIndex) return null;
 
     // Get declared properties
@@ -494,7 +433,7 @@ export class TypeResolver {
     if (properties.length > maxProperties) return null;
 
     const result: ObjectPropertyInfo[] = [];
-    const checker = this.typeChecker;
+    const checker = this.checker;
 
     for (const prop of properties) {
       const name = prop.getName();
@@ -534,11 +473,9 @@ export class TypeResolver {
    * @param tagNode - The JSX identifier node (e.g. the `ConfirmActionDialog` in `<ConfirmActionDialog>`)
    * @returns Property info or null if not resolvable
    */
-  getComponentPropsProperties(tagNode: T.Node): readonly ObjectPropertyInfo[] | null {
-    if (!this.services || !this.typeChecker) return null;
-
+  getComponentPropsProperties(tagNode: ts.Node): readonly ObjectPropertyInfo[] | null {
     try {
-      const componentType = this.services.getTypeAtLocation(tagNode);
+      const componentType = this.checker.getTypeAtLocation(tagNode);
       const signatures = componentType.getCallSignatures();
       if (signatures.length === 0) return null;
 
@@ -553,7 +490,7 @@ export class TypeResolver {
       const declaration = propsParam.valueDeclaration ?? propsParam.declarations?.[0];
       if (!declaration) return null;
 
-      const propsType = this.typeChecker.getTypeOfSymbolAtLocation(propsParam, declaration);
+      const propsType = this.checker.getTypeOfSymbolAtLocation(propsParam, declaration);
       return this.extractObjectProperties(propsType, 20, true);
     } catch {
       return null;
@@ -631,7 +568,7 @@ export class TypeResolver {
     }
 
     // Structural check: [Accessor<T>, Setter<T>] tuple from createSignal
-    if (this.typeChecker && isTupleType(tsType)) {
+    if (isTupleType(tsType)) {
       const typeArgs = getTypeArguments(tsType);
       if (typeArgs?.length === 2) {
         const first = typeArgs[0];
@@ -685,32 +622,6 @@ export class TypeResolver {
 
     return this.isSymbolFromSolid(symbol);
   }
-}
-
-/**
- * Check if parser services have type information available and extract typed services.
- *
- * @param services - The parser services object to check
- * @returns Typed parser services if available, null otherwise
- */
-function getTypedParserServices(services: Partial<ParserServices> | undefined): TypedParserServices | null {
-  if (
-    !services ||
-    !("program" in services) ||
-    !services.program ||
-    !("getTypeAtLocation" in services) ||
-    typeof services.getTypeAtLocation !== "function"
-  ) {
-    return null;
-  }
-
-  return {
-    program: services.program,
-    getTypeAtLocation: services.getTypeAtLocation,
-    getSymbolAtLocation: "getSymbolAtLocation" in services && typeof services.getSymbolAtLocation === "function"
-      ? services.getSymbolAtLocation
-      : () => undefined,
-  };
 }
 
 /**
@@ -939,6 +850,6 @@ function getTypeInternals(type: ts.Type): {
  * @param logger - Logger for debug output
  * @returns New TypeResolver
  */
-export function createTypeResolver(logger?: Logger): TypeResolver {
-  return new TypeResolver(logger);
+export function createTypeResolver(checker: ts.TypeChecker, logger?: Logger): TypeResolver {
+  return new TypeResolver(checker, logger);
 }

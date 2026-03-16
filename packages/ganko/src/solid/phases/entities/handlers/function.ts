@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { ParameterEntity } from "../../../entities/function";
 import { createFunction } from "../../../entities/function";
@@ -8,7 +8,7 @@ import { getFunctionName, getFunctionVariableName, getParameterName, getDeclarat
 import { visitParameterTypeAnnotation, visitTypeNode } from "../visitors/type";
 import { handleTypePredicate } from "./assertion";
 
-export function handleFunction(ctx: VisitorContext, node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression): void {
+export function handleFunction(ctx: VisitorContext, node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration): void {
   const graph = ctx.graph;
   const file = ctx.file;
   const scope = getScopeFor(graph, node);
@@ -16,8 +16,8 @@ export function handleFunction(ctx: VisitorContext, node: T.FunctionDeclaration 
   const variableName = getFunctionVariableName(node);
 
   const params: ParameterEntity[] = [];
-  for (let i = 0, len = node.params.length; i < len; i++) {
-    const param = node.params[i];
+  for (let i = 0, len = node.parameters.length; i < len; i++) {
+    const param = node.parameters[i];
     if (!param) continue;
     params.push({
       id: graph.nextMiscId(),
@@ -28,11 +28,11 @@ export function handleFunction(ctx: VisitorContext, node: T.FunctionDeclaration 
     visitParameterTypeAnnotation(ctx, param);
   }
 
-  if (node.returnType) {
-    const returnTypeNode = node.returnType.typeAnnotation;
+  if (node.type) {
+    const returnTypeNode = node.type;
     visitTypeNode(ctx, returnTypeNode);
 
-    if (returnTypeNode.type === "TSTypePredicate") {
+    if (ts.isTypePredicateNode(returnTypeNode)) {
       handleTypePredicate(ctx, node, returnTypeNode);
     }
   }

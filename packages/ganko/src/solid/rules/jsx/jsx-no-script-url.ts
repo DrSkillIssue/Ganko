@@ -19,7 +19,7 @@
  * @see https://infra.spec.whatwg.org/#ascii-tab-or-newline
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { Diagnostic, Fix } from "../../../diagnostic"
 import type { SolidGraph } from "../../impl";
 import type { JSXAttributeEntity, JSXElementEntity } from "../../entities/jsx";
@@ -29,7 +29,6 @@ import { createDiagnostic } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import { getStaticStringValue } from "../../util/static-value";
 import { getVariableByNameInScope } from "../../queries/scope";
-import { getVariableAssignments } from "../../queries/entity";
 import { getJSXAttributesByKind } from "../../queries/jsx";
 
 const messages = {
@@ -87,12 +86,12 @@ function isJavaScriptUrl(value: string | null): boolean {
  * @returns The static string value, or null if not resolvable
  */
 function resolveVariableToStringUses(
-  identifier: T.Identifier,
+  identifier: ts.Identifier,
   graph: SolidGraph,
   scope: ScopeEntity,
   visited: Set<string> = new Set(),
 ): string | null {
-  const name = identifier.name;
+  const name = identifier.text;
 
   if (visited.has(name)) {
     return null;
@@ -105,21 +104,15 @@ function resolveVariableToStringUses(
     return null;
   }
 
-  const assignments = getVariableAssignments(variable);
-  if (assignments.length === 0) {
-    return null;
-  }
+  const value = variable.initializer;
+  if (!value) return null;
 
-  const firstAssignment = assignments[0];
-  if (!firstAssignment) return null;
-  const value = firstAssignment.value;
   const staticValue = getStaticStringValue(value);
-
   if (staticValue !== null) {
     return staticValue;
   }
 
-  if (value.type === "Identifier") {
+  if (ts.isIdentifier(value)) {
     return resolveVariableToStringUses(value, graph, scope, visited);
   }
 
@@ -130,21 +123,22 @@ function resolveVariableToStringUses(
  * Build a fix to remove or replace javascript: URL.
  *
  * @param attr - The JSX attribute entity
+ * @param sourceFile - The source file for position calculations
  * @returns Fix object or undefined if not fixable
  */
-function buildScriptUrlFix(attr: JSXAttributeEntity): Fix | undefined {
-  if (attr.node.type !== "JSXAttribute" || !attr.node.value) return undefined;
+function buildScriptUrlFix(attr: JSXAttributeEntity, sourceFile: ts.SourceFile): Fix | undefined {
+  if (!ts.isJsxAttribute(attr.node) || !attr.node.initializer) return undefined;
 
-  const valueNode = attr.node.value;
+  const valueNode = attr.node.initializer;
 
-  if (valueNode.type === "Literal" && typeof valueNode.value === "string") {
-    return [{ range: [valueNode.range[0], valueNode.range[1]], text: '"#"' }];
+  if (ts.isStringLiteral(valueNode)) {
+    return [{ range: [valueNode.getStart(sourceFile), valueNode.end], text: '"#"' }];
   }
 
-  if (valueNode.type === "JSXExpressionContainer") {
+  if (ts.isJsxExpression(valueNode)) {
     const expr = valueNode.expression;
-    if (expr.type === "Literal" && typeof expr.value === "string") {
-      return [{ range: [expr.range[0], expr.range[1]], text: '"#"' }];
+    if (expr && ts.isStringLiteral(expr)) {
+      return [{ range: [expr.getStart(sourceFile), expr.end], text: '"#"' }];
     }
   }
 
@@ -173,16 +167,16 @@ function checkAttributeForScriptUrl(
 
   let staticValue = getStaticStringValue(valueExpr);
 
-  if (staticValue === null && valueExpr.type === "Identifier") {
+  if (staticValue === null && ts.isIdentifier(valueExpr)) {
     staticValue = resolveVariableToStringUses(valueExpr, graph, element.scope);
   }
 
   if (staticValue !== null && isJavaScriptUrl(staticValue)) {
-    const reportNode = attr.node.type === "JSXAttribute" && attr.node.value
-      ? attr.node.value
+    const reportNode = ts.isJsxAttribute(attr.node) && attr.node.initializer
+      ? attr.node.initializer
       : attr.node;
 
-    return createDiagnostic(file, reportNode, "jsx-no-script-url", "noJSURL", messages.noJSURL, "error", buildScriptUrlFix(attr));
+    return createDiagnostic(file, reportNode, graph.sourceFile, "jsx-no-script-url", "noJSURL", messages.noJSURL, "error", buildScriptUrlFix(attr, graph.sourceFile));
   }
 
   return null;

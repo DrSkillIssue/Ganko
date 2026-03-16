@@ -5,7 +5,7 @@
  * used in hot paths (loops) or repeatedly within a function.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { FunctionEntity, VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -25,7 +25,7 @@ const MIN_LITERAL_COUNT = 8
 interface UsageInfo {
   count: number
   inLoop: boolean
-  node: T.Node
+  node: ts.Node
   fnName: string
 }
 
@@ -57,6 +57,7 @@ export const preferMapLookupOverLinearScan = defineSolidRule({
           createDiagnostic(
             graph.file,
             usage.node,
+            graph.sourceFile,
             "prefer-map-lookup-over-linear-scan",
             "preferMapLookup",
             resolveMessage(messages.preferMapLookup, {
@@ -73,40 +74,34 @@ export const preferMapLookupOverLinearScan = defineSolidRule({
 
 function isFixedLiteralArray(variable: VariableEntity): boolean {
   if (variable.declarations.length === 0) return false
-  if (variable.assignments.length !== 1) return false
-
-  const firstAssignment = variable.assignments[0]
-  if (!firstAssignment) return false
-  if (firstAssignment.operator !== null) return false
-  if (firstAssignment.value.type !== "ArrayExpression") return false
+  const init = variable.initializer
+  if (!init || !ts.isArrayLiteralExpression(init)) return false
 
   for (let i = 0; i < variable.declarations.length; i++) {
     const decl = variable.declarations[i]
     if (!decl) continue;
-    if (decl.type !== "Identifier") return false
+    if (!ts.isIdentifier(decl)) return false
 
     const declarator = decl.parent
-    if (!declarator || declarator.type !== "VariableDeclarator") return false
-    const varDecl = declarator.parent
-    if (!varDecl || varDecl.type !== "VariableDeclaration") return false
-    if (varDecl.kind !== "const") return false
+    if (!declarator || !ts.isVariableDeclaration(declarator)) return false
+    const varDeclList = declarator.parent
+    if (!varDeclList || !ts.isVariableDeclarationList(varDeclList)) return false
+    if (!(varDeclList.flags & ts.NodeFlags.Const)) return false
   }
 
   return true
 }
 
 function countFixedLiteralElements(variable: VariableEntity): number {
-  const firstAssignment = variable.assignments[0]
-  if (!firstAssignment) return 0
-  if (firstAssignment.value.type !== "ArrayExpression") return 0
+  const init = variable.initializer
+  if (!init || !ts.isArrayLiteralExpression(init)) return 0
 
-  const elements = firstAssignment.value.elements
+  const elements = init.elements
   let count = 0
   for (let i = 0; i < elements.length; i++) {
     const element = elements[i]
     if (!element) return 0
-    if (element.type !== "Literal") return 0
-    if (typeof element.value !== "string" && typeof element.value !== "number") return 0
+    if (!ts.isStringLiteral(element) && !ts.isNumericLiteral(element)) return 0
     count++
   }
   return count
@@ -120,11 +115,11 @@ function collectLookupUsages(graph: SolidGraph, variable: VariableEntity): Reado
     if (!read) continue;
     const node = read.node
     const parent = node.parent
-    if (!parent || parent.type !== "MemberExpression") continue
-    if (parent.object !== node) continue
+    if (!parent || !ts.isPropertyAccessExpression(parent)) continue
+    if (parent.expression !== node) continue
 
     const callParent = parent.parent
-    if (callParent?.type === "CallExpression" && callParent.callee === parent) {
+    if (callParent && ts.isCallExpression(callParent) && callParent.expression === parent) {
       const method = memberPropertyName(parent)
       if (method === "includes" || method === "indexOf") {
         recordUsage(graph, byFunctionKey, callParent)
@@ -137,7 +132,20 @@ function collectLookupUsages(graph: SolidGraph, variable: VariableEntity): Reado
       }
     }
 
-    if (!parent.computed) continue
+    // Check element access (computed property)
+    if (parent.parent && ts.isElementAccessExpression(parent.parent) && parent.parent.expression === parent) {
+      // This doesn't apply for PropertyAccessExpression - skip
+    }
+  }
+
+  // Also check element access patterns
+  for (let i = 0; i < variable.reads.length; i++) {
+    const read = variable.reads[i]
+    if (!read) continue;
+    const node = read.node
+    const parent = node.parent
+    if (!parent || !ts.isElementAccessExpression(parent)) continue
+    if (parent.expression !== node) continue
     if (!isManualIndexComparison(parent, read.isInConditional)) continue
     recordUsage(graph, byFunctionKey, parent)
   }
@@ -145,53 +153,53 @@ function collectLookupUsages(graph: SolidGraph, variable: VariableEntity): Reado
   return byFunctionKey
 }
 
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
+function memberPropertyName(node: ts.PropertyAccessExpression): string | null {
+  const property = node.name
+  if (ts.isIdentifier(property)) return property.text
   return null
 }
 
-function isMembershipFindPredicate(call: T.CallExpression): boolean {
+function isMembershipFindPredicate(call: ts.CallExpression): boolean {
   const callback = call.arguments[0]
   if (!callback) return false
-  if (callback.type !== "ArrowFunctionExpression" && callback.type !== "FunctionExpression") return false
-  if (callback.params.length === 0) return false
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return false
+  if (callback.parameters.length === 0) return false
 
-  const firstParam = callback.params[0]
+  const firstParam = callback.parameters[0]
   if (!firstParam) return false
-  if (firstParam.type !== "Identifier") return false
+  if (!ts.isIdentifier(firstParam.name)) return false
+  const paramName = firstParam.name.text
   const bodyExpr = callbackBodyExpression(callback.body)
-  if (!bodyExpr || bodyExpr.type !== "BinaryExpression") return false
-  if (bodyExpr.operator !== "===") return false
+  if (!bodyExpr || !ts.isBinaryExpression(bodyExpr)) return false
+  if (bodyExpr.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return false
 
-  const leftIsParam = bodyExpr.left.type === "Identifier" && bodyExpr.left.name === firstParam.name
-  const rightIsParam = bodyExpr.right.type === "Identifier" && bodyExpr.right.name === firstParam.name
+  const leftIsParam = ts.isIdentifier(bodyExpr.left) && bodyExpr.left.text === paramName
+  const rightIsParam = ts.isIdentifier(bodyExpr.right) && bodyExpr.right.text === paramName
   if (!leftIsParam && !rightIsParam) return false
 
   const otherSide = leftIsParam ? bodyExpr.right : bodyExpr.left
-  return !expressionReferencesAny(otherSide, new Set([firstParam.name]))
+  return !expressionReferencesAny(otherSide, new Set([paramName]))
 }
 
-function callbackBodyExpression(body: T.BlockStatement | T.Expression): T.Expression | null {
-  if (body.type !== "BlockStatement") return body
-  if (body.body.length !== 1) return null
-  const statement = body.body[0]
+function callbackBodyExpression(body: ts.Block | ts.Expression | ts.ConciseBody): ts.Expression | null {
+  if (!ts.isBlock(body)) return body
+  if (body.statements.length !== 1) return null
+  const statement = body.statements[0]
   if (!statement) return null
-  if (statement.type !== "ReturnStatement") return null
-  return statement.argument
+  if (!ts.isReturnStatement(statement)) return null
+  return statement.expression ?? null
 }
 
-function isManualIndexComparison(member: T.MemberExpression, isInConditional: boolean): boolean {
+function isManualIndexComparison(member: ts.ElementAccessExpression, isInConditional: boolean): boolean {
   if (!isInConditional) return false
   const enclosingLoop = getEnclosingLoop(member)
   if (!enclosingLoop) return false
 
   const comparisonCandidate = nearestComparisonCandidate(member)
-  return comparisonCandidate !== null && COMPARISON_OPERATORS.has(comparisonCandidate.operator)
+  return comparisonCandidate !== null && COMPARISON_OPERATORS.has(comparisonCandidate.operatorToken.getText())
 }
 
-function nearestComparisonCandidate(member: T.MemberExpression): T.BinaryExpression | null {
+function nearestComparisonCandidate(member: ts.ElementAccessExpression): ts.BinaryExpression | null {
   const first = member.parent
   if (!first) return null
   const direct = asComparison(first)
@@ -215,20 +223,20 @@ function nearestComparisonCandidate(member: T.MemberExpression): T.BinaryExpress
   return asComparison(fourth)
 }
 
-function asComparison(node: T.Node): T.BinaryExpression | null {
-  if (node.type === "BinaryExpression") return node
+function asComparison(node: ts.Node): ts.BinaryExpression | null {
+  if (ts.isBinaryExpression(node)) return node
   return null
 }
 
-function isTypeWrapper(node: T.Node): boolean {
+function isTypeWrapper(node: ts.Node): boolean {
   return (
-    node.type === "TSAsExpression" ||
-    node.type === "TSTypeAssertion" ||
-    node.type === "TSNonNullExpression"
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
   )
 }
 
-function recordUsage(graph: SolidGraph, map: Map<string, UsageInfo>, node: T.Node): void {
+function recordUsage(graph: SolidGraph, map: Map<string, UsageInfo>, node: ts.Node): void {
   const fn = getContainingFunction(graph, node)
   const key = functionKey(fn)
   const existing = map.get(key)

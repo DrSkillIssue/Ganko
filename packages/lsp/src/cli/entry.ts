@@ -24,6 +24,7 @@ Lint Options:
   --max-warnings <n>       Exit with error if warnings exceed n
   --exclude <glob>         Glob pattern to exclude (repeatable)
   --no-daemon              Skip daemon, run analysis in-process
+  --max-workers <n>        Max parallel workers for lint (default: auto)
   --log-level <level>      Log level: trace, debug, info, warning, error, critical, off (default: off)
   --log-file <path>        Write logs to file (in addition to stderr)
   --verbose, -v            Shorthand for --log-level debug

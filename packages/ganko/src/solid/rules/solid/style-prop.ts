@@ -29,7 +29,7 @@
  * - Have appropriate units when needed (px, %, etc.)
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 
 import { knownCSSProperties, styleToObject as parseStyle, toKebabCase } from "@drskillissue/ganko-shared";
 import type { Diagnostic, Fix } from "../../../diagnostic"
@@ -74,24 +74,24 @@ const LENGTH_PERCENTAGE_PROPERTIES = new Set([
 type StyleIssue =
   | {
       type: "kebab";
-      node: T.Node;
+      node: ts.Node;
       name: string;
       kebabName: string;
       fix?: Fix;
     }
   | {
       type: "invalid";
-      node: T.Node;
+      node: ts.Node;
       name: string;
     }
   | {
       type: "numeric";
-      node: T.Node;
+      node: ts.Node;
       value: string;
     }
   | {
       type: "string";
-      node: T.Node;
+      node: ts.Node;
       prop: string;
       value: string;
       fix?: Fix;
@@ -131,11 +131,18 @@ function isLengthPercentageProperty(name: string): boolean {
 
 
 /** Get property name, handling computed properties with literal keys */
-function getPropertyName(prop: T.Property): string | null {
-  if (prop.computed && prop.key.type === "Literal") {
-    return String(prop.key.value);
+function getPropertyName(prop: ts.PropertyAssignment): string | null {
+  if (ts.isComputedPropertyName(prop.name)) {
+    const expr = prop.name.expression;
+    if (ts.isStringLiteral(expr)) {
+      return expr.text;
+    }
+    if (ts.isNumericLiteral(expr)) {
+      return expr.text;
+    }
+    return null;
   }
-  return prop.computed ? null : getPropertyKeyName(prop.key);
+  return getPropertyKeyName(prop.name);
 }
 
 /**
@@ -143,7 +150,7 @@ function getPropertyName(prop: T.Property): string | null {
  * Checks if the property name is valid CSS. If invalid, checks if it's a
  * camelCase version of a valid kebab-case property.
  */
-function detectPropertyNameIssue(prop: T.Property): StyleIssue | null {
+function detectPropertyNameIssue(prop: ts.PropertyAssignment, sourceFile: ts.SourceFile): StyleIssue | null {
   const name = getPropertyName(prop);
   if (!name) return null;
 
@@ -154,16 +161,16 @@ function detectPropertyNameIssue(prop: T.Property): StyleIssue | null {
   if (knownCSSProperties.has(kebabName)) {
     return {
       type: "kebab",
-      node: prop.key,
+      node: prop.name,
       name,
       kebabName,
-      fix: [{ range: [prop.key.range[0], prop.key.range[1]], text: `"${kebabName}"` }],
+      fix: [{ range: [prop.name.getStart(sourceFile), prop.name.end], text: `"${kebabName}"` }],
     };
   }
 
   return {
     type: "invalid",
-    node: prop.key,
+    node: prop.name,
     name,
   };
 }
@@ -177,7 +184,7 @@ function detectPropertyNameIssue(prop: T.Property): StyleIssue | null {
  * @param prop - The property node to check
  * @returns Style issue if found, null if valid
  */
-function detectNumericValueIssue(prop: T.Property): StyleIssue | null {
+function detectNumericValueIssue(prop: ts.PropertyAssignment): StyleIssue | null {
   const name = getPropertyName(prop);
 
   // CSS custom properties can have any value, skip check
@@ -186,13 +193,13 @@ function detectNumericValueIssue(prop: T.Property): StyleIssue | null {
   // If we can determine the property name and it doesn't accept lengths, skip
   if (name && !isLengthPercentageProperty(name)) return null;
 
-  const staticValue = getStaticValue(prop.value);
+  const staticValue = getStaticValue(prop.initializer);
 
   // Only flag non-zero numbers (0 doesn't need a unit)
   if (typeof staticValue?.value === "number" && staticValue.value !== 0) {
     return {
       type: "numeric",
-      node: prop.value,
+      node: prop.initializer,
       value: String(staticValue.value),
     };
   }
@@ -207,22 +214,25 @@ function detectNumericValueIssue(prop: T.Property): StyleIssue | null {
  * maintainability.
  *
  * @param style - The style value node (string literal or template)
- * @param attrValue - The JSX attribute value for fixing
+ * @param attrNode - The JSX attribute node for fixing
+ * @param sourceFile - The source file for position access
  * @returns Style issue if found, null if not a string style
  */
 function detectStringStyleIssue(
-  style: T.Literal | T.TemplateLiteral,
-  attrValue: T.JSXAttribute["value"],
+  style: ts.Node,
+  attrNode: ts.JsxAttribute,
+  sourceFile: ts.SourceFile,
 ): StyleIssue | null {
-  if (style.type === "Literal" && typeof style.value === "string") {
-    const objectStyles = parseStyle(style.value);
+  if (ts.isStringLiteral(style)) {
+    const objectStyles = parseStyle(style.text);
     const keys = objectStyles ? Object.keys(objectStyles) : [];
     const prop = keys[0] ?? "property";
     const value = objectStyles?.[prop] ?? "value";
 
+    const attrValue = attrNode.initializer;
     const fix: Fix | undefined =
       objectStyles && attrValue
-        ? [{ range: [attrValue.range[0], attrValue.range[1]], text: `{${JSON.stringify(objectStyles)}}` }]
+        ? [{ range: [attrValue.getStart(sourceFile), attrValue.end], text: `{${JSON.stringify(objectStyles)}}` }]
         : undefined;
 
     const issue: StyleIssue = {
@@ -235,7 +245,7 @@ function detectStringStyleIssue(
     return issue;
   }
 
-  if (style.type === "TemplateLiteral") {
+  if (ts.isTemplateExpression(style) || ts.isNoSubstitutionTemplateLiteral(style)) {
     return {
       type: "string",
       node: style,
@@ -254,14 +264,17 @@ function detectStringStyleIssue(
  * diagnostic messages and fixes.
  *
  * @param issue - The style issue to convert
+ * @param file - The file path
+ * @param sourceFile - The source file
  * @returns Diagnostic with appropriate message and optional fix
  */
-function issueToDiagnostic(issue: StyleIssue, file: string): Diagnostic {
+function issueToDiagnostic(issue: StyleIssue, file: string, sourceFile: ts.SourceFile): Diagnostic {
   switch (issue.type) {
     case "kebab":
       return createDiagnostic(
         file,
         issue.node,
+        sourceFile,
         "style-prop",
         "kebabStyleProp",
         resolveMessage(messages.kebabStyleProp, { name: issue.name, kebabName: issue.kebabName }),
@@ -273,6 +286,7 @@ function issueToDiagnostic(issue: StyleIssue, file: string): Diagnostic {
       return createDiagnostic(
         file,
         issue.node,
+        sourceFile,
         "style-prop",
         "invalidStyleProp",
         resolveMessage(messages.invalidStyleProp, { name: issue.name }),
@@ -283,6 +297,7 @@ function issueToDiagnostic(issue: StyleIssue, file: string): Diagnostic {
       return createDiagnostic(
         file,
         issue.node,
+        sourceFile,
         "style-prop",
         "numericStyleValue",
         resolveMessage(messages.numericStyleValue, { value: issue.value }),
@@ -293,6 +308,7 @@ function issueToDiagnostic(issue: StyleIssue, file: string): Diagnostic {
       return createDiagnostic(
         file,
         issue.node,
+        sourceFile,
         "style-prop",
         "stringStyle",
         resolveMessage(messages.stringStyle, { prop: issue.prop, value: issue.value }),
@@ -342,32 +358,32 @@ export const styleProp = defineSolidRule({
       const { attr } = entry;
       const value = attr.valueNode;
       if (!value) continue;
-      if (attr.node.type !== "JSXAttribute") continue;
+      if (!ts.isJsxAttribute(attr.node)) continue;
 
-      if (value.type === "Literal" || value.type === "TemplateLiteral") {
-        const issue = detectStringStyleIssue(value, attr.node.value);
+      if (ts.isStringLiteral(value) || ts.isTemplateExpression(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
+        const issue = detectStringStyleIssue(value, attr.node, graph.sourceFile);
         if (issue) {
-          emit(issueToDiagnostic(issue, graph.file));
+          emit(issueToDiagnostic(issue, graph.file, graph.sourceFile));
         }
         continue;
       }
 
-      if (value.type === "ObjectExpression") {
+      if (ts.isObjectLiteralExpression(value)) {
         const properties = value.properties;
         for (let j = 0, propLen = properties.length; j < propLen; j++) {
           const prop = properties[j];
           if (!prop) continue;
-          if (prop.type !== "Property") continue;
+          if (!ts.isPropertyAssignment(prop)) continue;
 
-          const nameIssue = detectPropertyNameIssue(prop);
+          const nameIssue = detectPropertyNameIssue(prop, graph.sourceFile);
           if (nameIssue) {
-            emit(issueToDiagnostic(nameIssue, graph.file));
+            emit(issueToDiagnostic(nameIssue, graph.file, graph.sourceFile));
             continue;
           }
 
           const valueIssue = detectNumericValueIssue(prop);
           if (valueIssue) {
-            emit(issueToDiagnostic(valueIssue, graph.file));
+            emit(issueToDiagnostic(valueIssue, graph.file, graph.sourceFile));
           }
         }
       }

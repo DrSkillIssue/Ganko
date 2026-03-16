@@ -1,7 +1,7 @@
 /**
  * Value tracing, passthrough detection, and reachability analysis
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { ScopeEntity } from "../entities/scope";
 import { HOOK_PATTERN } from "@drskillissue/ganko-shared";
@@ -19,7 +19,7 @@ export interface ReachabilityOptions {
   checkIIFE?: boolean;
 }
 
-export function isInOnDepsPosition(graph: SolidGraph, node: T.Node): boolean {
+export function isInOnDepsPosition(graph: SolidGraph, node: ts.Node): boolean {
   const cached = graph.onDepsCache.get(node);
   if (cached !== undefined) return cached;
   const result = computeIsInOnDepsPosition(node);
@@ -27,25 +27,25 @@ export function isInOnDepsPosition(graph: SolidGraph, node: T.Node): boolean {
   return result;
 }
 
-function computeIsInOnDepsPosition(node: T.Node): boolean {
-  let current: T.Node = node;
+function computeIsInOnDepsPosition(node: ts.Node): boolean {
+  let current: ts.Node = node;
   let parent = node.parent;
 
   while (parent) {
-    if (parent.type === "CallExpression" && parent.callee === current) {
+    if (ts.isCallExpression(parent) && parent.expression === current) {
       current = parent;
       parent = parent.parent;
       continue;
     }
-    if (parent.type === "ArrayExpression") {
+    if (ts.isArrayLiteralExpression(parent)) {
       current = parent;
       parent = parent.parent;
       continue;
     }
-    if (parent.type === "CallExpression") {
+    if (ts.isCallExpression(parent)) {
       if (parent.arguments[0] === current) {
-        const callee = parent.callee;
-        if (callee.type === "Identifier" && callee.name === "on") return true;
+        const callee = parent.expression;
+        if (ts.isIdentifier(callee) && callee.text === "on") return true;
       }
     }
     break;
@@ -54,7 +54,7 @@ function computeIsInOnDepsPosition(node: T.Node): boolean {
   return false;
 }
 
-export function isPassthroughPosition(graph: SolidGraph, node: T.Node): boolean {
+export function isPassthroughPosition(graph: SolidGraph, node: ts.Node): boolean {
   const cached = graph.passthroughCache.get(node);
   if (cached !== undefined) return cached;
   const result = computePassthroughPosition(graph, node);
@@ -62,18 +62,17 @@ export function isPassthroughPosition(graph: SolidGraph, node: T.Node): boolean 
   return result;
 }
 
-function computePassthroughPosition(graph: SolidGraph, node: T.Node): boolean {
+function computePassthroughPosition(graph: SolidGraph, node: ts.Node): boolean {
   const parent = node.parent;
   if (!parent) return false;
 
-  if (parent.type === "ReturnStatement" && parent.argument === node) return true;
-  if (parent.type === "VariableDeclarator" && parent.init === node) return true;
+  if (ts.isReturnStatement(parent) && parent.expression === node) return true;
+  if (ts.isVariableDeclaration(parent) && parent.initializer === node) return true;
 
-  if (parent.type === "Property" && parent.value === node) {
+  if (ts.isPropertyAssignment(parent) && parent.initializer === node) {
     if (isInAssignmentContext(parent.parent)) return true;
     // Property inside an object passed as a call argument: { ip: ipAddress }
-    // Traverse from the ObjectExpression to the call argument position
-    if (parent.parent?.type === "ObjectExpression") {
+    if (parent.parent && ts.isObjectLiteralExpression(parent.parent)) {
       const argNode = findCallArgumentNode(parent.parent);
       if (isPassthroughCallArgumentNode(graph, argNode)) return true;
       if (isCustomHookArgumentNode(argNode)) return true;
@@ -81,7 +80,7 @@ function computePassthroughPosition(graph: SolidGraph, node: T.Node): boolean {
     return false;
   }
 
-  if (parent.type === "ArrayExpression") {
+  if (ts.isArrayLiteralExpression(parent)) {
     if (isInAssignmentContext(parent)) return true;
     return isPassthroughCallArgumentNode(graph, findCallArgumentNode(parent));
   }
@@ -93,41 +92,41 @@ function computePassthroughPosition(graph: SolidGraph, node: T.Node): boolean {
   return false;
 }
 
-function isInAssignmentContext(node: T.Node | undefined): boolean {
+function isInAssignmentContext(node: ts.Node | undefined): boolean {
   if (!node) return false;
-  if (node.type === "ReturnStatement" || node.type === "VariableDeclarator" || node.type === "AssignmentExpression") return true;
-  if (node.type === "ObjectExpression" || node.type === "ArrayExpression") return isInAssignmentContext(node.parent);
-  if (node.type === "TSAsExpression" || node.type === "TSSatisfiesExpression") return isInAssignmentContext(node.parent);
+  if (ts.isReturnStatement(node) || ts.isVariableDeclaration(node) || ts.isBinaryExpression(node)) return true;
+  if (ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)) return isInAssignmentContext(node.parent);
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) return isInAssignmentContext(node.parent);
   return false;
 }
 
-function findCallArgumentNode(node: T.Node): T.Node {
-  let current: T.Node | undefined = node;
-  let argNode: T.Node = node;
-  while (current?.parent?.type === "ArrayExpression") {
+function findCallArgumentNode(node: ts.Node): ts.Node {
+  let current: ts.Node | undefined = node;
+  let argNode: ts.Node = node;
+  while (current?.parent && ts.isArrayLiteralExpression(current.parent)) {
     argNode = current.parent;
     current = current.parent;
   }
   return argNode;
 }
 
-function isPassthroughCallArgumentNode(graph: SolidGraph, argNode: T.Node): boolean {
+function isPassthroughCallArgumentNode(graph: SolidGraph, argNode: ts.Node): boolean {
   const arg = graph.callsByArgNode.get(argNode);
   if (!arg?.semantic) return false;
   const type = arg.semantic.semantic.type;
   return type === "passthrough" || type === "untracked";
 }
 
-function isCustomHookArgumentNode(argNode: T.Node): boolean {
+function isCustomHookArgumentNode(argNode: ts.Node): boolean {
   const parent = argNode.parent;
-  if (parent?.type !== "CallExpression") return false;
-  const callee = parent.callee;
-  if (callee.type === "Identifier" && HOOK_PATTERN.test(callee.name)) return true;
-  if (callee.type === "MemberExpression" && callee.property.type === "Identifier" && HOOK_PATTERN.test(callee.property.name)) return true;
+  if (!parent || !ts.isCallExpression(parent)) return false;
+  const callee = parent.expression;
+  if (ts.isIdentifier(callee) && HOOK_PATTERN.test(callee.text)) return true;
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && HOOK_PATTERN.test(callee.name.text)) return true;
   return false;
 }
 
-export function isReachableFromTrackedContext(graph: SolidGraph, node: T.Node, options?: ReachabilityOptions): boolean {
+export function isReachableFromTrackedContext(graph: SolidGraph, node: ts.Node, options?: ReachabilityOptions): boolean {
   const scope = getScopeFor(graph, node);
   if (isInTrackedContext(graph, scope)) return true;
 
@@ -147,17 +146,17 @@ export function isReachableFromTrackedContext(graph: SolidGraph, node: T.Node, o
   return false;
 }
 
-export function isPassthroughCallArgument(graph: SolidGraph, node: T.Node): boolean {
+export function isPassthroughCallArgument(graph: SolidGraph, node: ts.Node): boolean {
   const argNode = findCallArgumentNode(node);
   return isPassthroughCallArgumentNode(graph, argNode);
 }
 
-export function isCustomHookArgument(_graph: SolidGraph, node: T.Node): boolean {
+export function isCustomHookArgument(_graph: SolidGraph, node: ts.Node): boolean {
   const argNode = findCallArgumentNode(node);
   return isCustomHookArgumentNode(argNode);
 }
 
-export function isInSyncCallbackAtTopLevel(graph: SolidGraph, node: T.Node, componentScope: ScopeEntity): boolean {
+export function isInSyncCallbackAtTopLevel(graph: SolidGraph, node: ts.Node, componentScope: ScopeEntity): boolean {
   const scope = getScopeFor(graph, node);
   // Check if we're inside a sync callback (map, filter, find, etc.)
   const chain = scope._scopeChain;
@@ -175,26 +174,18 @@ export function isInSyncCallbackAtTopLevel(graph: SolidGraph, node: T.Node, comp
   return false;
 }
 
-export function traceToValue(graph: SolidGraph, expr: T.Expression, scope: ScopeEntity): T.Expression {
-  if (expr.type !== "Identifier") return expr;
-  const variable = getVariableByNameInScope(graph, expr.name, scope);
+export function traceToValue(graph: SolidGraph, expr: ts.Expression, scope: ScopeEntity): ts.Expression {
+  if (!ts.isIdentifier(expr)) return expr;
+  const variable = getVariableByNameInScope(graph, expr.text, scope);
   if (!variable) return expr;
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return expr;
-  const first = assignments[0];
-  if (!first) return expr;
-  return first.value ?? expr;
+  return variable.initializer ?? expr;
 }
 
-export function resolveToStaticString(graph: SolidGraph, identifier: T.Identifier): string | null {
+export function resolveToStaticString(graph: SolidGraph, identifier: ts.Identifier): string | null {
   const scope = getScopeFor(graph, identifier);
-  const variable = getVariableByNameInScope(graph, identifier.name, scope);
+  const variable = getVariableByNameInScope(graph, identifier.text, scope);
   if (!variable) return null;
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return null;
-  const first = assignments[0];
-  if (!first) return null;
-  const value = first.value;
+  const value = variable.initializer;
   if (!value) return null;
   return getStaticStringValue(value);
 }
@@ -213,13 +204,13 @@ export function resolveToStaticString(graph: SolidGraph, identifier: T.Identifie
  * @param node - The AST node to check
  * @returns True if the node is inside a value-semantic primitive argument
  */
-export function isInsideValueSemanticArg(graph: SolidGraph, node: T.Node): boolean {
-  let current: T.Node | undefined = node.parent;
+export function isInsideValueSemanticArg(graph: SolidGraph, node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
     if (
-      current.type === "ArrowFunctionExpression" ||
-      current.type === "FunctionExpression" ||
-      current.type === "FunctionDeclaration"
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current)
     ) {
       return false;
     }
@@ -248,18 +239,21 @@ export function isInsideValueSemanticArg(graph: SolidGraph, node: T.Node): boole
  * @param node - The AST node to check (the signal identifier)
  * @returns True if the node is a valid accessor passthrough in JSX
  */
-export function isJSXAccessorPassthrough(graph: SolidGraph, node: T.Node): boolean {
+export function isJSXAccessorPassthrough(graph: SolidGraph, node: ts.Node): boolean {
   const parent = node.parent;
-  if (parent?.type !== "JSXExpressionContainer") return false;
+  if (!parent || !ts.isJsxExpression(parent)) return false;
 
   const grandparent = parent.parent;
-  if (grandparent?.type !== "JSXAttribute") return false;
+  if (!grandparent || !ts.isJsxAttribute(grandparent)) return false;
 
-  const opening = grandparent.parent;
-  if (opening?.type !== "JSXOpeningElement") return false;
+  // JsxAttribute -> JsxAttributes -> JsxOpeningElement/JsxSelfClosingElement
+  const attrs = grandparent.parent;
+  if (!attrs || !ts.isJsxAttributes(attrs)) return false;
+  const opening = attrs.parent;
+  if (!opening || (!ts.isJsxOpeningElement(opening) && !ts.isJsxSelfClosingElement(opening))) return false;
 
-  const jsxElement = opening.parent;
-  if (!jsxElement || (jsxElement.type !== "JSXElement" && jsxElement.type !== "JSXFragment")) return false;
+  const jsxElement = ts.isJsxOpeningElement(opening) ? opening.parent : opening;
+  if (!jsxElement || (!ts.isJsxElement(jsxElement) && !ts.isJsxSelfClosingElement(jsxElement) && !ts.isJsxFragment(jsxElement))) return false;
 
   const element = graph.jsxByNode.get(jsxElement);
   if (!element || element.isDomElement) return false;

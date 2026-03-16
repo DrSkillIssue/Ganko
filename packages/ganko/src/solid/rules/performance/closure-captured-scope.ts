@@ -23,7 +23,7 @@
  *   }
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { ScopeEntity, FunctionEntity, VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
@@ -95,6 +95,7 @@ export const closureCapturedScope = defineSolidRule({
             createDiagnostic(
               graph.file,
               reportNode,
+              graph.sourceFile,
               "closure-captured-scope",
               "capturedScope",
               resolveMessage(messages.capturedScope, { name: v.name }),
@@ -126,53 +127,44 @@ function findLargeAllocations(scope: ScopeEntity): VariableEntity[] {
 }
 
 function isLargeAllocation(variable: VariableEntity): boolean {
-  const declarations = variable.declarations
-
-  for (let i = 0, len = declarations.length; i < len; i++) {
-    const decl = declarations[i]
-    if (!decl) continue
-    // declarations[] contains Identifier nodes; the VariableDeclarator is the parent
-    const declarator = decl.parent
-    if (declarator?.type !== "VariableDeclarator" || !declarator.init) continue
-    if (isLargeAllocationExpression(declarator.init)) return true
-  }
-
-  return false
+  const init = variable.initializer
+  return init !== null && isLargeAllocationExpression(init)
 }
 
-function isLargeAllocationExpression(node: T.Expression): boolean {
+function isLargeAllocationExpression(node: ts.Expression): boolean {
   // new Array(...), new Uint8Array(...), etc.
-  if (node.type === "NewExpression" && node.callee.type === "Identifier") {
-    if (LARGE_CONSTRUCTORS.has(node.callee.name)) return true
+  if (ts.isNewExpression(node) && ts.isIdentifier(node.expression)) {
+    if (LARGE_CONSTRUCTORS.has(node.expression.text)) return true
   }
 
   // Array.from(...), Buffer.alloc(...), Buffer.from(...)
-  if (node.type === "CallExpression" && node.callee.type === "MemberExpression") {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
     if (
-      node.callee.object.type === "Identifier" &&
-      node.callee.property.type === "Identifier"
+      ts.isIdentifier(node.expression.expression) &&
+      ts.isIdentifier(node.expression.name)
     ) {
-      const obj = node.callee.object.name
-      const method = node.callee.property.name
+      const obj = node.expression.expression.text
+      const method = node.expression.name.text
       if (obj === "Array" && method === "from") return true
       if (obj === "Buffer" && (method === "alloc" || method === "from")) return true
     }
   }
 
   // Array spread: [...data] creates a copy at least as large as the source
-  if (node.type === "ArrayExpression" && node.elements.length > 0) {
+  if (ts.isArrayLiteralExpression(node) && node.elements.length > 0) {
     for (let i = 0, len = node.elements.length; i < len; i++) {
-      if (node.elements[i]?.type === "SpreadElement") return true
+      const el = node.elements[i]
+      if (el && ts.isSpreadElement(el)) return true
     }
   }
 
   // Chained: new Array(...).fill(...).map(...)
-  if (node.type === "CallExpression" && node.callee.type === "MemberExpression") {
-    if (node.callee.object.type === "CallExpression") {
-      return isLargeAllocationExpression(node.callee.object)
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+    if (ts.isCallExpression(node.expression.expression)) {
+      return isLargeAllocationExpression(node.expression.expression)
     }
-    if (node.callee.object.type === "NewExpression") {
-      return isLargeAllocationExpression(node.callee.object)
+    if (ts.isNewExpression(node.expression.expression)) {
+      return isLargeAllocationExpression(node.expression.expression)
     }
   }
 
@@ -193,32 +185,34 @@ function findEscapingClosureRanges(fn: FunctionEntity, graph: SolidGraph): reado
   for (let i = 0, len = returns.length; i < len; i++) {
     const ret = returns[i]
     if (!ret) continue
-    const arg = ret.node.argument
+    const arg = ret.node.expression
     if (!arg) continue
 
-    if (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") {
-      ranges.push(arg.range)
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+      ranges.push([arg.getStart(), arg.end])
       continue
     }
 
     // Check for closures inside returned objects: return { method: () => ... }
-    if (arg.type === "ObjectExpression") {
+    if (ts.isObjectLiteralExpression(arg)) {
       extractClosureRangesFromObject(arg, ranges)
     }
   }
 
   // 2. Closures assigned to outer-scope variables or properties
-  const fnRange = fn.node.range
+  const fnStart = fn.node.getStart()
+  const fnEnd = fn.node.end
 
   // Property assignments within this function (e.g., this.fn = () => ...)
   const assignments = graph.propertyAssignments
   for (let i = 0, len = assignments.length; i < len; i++) {
     const pa = assignments[i]
     if (!pa) continue
-    if (pa.node.range[0] < fnRange[0] || pa.node.range[1] > fnRange[1]) continue
+    const paStart = pa.node.getStart()
+    if (paStart < fnStart || pa.node.end > fnEnd) continue
     const val = pa.value
-    if (val.type === "ArrowFunctionExpression" || val.type === "FunctionExpression") {
-      ranges.push(val.range)
+    if (ts.isArrowFunction(val) || ts.isFunctionExpression(val)) {
+      ranges.push([val.getStart(), val.end])
     }
   }
 
@@ -235,12 +229,13 @@ function findEscapingClosureRanges(fn: FunctionEntity, graph: SolidGraph): reado
         const assign = varAssigns[ai]
         if (!assign) continue
         const assignNode = assign.node
+        const assignStart = assignNode.getStart()
         // Must be inside the function body
-        if (assignNode.range[0] < fnRange[0] || assignNode.range[1] > fnRange[1]) continue
-        if (assignNode.parent?.type === "AssignmentExpression") {
-          const rhs = assignNode.parent.right
-          if (rhs.type === "ArrowFunctionExpression" || rhs.type === "FunctionExpression") {
-            ranges.push(rhs.range)
+        if (assignStart < fnStart || assignNode.end > fnEnd) continue
+        if (ts.isBinaryExpression(assignNode)) {
+          const rhs = assignNode.right
+          if (ts.isArrowFunction(rhs) || ts.isFunctionExpression(rhs)) {
+            ranges.push([rhs.getStart(), rhs.end])
           }
         }
       }
@@ -253,16 +248,16 @@ function findEscapingClosureRanges(fn: FunctionEntity, graph: SolidGraph): reado
 /**
  * Extract function ranges from object expression properties.
  */
-function extractClosureRangesFromObject(obj: T.ObjectExpression, ranges: [number, number][]): void {
+function extractClosureRangesFromObject(obj: ts.ObjectLiteralExpression, ranges: [number, number][]): void {
   const props = obj.properties
   for (let i = 0, len = props.length; i < len; i++) {
     const prop = props[i]
     if (!prop) continue
-    if (prop.type !== "Property") continue
+    if (!ts.isPropertyAssignment(prop)) continue
 
-    const val = prop.value
-    if (val.type === "ArrowFunctionExpression" || val.type === "FunctionExpression") {
-      ranges.push(val.range)
+    const val = prop.initializer
+    if (ts.isArrowFunction(val) || ts.isFunctionExpression(val)) {
+      ranges.push([val.getStart(), val.end])
     }
   }
 }
@@ -276,8 +271,9 @@ function variableReadInRange(variable: VariableEntity, range: readonly [number, 
   for (let i = 0, len = reads.length; i < len; i++) {
     const read = reads[i]
     if (!read) continue
-    const readRange = read.node.range
-    if (readRange[0] >= range[0] && readRange[1] <= range[1]) {
+    const readStart = read.node.getStart()
+    const readEnd = read.node.end
+    if (readStart >= range[0] && readEnd <= range[1]) {
       return true
     }
   }

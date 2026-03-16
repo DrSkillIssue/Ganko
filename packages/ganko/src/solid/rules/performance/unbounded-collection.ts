@@ -19,6 +19,7 @@
  *   }
  */
 
+import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -68,8 +69,8 @@ export const unboundedCollection = defineSolidRule({
       if (!methodsUsed.hasDynamicAdditive) continue
 
       // Reassignment acts as eviction: let cache = new Map(); cache = new Map();
-      // Initial declaration counts as one write, so extra assignments indicate reassignment
-      if (variable.assignments.length > variable.declarations.length) continue
+      // Any runtime assignment indicates the collection is being reset
+      if (variable.assignments.length > 0) continue
 
       const diagNode = variable.declarations[0] ?? variable.reads[0]?.node ?? variable.assignments[0]?.node
       if (!diagNode) continue
@@ -78,6 +79,7 @@ export const unboundedCollection = defineSolidRule({
         createDiagnostic(
           graph.file,
           diagNode,
+          graph.sourceFile,
           "unbounded-collection",
           "unboundedCollection",
           resolveMessage(messages.unboundedCollection, {
@@ -96,43 +98,21 @@ export const unboundedCollection = defineSolidRule({
  * Determine if a variable is initialized as a Map, Set, or Array.
  */
 function getCollectionType(variable: VariableEntity): string | null {
-  const declarations = variable.declarations
-  for (let i = 0, len = declarations.length; i < len; i++) {
-    // declarations[] contains Identifier nodes; the VariableDeclarator is the parent
-    const decl = declarations[i]
-    if (!decl) continue
-    const declarator = decl.parent
-    if (declarator?.type !== "VariableDeclarator") continue
-    const init = declarator.init
-    if (!init) continue
+  const init = variable.initializer
+  if (!init) return null
 
-    if (init.type === "NewExpression" && init.callee.type === "Identifier") {
-      const name = init.callee.name
-      if (name === "Map" || name === "Set") return name
-      if (name === "Array") return "Array"
-    }
-
-    if (init.type === "ArrayExpression") return "Array"
-
-    // Map(), Set() called without new (less common but valid)
-    if (init.type === "CallExpression" && init.callee.type === "Identifier") {
-      const name = init.callee.name
-      if (name === "Map" || name === "Set") return name
-    }
+  if (ts.isNewExpression(init) && ts.isIdentifier(init.expression)) {
+    const name = init.expression.text
+    if (name === "Map" || name === "Set") return name
+    if (name === "Array") return "Array"
   }
 
-  // Check assignments too
-  const assignments = variable.assignments
-  for (let i = 0, len = assignments.length; i < len; i++) {
-    const assignment = assignments[i]
-    if (!assignment) continue
-    const value = assignment.value
-    if (value.type === "NewExpression" && value.callee.type === "Identifier") {
-      const name = value.callee.name
-      if (name === "Map" || name === "Set") return name
-      if (name === "Array") return "Array"
-    }
-    if (value.type === "ArrayExpression") return "Array"
+  if (ts.isArrayLiteralExpression(init)) return "Array"
+
+  // Map(), Set() called without new (less common but valid)
+  if (ts.isCallExpression(init) && ts.isIdentifier(init.expression)) {
+    const name = init.expression.text
+    if (name === "Map" || name === "Set") return name
   }
 
   return null
@@ -161,20 +141,26 @@ function collectMethodCallsViaReads(variable: VariableEntity): MethodUsage {
     if (!read) continue;
     const readNode = read.node
     const parent = readNode.parent
-    if (parent?.type !== "MemberExpression" || parent.object !== readNode) continue
+    if (!parent) continue
 
-    const prop = parent.property
     let method: string
-    if (prop.type === "Identifier") {
-      method = prop.name
-    } else if (prop.type === "Literal" && typeof prop.value === "string") {
-      method = prop.value
+    let callParent: ts.Node | undefined
+
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === readNode) {
+      const prop = parent.name
+      if (!ts.isIdentifier(prop)) continue
+      method = prop.text
+      callParent = parent.parent
+    } else if (ts.isElementAccessExpression(parent) && parent.expression === readNode) {
+      const arg = parent.argumentExpression
+      if (!ts.isStringLiteral(arg)) continue
+      method = arg.text
+      callParent = parent.parent
     } else {
       continue
     }
 
-    const grandparent = parent.parent
-    if (grandparent?.type !== "CallExpression" || grandparent.callee !== parent) continue
+    if (!callParent || !ts.isCallExpression(callParent) || callParent.expression !== parent) continue
 
     if (REMOVAL_METHODS.has(method)) {
       removal = true

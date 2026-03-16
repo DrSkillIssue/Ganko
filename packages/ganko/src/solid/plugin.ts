@@ -1,11 +1,11 @@
+import type ts from "typescript"
 import type { Emit, Plugin } from "../graph"
 import { runRules } from "../graph"
-import type { TSESLint } from "@typescript-eslint/utils"
 import type { SolidInput } from "./input"
 import { SolidGraph } from "./impl"
 import { runPhases } from "./phases"
 import { rules } from "./rules"
-import { parseFile } from "./parse"
+import { createSolidInput } from "./create-input"
 import { createSuppressionEmit } from "../suppression"
 import { SOLID_EXTENSIONS, matchesExtension } from "@drskillissue/ganko-shared"
 
@@ -29,7 +29,7 @@ export function buildSolidGraph(input: SolidInput): SolidGraph {
  */
 export function analyzeInput(input: SolidInput, emit: Emit): void {
   const graph = buildSolidGraph(input)
-  runRules(rules, graph, createSuppressionEmit(input.sourceCode, emit))
+  runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit, graph.comments))
 }
 
 /**
@@ -39,40 +39,30 @@ export function analyzeInput(input: SolidInput, emit: Emit): void {
  * cache graphs (e.g. CLI lint) can build once, run single-file rules,
  * and reuse the same graph for cross-file analysis.
  */
-export function runSolidRules(graph: SolidGraph, sourceCode: TSESLint.SourceCode, emit: Emit): void {
-  runRules(rules, graph, createSuppressionEmit(sourceCode, emit))
+export function runSolidRules(graph: SolidGraph, sourceFile: ts.SourceFile, emit: Emit): void {
+  runRules(rules, graph, createSuppressionEmit(sourceFile, emit, graph.comments))
 }
 
 /**
  * The Solid.js plugin.
  *
- * Analyzes Solid.js files by reading from disk, parsing with
- * @typescript-eslint/parser, building a SolidGraph, and running all rules.
+ * Analyzes Solid.js files by building a SolidGraph and running all rules.
  * Rules push diagnostics via the emit callback.
- *
- * @example
- * ```ts
- * import { createRunner, SolidPlugin } from "@drskillissue/ganko"
- *
- * const runner = createRunner({ plugins: [SolidPlugin] })
- * const diagnostics = runner.run(["src/App.tsx"])
- * ```
  */
 export const SolidPlugin: Plugin<"solid"> = {
   kind: "solid",
   extensions: SOLID_EXTENSIONS,
 
-  /**
-   * Analyze Solid.js files and emit diagnostics.
-   *
-   * Reads each file, parses it, builds the graph, and runs all rules.
-   */
-  analyze(files: readonly string[], emit: Emit): void {
+  analyze(files: readonly string[], emit: Emit, context?: { program: ts.Program }): void {
+    if (!context) {
+      throw new Error("SolidPlugin.analyze requires a context with ts.Program")
+    }
+    const { program } = context
     for (const file of files) {
       if (!matchesExtension(file, SOLID_EXTENSIONS)) continue
-      const input = parseFile(file)
+      const input = createSolidInput(file, program)
       const graph = buildSolidGraph(input)
-      runRules(rules, graph, createSuppressionEmit(input.sourceCode, emit))
+      runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit, graph.comments))
     }
   },
 }

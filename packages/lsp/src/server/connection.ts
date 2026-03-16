@@ -4,10 +4,10 @@
  * Main entry point for the LSP server. Sets up the connection,
  * routes requests to handlers, and coordinates components.
  *
- * HandlerContext is constructed from Project using the oracle's B+ pattern:
- * - getAST uses parseContent from ganko + sf.version cache
+ * HandlerContext is constructed from Project:
+ * - getAST returns ts.SourceFile from project.getSourceFile()
  * - getDiagnostics delegates to project.run([path])
- * - getLanguageService/getSourceFile delegate to project → ts.LanguageService
+ * - getLanguageService/getSourceFile delegate to project
  *
  * Cache invalidation and dependent re-diagnosis are centralised in three
  * methods on ServerContext:
@@ -25,11 +25,12 @@ import {
   type PublishDiagnosticsParams,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import type { TSESTree as T } from "@typescript-eslint/utils";
-
-import { parseContent, GraphCache } from "@drskillissue/ganko";
+import ts from "typescript";
+import { dirname } from "node:path";
+import { GraphCache, createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { createTier1Program } from "../core/tier1-program";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
@@ -53,6 +54,7 @@ import {
 
 import {
   type DocumentState,
+  type PendingChange,
   createDocumentState,
   handleDidOpen,
   handleDidChange,
@@ -88,28 +90,20 @@ import { getOpenDocumentPaths } from "./handlers/document";
 /** Debounce delay for document changes in milliseconds. */
 const DEBOUNCE_MS = 150;
 
-/** Cached ESTree AST entry keyed by script version from project service */
-interface CachedAST {
-  readonly version: string
-  readonly ast: T.Program
-}
-
 /**
  * Create a HandlerContext from a Project.
  *
- * Implements the oracle's B+ pattern: getAST uses parseContent from ganko
- * with sf.version as cache key. getDiagnostics delegates to project.run().
+ * getAST returns the TypeScript SourceFile directly from the project.
+ * getDiagnostics delegates to project.run().
  *
  * @param project - The ganko Project instance
  * @param graphCache - Versioned graph cache for cross-file analysis
- * @param astCache - Shared AST cache managed by the server
  * @param diagCache - Shared diagnostic cache managed by the server
  * @returns HandlerContext for handlers
  */
 function createHandlerContext(
   project: Project,
   graphCache: GraphCache,
-  astCache: Map<string, CachedAST>,
   diagCache: Map<string, readonly Diagnostic[]>,
   handlerLog: Logger,
 ): HandlerContext {
@@ -118,40 +112,24 @@ function createHandlerContext(
   return {
     log: handlerLog,
 
-    getLanguageService(path) {
-      return project.getLanguageService(path);
+    getLanguageService(_path) {
+      return project.getLanguageService();
     },
 
     getSourceFile(path) {
-      const ls = project.getLanguageService(path);
-      return ls?.getProgram()?.getSourceFile(path) ?? null;
+      return project.getSourceFile(path) ?? null;
     },
 
     getTSFileInfo(path) {
-      const ls = project.getLanguageService(path);
+      const ls = project.getLanguageService();
       if (!ls) return null;
-      const sf = ls.getProgram()?.getSourceFile(path);
+      const sf = project.getSourceFile(path);
       if (!sf) return null;
       return { ls, sf };
     },
 
     getAST(path) {
-      const ls = project.getLanguageService(path);
-      if (!ls) return null;
-
-      const sf = ls.getProgram()?.getSourceFile(path);
-      if (!sf) return null;
-
-      const version = project.getScriptVersion(path);
-      if (!version) return null;
-
-      const cached = astCache.get(path);
-      if (cached && cached.version === version) return cached.ast;
-
-      const input = parseContent(path, sf.text, graphCache.logger);
-      const ast = input.sourceCode.ast;
-      astCache.set(path, { version, ast });
-      return ast;
+      return project.getSourceFile(path) ?? null;
     },
 
     getDiagnostics(path) {
@@ -159,14 +137,14 @@ function createHandlerContext(
     },
 
     getContent(path) {
-      const ls = project.getLanguageService(path);
-      return ls?.getProgram()?.getSourceFile(path)?.text ?? null;
+      return project.getSourceFile(path)?.text ?? null;
     },
 
     getSolidGraph(path) {
       if (classifyFile(path) !== "solid") return null;
-      const version = project.getScriptVersion(path);
-      if (!version) return null;
+      const sourceFile = project.getSourceFile(path);
+      if (!sourceFile) return null;
+      const version = contentHash(sourceFile.text);
       return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
     },
   };
@@ -210,6 +188,42 @@ function collectAffectedPaths(
   }
   if (logger?.enabled) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
   return out;
+}
+
+/**
+ * Rebuild workspace cross-file results once for the current cache state.
+ *
+ * The debounce flow publishes changed files with single-file diagnostics first,
+ * then merges fresh cross-file results. That merge must not depend on some
+ * other open file triggering a cross-file run as a side effect.
+ */
+function refreshCrossFileCache(
+  context: ServerContext,
+  project: Project,
+  changed: readonly PendingChange[],
+): void {
+  const fileIndex = context.fileIndex;
+  if (!fileIndex) return;
+
+  let seedPath: string | null = null;
+  for (let i = 0, len = changed.length; i < len; i++) {
+    const change = changed[i];
+    if (!change) continue;
+    seedPath = change.path;
+    break;
+  }
+  if (seedPath === null) return;
+
+  runCrossFileDiagnostics(
+    seedPath,
+    fileIndex,
+    project,
+    context.graphCache,
+    context.tailwindValidator,
+    context.resolveContent,
+    context.serverState.ruleOverrides,
+    context.externalCustomProperties,
+  );
 }
 
 /**
@@ -275,6 +289,14 @@ export interface ServerContext {
   tailwindValidator: TailwindValidator | null
   /** CSS custom properties provided by external libraries (e.g., Kobalte's --kb-* properties) */
   externalCustomProperties?: ReadonlySet<string>
+  /** Compiler options cached from tsconfig for Tier 1 programs */
+  cachedCompilerOptions: ts.CompilerOptions | null
+  /** Cached CompilerHost for Tier 1 programs (avoids re-parsing lib.d.ts) */
+  cachedTier1Host: ts.CompilerHost | null
+  /** Whether the full TypeScript program is ready (Tier 2 gate) */
+  watchProgramReady: boolean
+  /** Whether workspace-level enrichment (ESLint, Tailwind, cross-file) is ready (Tier 3 gate) */
+  workspaceReady: boolean
   /** Debounced GC after request handlers */
   readonly gcTimer: GcTimer
   /** Periodic memory monitoring with high-water-mark gating */
@@ -401,7 +423,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     return supportedExtensions.has(uri.slice(dotIdx));
   });
 
-  const astCache = new Map<string, CachedAST>();
   const diagCache = new Map<string, readonly Diagnostic[]>();
   const graphCache = new GraphCache(prefixLogger(log, "cache"));
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
@@ -422,6 +443,10 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     diagCache,
     graphCache,
     tailwindValidator: null,
+    cachedCompilerOptions: null,
+    cachedTier1Host: null,
+    watchProgramReady: false,
+    workspaceReady: false,
     gcTimer,
     memoryWatcher,
     ready,
@@ -429,7 +454,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
     setProject(project) {
       context.project = project;
-      context.handlerCtx = createHandlerContext(project, graphCache, astCache, diagCache, prefixLogger(log, "handler"));
+      context.handlerCtx = createHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
@@ -448,7 +473,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     evictFileCache(path) {
       const key = canonicalPath(path);
       if (log.enabled) log.debug(`evictFileCache: ${key}`);
-      astCache.delete(key);
       diagCache.delete(key);
       graphCache.invalidate(key);
     },
@@ -475,7 +499,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
       graphCache.invalidateAll();
       diagCache.clear();
-      astCache.clear();
       const paths = getOpenDocumentPaths(context.documentState);
       if (log.enabled) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files`);
       for (let i = 0, len = paths.length; i < len; i++) {
@@ -540,6 +563,9 @@ function setupLifecycleHandlers(context: ServerContext): void {
 
   connection.onDidChangeWatchedFiles(async (params) => {
     await context.ready;
+    /* External file changes during Tier 1 are deferred — the full program
+       isn't built yet, and Tier 2/3 re-diagnosis will pick up disk changes. */
+    if (!context.watchProgramReady) return;
     let eslintConfigChanged = false;
     const changes = params.changes;
     const paths: string[] = new Array(changes.length);
@@ -631,6 +657,10 @@ function setupLifecycleHandlers(context: ServerContext): void {
       context.log.setLevel(parseLogLevel(rawLevel, "info"));
     }
 
+    /* Configuration changes during Tier 1 are deferred — ESLint config
+       was loaded in Phase A, and full re-diagnosis happens in Phase B/C. */
+    if (!context.watchProgramReady) return;
+
     const result = handleConfigurationChange(params, serverState);
     if (result === "none") return;
 
@@ -677,6 +707,22 @@ function setupDocumentHandlers(context: ServerContext): void {
     const project = context.project;
     if (!project) return;
 
+    if (!context.watchProgramReady) {
+      /* Tier 1 path: program not built yet. Update the project's file buffers
+         (so the eventual program build uses current content) and publish
+         Tier 1 diagnostics for solid files. */
+      const changes = flushPendingChanges(documentState);
+      for (let i = 0, len = changes.length; i < len; i++) {
+        const change = changes[i];
+        if (!change) continue;
+        project.updateFile(change.path, change.content);
+        if (classifyFile(change.path) === "solid") {
+          publishTier1Diagnostics(context, change.path, change.content);
+        }
+      }
+      return;
+    }
+
     const t0 = performance.now();
     const changes = flushPendingChanges(documentState);
     if (context.log.enabled) context.log.debug(`processChangesCallback: ${changes.length} changes`);
@@ -700,6 +746,9 @@ function setupDocumentHandlers(context: ServerContext): void {
       diagnosed.add(change.path);
     }
 
+    if (context.log.enabled) context.log.debug("processChangesCallback: refreshing cross-file cache for changed batch");
+    refreshCrossFileCache(context, project, changes);
+
     context.rediagnoseAffected(paths, diagnosed);
 
     /* Phase 4: Merge cross-file diagnostics into changed files.
@@ -721,16 +770,33 @@ function setupDocumentHandlers(context: ServerContext): void {
 
   documents.onDidOpen(async (event) => {
     const path = handleDidOpen(event, documentState);
+    if (!path) return;
     await context.ready;
+
+    const key = canonicalPath(path);
     if (context.log.enabled) context.log.debug(
-      `didOpen: uri=${event.document.uri} path=${path} hasProject=${!!context.project} `
-      + `version=${event.document.version} openDocs=${documentState.openDocuments.size}`,
+      `didOpen: uri=${event.document.uri} path=${key} hasProject=${!!context.project} `
+      + `version=${event.document.version} openDocs=${documentState.openDocuments.size} `
+      + `watchReady=${context.watchProgramReady}`,
     );
+
+    if (!context.watchProgramReady) {
+      /* Tier 1: single-file program, no waiting for full build.
+         Only solid files get Tier 1 — CSS and unknown files wait for Tier 2/3. */
+      const kind = classifyFile(key);
+      if (kind === "solid") {
+        publishTier1Diagnostics(context, key, event.document.getText());
+      }
+      /* Tier 2 re-diagnosis is handled by handleInitialized Phase B
+         when the full program becomes available. */
+      return;
+    }
+
+    /* Tier 2+: full program available. */
     const project = context.project;
-    if (path && project) {
-      if (context.log.enabled) context.log.debug(`didOpen: calling publishFileDiagnostics for ${path}`);
-      publishFileDiagnostics(context, project, path, event.document.getText());
-      if (context.log.enabled) context.log.debug(`didOpen: publishFileDiagnostics complete for ${path}`);
+    if (project) {
+      if (context.log.enabled) context.log.debug(`didOpen: calling publishFileDiagnostics for ${key}`);
+      publishFileDiagnostics(context, project, key, event.document.getText());
     }
   });
 
@@ -764,6 +830,19 @@ function setupDocumentHandlers(context: ServerContext): void {
     }
 
     handleDidSave(event, documentState);
+
+    if (!context.watchProgramReady) {
+      /* During Tier 1: flush pending changes to project file buffers so the
+         eventual program build uses current content. Skip diagnosis — Tier 2
+         re-diagnosis in handleInitialized Phase B will pick this up. */
+      const changes = flushPendingChanges(documentState);
+      for (let i = 0, len = changes.length; i < len; i++) {
+        const change = changes[i];
+        if (!change) continue;
+        project.updateFile(change.path, change.content);
+      }
+      return;
+    }
 
     const changes = flushPendingChanges(documentState);
     const savedPath = uriToPath(event.document.uri);
@@ -844,7 +923,7 @@ function setupFeatureHandlers(context: ServerContext): void {
   }
 
   function isReady(): boolean {
-    return isServerReady(context.serverState);
+    return isServerReady(context.serverState) && context.watchProgramReady;
   }
 
   const { log, gcTimer } = context;
@@ -916,6 +995,92 @@ function setupFeatureHandlers(context: ServerContext): void {
 }
 
 /**
+ * Publish Tier 1 diagnostics for a file using a minimal single-file ts.Program.
+ *
+ * Used during startup before the full TypeScript program is built. Creates a
+ * real ts.Program with full TypeChecker scoped to the file and its direct
+ * imports (solid-js types, DOM libs are available). Cross-module project
+ * types are NOT available — they resolve to `any`.
+ *
+ * Cost: ~50-100ms on first call (lib.d.ts parsing), ~20-50ms thereafter
+ * (CompilerHost is cached across calls).
+ *
+ * @param context - Server context
+ * @param path - Canonical file path
+ * @param content - Current in-memory content
+ */
+function publishTier1Diagnostics(
+  context: ServerContext,
+  path: string,
+  content: string,
+): void {
+  if (!context.serverState.rootPath) return;
+
+  const t0 = performance.now();
+
+  /* Cache compiler options from tsconfig — parsed once, reused for all
+     Tier 1 calls during startup. */
+  if (context.cachedCompilerOptions === null) {
+    const tsconfigPath = ts.findConfigFile(
+      context.serverState.rootPath,
+      ts.sys.fileExists,
+      "tsconfig.json",
+    );
+    if (tsconfigPath) {
+      const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(
+        configFile.config,
+        ts.sys,
+        dirname(tsconfigPath),
+      );
+      context.cachedCompilerOptions = parsed.options;
+    }
+  }
+
+  /* Cache the CompilerHost across Tier 1 calls to avoid re-parsing lib.d.ts
+     for each opened file. lib.d.ts parsing is cached within a single
+     CompilerHost instance, NOT globally — reusing the host saves ~50-100ms
+     per subsequent file. */
+  if (context.cachedTier1Host === null && context.cachedCompilerOptions) {
+    context.cachedTier1Host = ts.createCompilerHost(context.cachedCompilerOptions);
+  }
+
+  const tier1 = createTier1Program(
+    path,
+    content,
+    context.cachedCompilerOptions ?? undefined,
+    context.cachedTier1Host ?? undefined,
+  );
+  if (!tier1) {
+    if (context.log.enabled) context.log.warning(`Tier 1: failed to create program for ${path}`);
+    return;
+  }
+
+  const input = createSolidInput(path, tier1.program, context.log);
+  const graph = buildSolidGraph(input);
+
+  const diagnostics: Diagnostic[] = [];
+  const rawEmit = (d: Diagnostic) => diagnostics.push(d);
+  const hasOverrides = Object.keys(context.serverState.ruleOverrides).length > 0;
+  const emit = hasOverrides ? createOverrideEmit(rawEmit, context.serverState.ruleOverrides) : rawEmit;
+  runSolidRules(graph, input.sourceFile, emit);
+
+  context.diagCache.set(path, diagnostics);
+
+  const converted = convertDiagnostics(diagnostics);
+  const uri = context.documentState.pathIndex.get(path) ?? pathToUri(path);
+  const docInfo = context.documentState.openDocuments.get(uri);
+
+  const params: PublishDiagnosticsParams = { uri, diagnostics: converted };
+  if (docInfo?.version !== undefined) params.version = docInfo.version;
+  context.connection.sendDiagnostics(params);
+
+  if (context.log.enabled) {
+    context.log.info(`Tier 1: ${path} → ${diagnostics.length} diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+}
+
+/**
  * Publish diagnostics for a file.
  *
  * @param context - Server context
@@ -927,7 +1092,7 @@ function setupFeatureHandlers(context: ServerContext): void {
  *   typing (debounced changes) where only single-file rules matter.
  *   Previous cross-file results are preserved when skipped.
  */
-function publishFileDiagnostics(
+export function publishFileDiagnostics(
   context: ServerContext,
   project: Project,
   path: string,
@@ -936,7 +1101,9 @@ function publishFileDiagnostics(
 ): void {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  const resolved = content ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined);
+  const resolved = content
+    ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined)
+    ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
   if (context.log.enabled) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
   const t0 = performance.now();
   const singleFile = runDiagnostics(project, context.diagCache, key, resolved, context.serverState.ruleOverrides, context.log);

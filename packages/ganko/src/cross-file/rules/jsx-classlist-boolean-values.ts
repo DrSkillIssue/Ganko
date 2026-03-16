@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { forEachClassListPropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
@@ -20,17 +21,17 @@ export const jsxClasslistBooleanValues = defineCrossRule({
   check(context, emit) {
     const { solids } = context
     forEachClassListPropertyAcross(solids, (solid, p) => {
-      if (p.type !== "Property") return
-      const n = objectKeyName(p.key)
+      if (!ts.isPropertyAssignment(p)) return
+      const n = objectKeyName(p.name)
       if (!n) return
-      if (isBooleanish(p.value)) return
-      if (isDefinitelyNonBoolean(p.value)) {
-        emit(createDiagnostic(solid.file, p.value, jsxClasslistBooleanValues.id, "nonBooleanValue", resolveMessage(messages.nonBooleanValue, { name: n }), "error"))
+      if (isBooleanish(p.initializer)) return
+      if (isDefinitelyNonBoolean(p.initializer)) {
+        emit(createDiagnostic(solid.file, p.initializer, solid.sourceFile, jsxClasslistBooleanValues.id, "nonBooleanValue", resolveMessage(messages.nonBooleanValue, { name: n }), "error"))
         return
       }
-      if (isBooleanType(solid, p.value)) return
-      if (!isDefinitelyNonBooleanType(solid, p.value)) return
-      emit(createDiagnostic(solid.file, p.value, jsxClasslistBooleanValues.id, "nonBooleanValue", resolveMessage(messages.nonBooleanValue, { name: n }), "error"))
+      if (isBooleanType(solid, p.initializer)) return
+      if (!isDefinitelyNonBooleanType(solid, p.initializer)) return
+      emit(createDiagnostic(solid.file, p.initializer, solid.sourceFile, jsxClasslistBooleanValues.id, "nonBooleanValue", resolveMessage(messages.nonBooleanValue, { name: n }), "error"))
     })
   },
 })

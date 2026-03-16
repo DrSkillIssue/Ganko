@@ -5,6 +5,7 @@
  * Collect into an array and join at the end instead.
  */
 
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
@@ -25,15 +26,15 @@ function isStringVariable(variable: VariableEntity, graph: SolidGraph): boolean 
   for (let i = 0; i < declarations.length; i++) {
     const decl = declarations[i]
     if (!decl) continue;
-    if (decl.type !== "Identifier") continue
-    if (decl.parent?.type !== "VariableDeclarator") continue
+    if (!ts.isIdentifier(decl)) continue
+    if (!decl.parent || !ts.isVariableDeclaration(decl.parent)) continue
 
-    const init = decl.parent.init
+    const init = decl.parent.initializer
     if (!init) continue
 
     if (typeIncludesString(graph, init)) return true
-    if (init.type === "Literal" && typeof init.value === "string") return true
-    if (init.type === "TemplateLiteral") return true
+    if (ts.isStringLiteral(init)) return true
+    if (ts.isTemplateExpression(init) || ts.isNoSubstitutionTemplateLiteral(init)) return true
   }
   return false
 }
@@ -51,15 +52,18 @@ function isDeclaredOutsideLoop(variable: VariableEntity): boolean {
   for (let i = 0; i < declarations.length; i++) {
     const decl = declarations[i]
     if (!decl) continue;
-    if (decl.type !== "Identifier") continue
+    if (!ts.isIdentifier(decl)) continue
 
     const declarator = decl.parent
-    if (declarator?.type !== "VariableDeclarator") continue
+    if (!declarator || !ts.isVariableDeclaration(declarator)) continue
 
-    const varDecl = declarator.parent
-    if (varDecl?.type !== "VariableDeclaration") continue
+    const varDeclList = declarator.parent
+    if (!varDeclList || !ts.isVariableDeclarationList(varDeclList)) continue
 
-    return !isInLoop(varDecl)
+    const varStatement = varDeclList.parent
+    if (!varStatement || !ts.isVariableStatement(varStatement)) continue
+
+    return !isInLoop(varStatement)
   }
   return true
 }
@@ -91,12 +95,12 @@ export const stringConcatInLoop = defineSolidRule({
       for (let i = 0; i < assignments.length; i++) {
         const assignment = assignments[i]
         if (!assignment) continue;
-        if (assignment.operator !== "+=") continue
+        if (assignment.operator !== ts.SyntaxKind.PlusEqualsToken) continue
         if (!assignment.isInLoop) continue
 
-        const parent = assignment.node.parent
-        if (parent?.type === "AssignmentExpression") {
-          emit(createDiagnostic(graph.file, parent, "string-concat-in-loop", "stringConcatInLoop", messages.stringConcatInLoop, "error"))
+        const node = assignment.node
+        if (ts.isBinaryExpression(node)) {
+          emit(createDiagnostic(graph.file, node, graph.sourceFile, "string-concat-in-loop", "stringConcatInLoop", messages.stringConcatInLoop, "error"))
         }
       }
     }

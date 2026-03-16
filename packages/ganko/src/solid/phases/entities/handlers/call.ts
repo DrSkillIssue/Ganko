@@ -1,22 +1,22 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { ArgumentEntity, PrimitiveInfo, ArgumentSemantic } from "../../../entities/call";
 import { createCall } from "../../../entities/call";
 import { getScopeFor } from "../../../queries/scope";
 import { getPrimitiveByName, toPrimitiveInfo } from "../../../queries/get";
 
-export function handleCall(ctx: VisitorContext, node: T.CallExpression | T.NewExpression): void {
+export function handleCall(ctx: VisitorContext, node: ts.CallExpression | ts.NewExpression): void {
   const graph = ctx.graph;
   const file = ctx.file;
   const scope = getScopeFor(graph, node);
-  const callee = node.callee;
+  const callee = node.expression;
 
   // Detect if this is a Solid primitive call
   let primitive: PrimitiveInfo | null = null;
   let argumentSemantics: ArgumentSemantic[] = [];
 
-  if (callee.type === "Identifier") {
-    const def = getPrimitiveByName(callee.name);
+  if (ts.isIdentifier(callee)) {
+    const def = getPrimitiveByName(callee.text);
     if (def) {
       primitive = toPrimitiveInfo(def);
       argumentSemantics = def.argumentSemantics;
@@ -25,8 +25,9 @@ export function handleCall(ctx: VisitorContext, node: T.CallExpression | T.NewEx
 
   // Build argument entities with semantics applied
   const args: ArgumentEntity[] = [];
-  for (let i = 0, len = node.arguments.length; i < len; i++) {
-    const arg = node.arguments[i];
+  const nodeArgs = node.arguments ?? [];
+  for (let i = 0, len = nodeArgs.length; i < len; i++) {
+    const arg = nodeArgs[i];
     let semantic: ArgumentSemantic | null = null;
 
     // Find matching semantic for this position

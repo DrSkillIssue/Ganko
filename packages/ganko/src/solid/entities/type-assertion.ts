@@ -8,8 +8,9 @@
  * - `as any` casts
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { ScopeEntity } from "./scope";
+import type { FunctionNode } from "../util/function";
 
 /**
  * The kind of type assertion being performed.
@@ -29,11 +30,11 @@ export type TypeAssertionKind =
 export interface TypeAssertionEntity {
   readonly id: number;
   /** The assertion node (TSAsExpression or TSTypeAssertion) */
-  readonly node: T.TSAsExpression | T.TSTypeAssertion;
+  readonly node: ts.AsExpression | ts.TypeAssertion;
   /** The expression being cast */
-  readonly expression: T.Expression;
+  readonly expression: ts.Expression;
   /** The type being cast to */
-  readonly typeAnnotation: T.TypeNode;
+  readonly typeAnnotation: ts.TypeNode;
   /** The kind of assertion */
   readonly kind: TypeAssertionKind;
   /** Whether this is inside a loop */
@@ -63,11 +64,11 @@ export interface TypeAssertionEntity {
 export interface TypePredicateEntity {
   readonly id: number;
   /** The function node */
-  readonly node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression;
+  readonly node: FunctionNode;
   /** The parameter name being narrowed */
   readonly parameterName: string;
   /** The type being asserted */
-  readonly typeAnnotation: T.TypeNode;
+  readonly typeAnnotation: ts.TypeNode;
 }
 
 /**
@@ -83,11 +84,11 @@ export interface TypePredicateEntity {
 export interface UnsafeGenericAssertionEntity {
   readonly id: number;
   /** The function node */
-  readonly node: T.FunctionDeclaration | T.FunctionExpression | T.ArrowFunctionExpression;
+  readonly node: FunctionNode;
   /** The generic type parameter being asserted to */
   readonly typeParameterName: string;
   /** The type assertion node within the function */
-  readonly assertion: T.TSAsExpression | T.TSTypeAssertion;
+  readonly assertion: ts.AsExpression | ts.TypeAssertion;
 }
 
 /**
@@ -123,8 +124,8 @@ export type UnsafeAnnotationKind = "any" | "unknown";
  */
 export interface UnsafeTypeAnnotationEntity {
   readonly id: number;
-  /** The TSAnyKeyword or TSUnknownKeyword node */
-  readonly node: T.TSAnyKeyword | T.TSUnknownKeyword;
+  /** The AnyKeyword or UnknownKeyword type node */
+  readonly node: ts.TypeNode;
   /** Whether this is `any` or `unknown` */
   readonly kind: UnsafeAnnotationKind;
   /** Where the annotation appears */

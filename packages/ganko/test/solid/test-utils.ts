@@ -1,14 +1,92 @@
+import ts from "typescript"
+import { resolve } from "path"
 import { buildSolidGraph, analyzeInput } from "../../src/solid/plugin"
-import { parseContent } from "../../src/solid/parse"
+import { createSolidInput } from "../../src/solid/create-input"
 import type { Emit } from "../../src/graph"
 import type { SolidGraph, SolidInput } from "../../src"
 import type { Diagnostic, FixOperation } from "../../src/diagnostic"
 
+const compilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ESNext,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  jsx: ts.JsxEmit.Preserve,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+}
+
+/** Shared CompilerHost — created once, reused across all createTestProgram calls. */
+const defaultHost = ts.createCompilerHost(compilerOptions)
+
 /**
- * Parse code and create SolidInput.
+ * Cache parsed lib SourceFile objects at module scope. Lib .d.ts files are
+ * immutable so parsing them once and reusing across all ts.createProgram
+ * invocations is safe and eliminates the dominant cost per call (~100 lib files).
+ */
+const LIB_CACHE_MAX = 200
+const libSourceFileCache = new Map<string, ts.SourceFile | undefined>()
+
+/**
+ * Last program for incremental reuse. TypeScript's createProgram with
+ * oldProgram reuses unchanged SourceFiles AND internal type checker
+ * structures (symbol tables, flow graph caches). Since every test shares
+ * the same ~100 lib files, this avoids rebuilding checker internals
+ * from scratch for each of the 1500+ test invocations.
+ */
+let lastProgram: ts.Program | null = null
+
+/**
+ * Create an in-memory ts.Program from a map of virtual file contents.
+ * Falls back to the real filesystem for lib files (e.g. lib.d.ts).
+ * Uses oldProgram for incremental reuse of lib SourceFiles and checker state.
+ */
+export function createTestProgram(files: Record<string, string>): ts.Program {
+  const fileMap = new Map<string, string>()
+  for (const [key, value] of Object.entries(files)) {
+    fileMap.set(resolve(key), value)
+  }
+
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    getSourceFile(fileName, languageVersion) {
+      const content = fileMap.get(fileName)
+      if (content !== undefined) {
+        return ts.createSourceFile(fileName, content, languageVersion, true)
+      }
+      const cached = libSourceFileCache.get(fileName)
+      if (cached !== undefined) return cached
+      if (libSourceFileCache.size >= LIB_CACHE_MAX) libSourceFileCache.clear()
+      const sf = defaultHost.getSourceFile(fileName, languageVersion)
+      libSourceFileCache.set(fileName, sf)
+      return sf
+    },
+    fileExists(fileName) {
+      return fileMap.has(fileName) || defaultHost.fileExists(fileName)
+    },
+    readFile(fileName) {
+      return fileMap.get(fileName) ?? defaultHost.readFile(fileName)
+    },
+  }
+
+  const opts: ts.CreateProgramOptions = {
+    rootNames: [...fileMap.keys()],
+    options: compilerOptions,
+    host,
+  }
+  if (lastProgram) opts.oldProgram = lastProgram
+  const program = ts.createProgram(opts)
+  lastProgram = program
+  return program
+}
+
+/**
+ * Parse code and create SolidInput using the TypeScript compiler API.
  */
 export function parseCode(code: string, filePath = "test.tsx"): SolidInput {
-  return parseContent(filePath, code)
+  const resolvedPath = resolve(filePath)
+  const program = createTestProgram({ [filePath]: code })
+  return createSolidInput(resolvedPath, program)
 }
 
 /**

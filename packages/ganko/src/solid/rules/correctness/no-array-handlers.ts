@@ -14,7 +14,7 @@
  * Uses TypeFlags to detect Array<T>, T[], ReadonlyArray<T>, and tuple types.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import type ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { JSXAttributeEntity } from "../../entities/jsx"
@@ -69,7 +69,7 @@ export const noArrayHandlers = defineSolidRule({
   },
   options,
   check(graph, emit) {
-    const reported = new Set<T.JSXAttribute | T.JSXSpreadAttribute>()
+    const reported = new Set<ts.JsxAttribute | ts.JsxSpreadAttribute>()
 
     const eventHandlerAttrs = getJSXAttributesByKind(graph, "event-handler")
     const propAttrs = getJSXAttributesByKind(graph, "prop")
@@ -95,6 +95,7 @@ export const noArrayHandlers = defineSolidRule({
           createDiagnostic(
             graph.file,
             attr.node,
+            graph.sourceFile,
             "no-array-handlers",
             "noArrayHandlers",
             resolveMessage(messages.noArrayHandlers, { handlerName }),
@@ -124,6 +125,7 @@ export const noArrayHandlers = defineSolidRule({
           createDiagnostic(
             graph.file,
             attr.node,
+            graph.sourceFile,
             "no-array-handlers",
             "noArrayHandlers",
             resolveMessage(messages.noArrayHandlers, { handlerName }),

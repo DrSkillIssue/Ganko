@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getCallsByMethodName } from "../../queries"
@@ -31,7 +31,7 @@ export const noFullSplitInHotParse = defineSolidRule({
     for (let i = 0; i < splitCalls.length; i++) {
       const call = splitCalls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
       const loop = getEnclosingLoop(call.node)
       if (!loop) continue
       if (isInLoopControl(loop, call.node)) continue
@@ -39,15 +39,16 @@ export const noFullSplitInHotParse = defineSolidRule({
       if (isCharSplit(call.node)) continue
       if (isFollowedByPipeline(call.node)) continue
 
-      const callee = call.node.callee
-      if (callee.type !== "MemberExpression") continue
-      if (!isStringLikeReceiver(graph, callee.object, call.calleeRootVariable)) continue
-      if (isSmallLiteralRoot(callee.object)) continue
+      const callee = call.node.expression
+      if (!ts.isPropertyAccessExpression(callee)) continue
+      if (!isStringLikeReceiver(graph, callee.expression, call.calleeRootVariable)) continue
+      if (isSmallLiteralRoot(callee.expression)) continue
 
       emit(
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-full-split-in-hot-parse",
           "fullSplitInHotParse",
           messages.fullSplitInHotParse,
@@ -58,61 +59,58 @@ export const noFullSplitInHotParse = defineSolidRule({
   },
 })
 
-function isCharSplit(node: T.CallExpression): boolean {
+function isCharSplit(node: ts.CallExpression): boolean {
   const first = node.arguments[0]
   if (!first) return false
-  return first.type === "Literal" && first.value === ""
+  return ts.isStringLiteral(first) && first.text === ""
 }
 
-function isFollowedByPipeline(node: T.CallExpression): boolean {
+function isFollowedByPipeline(node: ts.CallExpression): boolean {
   const parent = node.parent
-  if (!parent || parent.type !== "MemberExpression") return false
-  if (parent.object !== node) return false
+  if (!parent || !ts.isPropertyAccessExpression(parent)) return false
+  if (parent.expression !== node) return false
 
   const call = parent.parent
-  if (!call || call.type !== "CallExpression" || call.callee !== parent) return false
+  if (!call || !ts.isCallExpression(call) || call.expression !== parent) return false
 
   const method = memberPropertyName(parent)
   if (!method) return false
   return CHAINED_FOLLOW_UP_METHODS.has(method)
 }
 
-function isSmallLiteralRoot(node: T.Node): boolean {
-  if (node.type !== "Literal") return false
-  return typeof node.value === "string" && node.value.length <= 16
+function isSmallLiteralRoot(node: ts.Node): boolean {
+  if (!ts.isStringLiteral(node)) return false
+  return node.text.length <= 16
 }
 
-function memberPropertyName(node: T.MemberExpression): string | null {
-  const property = node.property
-  if (property.type === "Identifier") return property.name
-  if (property.type === "Literal" && typeof property.value === "string") return property.value
+function memberPropertyName(node: ts.PropertyAccessExpression): string | null {
+  const property = node.name
+  if (ts.isIdentifier(property)) return property.text
   return null
 }
 
-function isInLoopControl(loop: T.Node, node: T.Node): boolean {
-  if (!node.range) return false
-
-  if (loop.type === "ForStatement") {
-    if (isWithin(node, loop.init)) return true
-    if (isWithin(node, loop.test)) return true
-    if (isWithin(node, loop.update)) return true
+function isInLoopControl(loop: ts.Node, node: ts.Node): boolean {
+  if (ts.isForStatement(loop)) {
+    if (isWithin(node, loop.initializer)) return true
+    if (isWithin(node, loop.condition)) return true
+    if (isWithin(node, loop.incrementor)) return true
     return false
   }
 
-  if (loop.type === "ForOfStatement" || loop.type === "ForInStatement") {
-    if (isWithin(node, loop.right)) return true
-    if (isWithin(node, loop.left)) return true
+  if (ts.isForOfStatement(loop) || ts.isForInStatement(loop)) {
+    if (isWithin(node, loop.expression)) return true
+    if (isWithin(node, loop.initializer)) return true
     return false
   }
 
-  if (loop.type === "WhileStatement" || loop.type === "DoWhileStatement") {
-    return isWithin(node, loop.test)
+  if (ts.isWhileStatement(loop) || ts.isDoStatement(loop)) {
+    return isWithin(node, loop.expression)
   }
 
   return false
 }
 
-function isWithin(node: T.Node, container: T.Node | null): boolean {
-  if (!container || !node.range || !container.range) return false
-  return node.range[0] >= container.range[0] && node.range[1] <= container.range[1]
+function isWithin(node: ts.Node, container: ts.Node | undefined | null): boolean {
+  if (!container) return false
+  return node.pos >= container.pos && node.end <= container.end
 }

@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -27,7 +27,7 @@ export const noRescanIndexofLoop = defineSolidRule({
   options,
 
   check(graph, emit) {
-    const grouped = new Map<string, { method: SearchMethod; node: T.CallExpression; count: number }>()
+    const grouped = new Map<string, { method: SearchMethod; node: ts.CallExpression; count: number }>()
 
     collect(graph, "indexOf", grouped)
     collect(graph, "includes", grouped)
@@ -38,6 +38,7 @@ export const noRescanIndexofLoop = defineSolidRule({
         createDiagnostic(
           graph.file,
           entry.node,
+          graph.sourceFile,
           "no-rescan-indexof-loop",
           "rescanIndexOf",
           resolveMessage(messages.rescanIndexOf, { method: entry.method }),
@@ -51,20 +52,20 @@ export const noRescanIndexofLoop = defineSolidRule({
 function collect(
   graph: SolidGraph,
   method: SearchMethod,
-  grouped: Map<string, { method: SearchMethod; node: T.CallExpression; count: number }>,
+  grouped: Map<string, { method: SearchMethod; node: ts.CallExpression; count: number }>,
 ): void {
   const calls = getCallsByMethodName(graph, method)
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i]
     if (!call) continue;
-    if (call.node.type !== "CallExpression") continue
+    if (!ts.isCallExpression(call.node)) continue
     if (!startsFromBeginning(call.node, method)) continue
 
-    const callee = call.node.callee
-    if (callee.type !== "MemberExpression") continue
-    if (callee.object.type !== "Identifier") continue
-    const receiverName = callee.object.name
-    if (!isStringLikeReceiver(graph, callee.object, call.calleeRootVariable)) continue
+    const callee = call.node.expression
+    if (!ts.isPropertyAccessExpression(callee)) continue
+    if (!ts.isIdentifier(callee.expression)) continue
+    const receiverName = callee.expression.text
+    if (!isStringLikeReceiver(graph, callee.expression, call.calleeRootVariable)) continue
 
     const loop = getEnclosingLoop(call.node)
     if (!loop) continue
@@ -84,17 +85,17 @@ function collect(
   }
 }
 
-function startsFromBeginning(node: T.CallExpression, method: SearchMethod): boolean {
+function startsFromBeginning(node: ts.CallExpression, method: SearchMethod): boolean {
   if (method === "indexOf") {
     if (node.arguments.length < 2) return true
     const second = node.arguments[1]
     if (!second) return true
-    if (second.type === "Literal" && second.value === 0) return true
+    if (ts.isNumericLiteral(second) && second.text === "0") return true
     return false
   }
 
   if (node.arguments.length < 2) return true
   const second = node.arguments[1]
   if (!second) return true
-  return second.type === "Literal" && second.value === 0
+  return ts.isNumericLiteral(second) && second.text === "0"
 }

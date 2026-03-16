@@ -3,6 +3,7 @@
  * The delete operator transitions objects to "dictionary mode" in V8.
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 
@@ -24,17 +25,17 @@ export const avoidDeleteOperator = defineSolidRule({
   options,
 
   check(graph, emit) {
-    const deleteExprs = graph.unaryExpressionsByOperator.get("delete")
-    if (!deleteExprs || deleteExprs.length === 0) return
+    const deleteExprs = graph.deleteExpressions
+    if (deleteExprs.length === 0) return
 
     for (let i = 0, len = deleteExprs.length; i < len; i++) {
       const expr = deleteExprs[i];
       if (!expr) continue;
-      const arg = expr.argument;
-      if (arg.type !== "MemberExpression") continue;
+      const arg = expr.expression;
+      if (!ts.isPropertyAccessExpression(arg) && !ts.isElementAccessExpression(arg)) continue;
 
       emit(
-        createDiagnostic(graph.file, expr, "avoid-delete-operator", "avoidDelete", messages.avoidDelete, "warn"),
+        createDiagnostic(graph.file, expr, graph.sourceFile, "avoid-delete-operator", "avoidDelete", messages.avoidDelete, "warn"),
       )
     }
   },

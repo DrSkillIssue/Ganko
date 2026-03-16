@@ -26,12 +26,9 @@ export type { Diagnostic, Fix, FixOperation } from "@drskillissue/ganko";
 export { createProject } from "./core/project";
 export type { Project, ProjectConfig } from "./core/project";
 
-// TypeScript Project Service
-export {
-  createTypeScriptProjectService,
-  type TypeScriptProjectService,
-  type ProjectServiceOptions,
-} from "./core/project-service";
+// TypeScript program services
+export { createBatchProgram, type BatchTypeScriptService } from "./core/batch-program";
+export { createIncrementalProgram, type IncrementalTypeScriptService } from "./core/incremental-program";
 
 // Server exports
 export { createServer, startServer, main } from "./server/connection";

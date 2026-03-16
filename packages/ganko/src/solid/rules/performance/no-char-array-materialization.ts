@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -29,18 +29,19 @@ export const noCharArrayMaterialization = defineSolidRule({
     for (let i = 0; i < splitCalls.length; i++) {
       const call = splitCalls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
       if (!isLoopedParseContext(graph, call.node)) continue
 
-      const callee = call.node.callee
-      if (callee.type !== "MemberExpression") continue
-      if (!isStringLikeReceiver(graph, callee.object, call.calleeRootVariable)) continue
+      const callee = call.node.expression
+      if (!ts.isPropertyAccessExpression(callee)) continue
+      if (!isStringLikeReceiver(graph, callee.expression, call.calleeRootVariable)) continue
       if (!isCharSplit(call.node)) continue
 
       emit(
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-char-array-materialization",
           "charArrayMaterialization",
           resolveMessage(messages.charArrayMaterialization, { pattern: "split(\"\")" }),
@@ -53,18 +54,19 @@ export const noCharArrayMaterialization = defineSolidRule({
     for (let i = 0; i < fromCalls.length; i++) {
       const call = fromCalls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
       if (!isLoopedParseContext(graph, call.node)) continue
       if (!isArrayFromCall(call.node)) continue
 
       const first = call.node.arguments[0]
-      if (!first || first.type === "SpreadElement") continue
+      if (!first || ts.isSpreadElement(first)) continue
       if (!isStringLikeReceiver(graph, first, null)) continue
 
       emit(
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-char-array-materialization",
           "charArrayMaterialization",
           resolveMessage(messages.charArrayMaterialization, { pattern: "Array.from(str)" }),
@@ -79,12 +81,13 @@ export const noCharArrayMaterialization = defineSolidRule({
       if (!spread) continue;
       if (!isLoopedParseContext(graph, spread)) continue
       if (!isArraySpread(spread)) continue
-      if (!isStringLikeReceiver(graph, spread.argument, null)) continue
+      if (!isStringLikeReceiver(graph, spread.expression, null)) continue
 
       emit(
         createDiagnostic(
           graph.file,
           spread,
+          graph.sourceFile,
           "no-char-array-materialization",
           "charArrayMaterialization",
           resolveMessage(messages.charArrayMaterialization, { pattern: "[...str]" }),
@@ -95,26 +98,26 @@ export const noCharArrayMaterialization = defineSolidRule({
   },
 })
 
-function isLoopedParseContext(graph: SolidGraph, node: T.Node): boolean {
+function isLoopedParseContext(graph: SolidGraph, node: ts.Node): boolean {
   if (!getEnclosingLoop(node)) return false
   return isLikelyStringParsingContext(graph, node)
 }
 
-function isCharSplit(node: T.CallExpression): boolean {
+function isCharSplit(node: ts.CallExpression): boolean {
   const first = node.arguments[0]
-  return first !== undefined && first.type === "Literal" && first.value === ""
+  return first !== undefined && ts.isStringLiteral(first) && first.text === ""
 }
 
-function isArrayFromCall(node: T.CallExpression): boolean {
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return false
-  if (callee.object.type !== "Identifier" || callee.object.name !== "Array") return false
-  const property = callee.property
-  if (property.type === "Identifier") return property.name === "from"
-  if (property.type === "Literal" && typeof property.value === "string") return property.value === "from"
+function isArrayFromCall(node: ts.CallExpression): boolean {
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return false
+  if (!ts.isIdentifier(callee.expression) || callee.expression.text !== "Array") return false
+  const property = callee.name
+  if (ts.isIdentifier(property)) return property.text === "from"
   return false
 }
 
-function isArraySpread(node: T.SpreadElement): boolean {
-  return node.parent?.type === "ArrayExpression"
+function isArraySpread(node: ts.SpreadElement | ts.SpreadAssignment): boolean {
+  if (!ts.isSpreadElement(node)) return false
+  return node.parent ? ts.isArrayLiteralExpression(node.parent) : false
 }

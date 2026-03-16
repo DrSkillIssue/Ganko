@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import { getStaticClassTokensForElementEntity, getStaticStyleKeysForElement, objectKeyName } from "../../solid/queries/jsx-derived"
@@ -56,15 +56,14 @@ export function collectInlineStyleValuesByElementId(graph: SolidGraph): Readonly
     const entry = graph.styleProperties[i]
     if (!entry) continue
     const property = entry.property
-    if (property.type !== "Property") continue
-    if (property.computed) continue
+    if (!ts.isPropertyAssignment(property)) continue
 
-    const keyName = objectKeyName(property.key)
+    const keyName = objectKeyName(property.name)
     if (!keyName) continue
 
     const normalizedKey = normalizeStyleKey(keyName)
     if (!isMonitoredSignal(normalizedKey)) continue
-    const value = getStaticStyleValue(property.value)
+    const value = getStaticStyleValue(property.initializer)
     if (value === null) continue
 
     const existing = out.get(entry.element.id)
@@ -86,7 +85,7 @@ function normalizeStyleKey(key: string): string {
   return toKebabCase(key)
 }
 
-function getStaticStyleValue(node: T.Node): string | null {
+function getStaticStyleValue(node: ts.Node): string | null {
   const staticString = getStaticStringValue(node)
   if (staticString !== null) return staticString
   const staticNumber = getStaticNumericValue(node)
@@ -118,8 +117,8 @@ export function getTextualContentState(
       continue
     }
     if (child.kind !== "text") continue
-    if (child.node.type !== "JSXText") continue
-    if (isBlank(child.node.value)) continue
+    if (!ts.isJsxText(child.node)) continue
+    if (isBlank(child.node.text)) continue
     memo.set(element.id, LayoutTextualContentState.Yes)
     return LayoutTextualContentState.Yes
   }
@@ -170,10 +169,10 @@ export function getTextualContentState(
   return LayoutTextualContentState.No
 }
 
-function isStructuralExpression(node: T.Node): boolean {
-  if (node.type !== "JSXExpressionContainer") return false
+function isStructuralExpression(node: ts.Node): boolean {
+  if (!ts.isJsxExpression(node)) return false
   const expr = node.expression
-  if (expr.type === "JSXEmptyExpression") return false
+  if (!expr) return false
   return containsJSX(expr)
 }
 

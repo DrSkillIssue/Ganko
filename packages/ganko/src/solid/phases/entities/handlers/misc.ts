@@ -1,15 +1,15 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { ReturnStatementEntity } from "../../../entities/return-statement";
 import type { PropertyAssignmentEntity } from "../../../entities/property-assignment";
 import type { FunctionEntity } from "../../../entities/function";
 import { getScopeFor } from "../../../queries/scope";
 
-export function handleReturnStatement(ctx: VisitorContext, node: T.ReturnStatement): void {
+export function handleReturnStatement(ctx: VisitorContext, node: ts.ReturnStatement): void {
   const fn = ctx.functionStack[ctx.functionStack.length - 1];
   if (!fn) return;
 
-  const hasArg = node.argument !== null;
+  const hasArg = node.expression !== null && node.expression !== undefined;
   if (hasArg) {
     fn.hasNonVoidReturn = true;
   }
@@ -24,43 +24,43 @@ export function handleReturnStatement(ctx: VisitorContext, node: T.ReturnStateme
   fn.returnStatements.push(entity);
 }
 
-export function isEarlyReturn(_ctx: VisitorContext, node: T.ReturnStatement, fn: FunctionEntity): boolean {
+export function isEarlyReturn(_ctx: VisitorContext, node: ts.ReturnStatement, fn: FunctionEntity): boolean {
   const body = fn.node.body;
-  if (body.type !== "BlockStatement") return false;
-  const statements = body.body;
+  if (!body || !ts.isBlock(body)) return false;
+  const statements = body.statements;
   if (statements.length === 0) return false;
   const last = statements[statements.length - 1];
   return last !== node;
 }
 
-export function handleThrowStatement(ctx: VisitorContext, ): void {
+export function handleThrowStatement(ctx: VisitorContext): void {
   if (ctx.functionStack.length === 0) return;
   const fn = ctx.functionStack[ctx.functionStack.length - 1];
   if (fn) fn.hasThrowStatement = true;
 }
 
-export function handleAwaitExpression(ctx: VisitorContext, node: T.AwaitExpression): void {
+export function handleAwaitExpression(ctx: VisitorContext, node: ts.AwaitExpression): void {
   if (ctx.functionStack.length === 0) return;
   const fn = ctx.functionStack[ctx.functionStack.length - 1];
-  if (fn) fn.awaitRanges.push(node.range);
+  if (fn) fn.awaitRanges.push([node.pos, node.end]);
 }
 
-export function handleNewExpression(ctx: VisitorContext, node: T.NewExpression): void {
-  const callee = node.callee;
-  if (callee.type === "Identifier") {
-    ctx.graph.addNewExpressionByCallee(callee.name, node);
-  } else if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
-    ctx.graph.addNewExpressionByCallee(callee.property.name, node);
+export function handleNewExpression(ctx: VisitorContext, node: ts.NewExpression): void {
+  const callee = node.expression;
+  if (ts.isIdentifier(callee)) {
+    ctx.graph.addNewExpressionByCallee(callee.text, node);
+  } else if (ts.isPropertyAccessExpression(callee)) {
+    ctx.graph.addNewExpressionByCallee(callee.name.text, node);
   }
 }
 
-export function handleMemberExpression(ctx: VisitorContext, node: T.MemberExpression): void {
+export function handleMemberExpression(ctx: VisitorContext, node: ts.PropertyAccessExpression): void {
   if (ctx.functionStack.length === 0) return;
   const fn = ctx.functionStack[ctx.functionStack.length - 1];
   if (!fn) return;
 
-  const obj = node.object;
-  if (obj.type !== "Identifier") return;
+  const obj = node.expression;
+  if (!ts.isIdentifier(obj)) return;
 
   let cache = fn._memberAccessesByIdentifier;
   if (!cache) {
@@ -68,7 +68,7 @@ export function handleMemberExpression(ctx: VisitorContext, node: T.MemberExpres
     fn._memberAccessesByIdentifier = cache;
   }
 
-  const name = obj.name;
+  const name = obj.text;
   const existing = cache.get(name);
   if (existing) {
     existing.push(node);
@@ -77,18 +77,21 @@ export function handleMemberExpression(ctx: VisitorContext, node: T.MemberExpres
   }
 }
 
-export function handleAssignmentExpression(ctx: VisitorContext, node: T.AssignmentExpression): void {
+export function handleAssignmentExpression(ctx: VisitorContext, node: ts.BinaryExpression): void {
   const left = node.left;
-  if (left.type !== "MemberExpression") return;
+  if (!ts.isPropertyAccessExpression(left) && !ts.isElementAccessExpression(left)) return;
 
   const graph = ctx.graph;
   const scope = getScopeFor(graph, node);
-  const object = left.object;
-  const property = left.property;
+  const object = left.expression;
+  const isComputed = ts.isElementAccessExpression(left);
+  const property = ts.isElementAccessExpression(left)
+    ? left.argumentExpression
+    : left.name;
 
-  const isArrayIndex = left.computed && isLikelyArrayIndex(ctx, property);
-  const hasDynamicProperty = left.computed && property.type !== "Literal";
-  const propertyExists = checkPropertyExistsOnType(ctx, object, property, left.computed);
+  const isArrayIndex = isComputed && isLikelyArrayIndex(ctx, property);
+  const hasDynamicProperty = isComputed && !ts.isStringLiteral(property) && !ts.isNumericLiteral(property);
+  const propertyExists = checkPropertyExistsOnType(ctx, object, property, isComputed);
 
   const entity: PropertyAssignmentEntity = {
     id: graph.nextMiscId(),
@@ -96,9 +99,9 @@ export function handleAssignmentExpression(ctx: VisitorContext, node: T.Assignme
     target: left,
     object,
     property,
-    computed: left.computed,
+    computed: isComputed,
     value: node.right,
-    operator: node.operator,
+    operator: node.operatorToken.kind,
     scope,
     file: ctx.file,
     isInLoop: ctx.loopDepth > 0,
@@ -111,30 +114,30 @@ export function handleAssignmentExpression(ctx: VisitorContext, node: T.Assignme
   graph.addPropertyAssignment(entity);
 }
 
-export function isLikelyArrayIndex(_ctx: VisitorContext, node: T.Expression | T.PrivateIdentifier): boolean {
-  if (node.type === "Literal" && typeof node.value === "number") return true;
-  if (node.type === "Identifier") {
-    const name = node.name;
+export function isLikelyArrayIndex(_ctx: VisitorContext, node: ts.Expression): boolean {
+  if (ts.isNumericLiteral(node)) return true;
+  if (ts.isIdentifier(node)) {
+    const name = node.text;
     return name === "i" || name === "j" || name === "k" || name === "index" || name === "idx";
   }
-  if (node.type === "BinaryExpression") return true;
-  if (node.type === "UpdateExpression") return true;
+  if (ts.isBinaryExpression(node)) return true;
+  if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) return true;
   return false;
 }
 
-export function checkPropertyExistsOnType(ctx: VisitorContext, 
-  object: T.Expression,
-  property: T.Expression | T.PrivateIdentifier,
+export function checkPropertyExistsOnType(ctx: VisitorContext,
+  object: ts.Expression,
+  property: ts.Expression | ts.Identifier,
   computed: boolean,
 ): boolean {
   const resolver = ctx.graph.typeResolver;
   if (!resolver.hasTypeInfo()) return true;
 
   let propName: string | null = null;
-  if (!computed && property.type === "Identifier") {
-    propName = property.name;
-  } else if (property.type === "Literal" && typeof property.value === "string") {
-    propName = property.value;
+  if (!computed && ts.isIdentifier(property)) {
+    propName = property.text;
+  } else if (ts.isStringLiteral(property)) {
+    propName = property.text;
   }
 
   if (!propName) return true;

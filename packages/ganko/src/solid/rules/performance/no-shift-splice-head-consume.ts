@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName, getVariableByNameInScope } from "../../queries"
@@ -32,7 +32,7 @@ export const noShiftSpliceHeadConsume = defineSolidRule({
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
 
       const method = methodName(call.node)
       if (!method) continue
@@ -45,7 +45,7 @@ export const noShiftSpliceHeadConsume = defineSolidRule({
       const receiver = receiverIdentifier(call.node)
       if (!receiver) continue
 
-      const variable = getVariableByNameInScope(graph, receiver.name, call.scope)
+      const variable = getVariableByNameInScope(graph, receiver.text, call.scope)
       if (!variable) continue
       if (!declaredOutsideLoop(variable, loop)) continue
       if (isSmallFixedArray(variable)) continue
@@ -54,6 +54,7 @@ export const noShiftSpliceHeadConsume = defineSolidRule({
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-shift-splice-head-consume",
           "headConsume",
           resolveMessage(messages.headConsume, { method }),
@@ -64,50 +65,46 @@ export const noShiftSpliceHeadConsume = defineSolidRule({
   },
 })
 
-function methodName(node: T.CallExpression): string | null {
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return null
-  if (callee.property.type === "Identifier") return callee.property.name
-  if (callee.property.type === "Literal" && typeof callee.property.value === "string") return callee.property.value
+function methodName(node: ts.CallExpression): string | null {
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return null
+  if (ts.isIdentifier(callee.name)) return callee.name.text
   return null
 }
 
-function receiverIdentifier(node: T.CallExpression): T.Identifier | null {
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return null
-  const object = callee.object
-  if (object.type !== "Identifier") return null
+function receiverIdentifier(node: ts.CallExpression): ts.Identifier | null {
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return null
+  const object = callee.expression
+  if (!ts.isIdentifier(object)) return null
   return object
 }
 
-function isHeadSplice(node: T.CallExpression): boolean {
+function isHeadSplice(node: ts.CallExpression): boolean {
   if (node.arguments.length === 0) return false
   const first = node.arguments[0]
   if (!first) return false
-  if (first.type !== "Literal" || first.value !== 0) return false
+  if (!ts.isNumericLiteral(first) || first.text !== "0") return false
   if (node.arguments.length === 1) return true
   const second = node.arguments[1]
   if (!second) return false
-  return second.type === "Literal" && second.value === 1
+  return ts.isNumericLiteral(second) && second.text === "1"
 }
 
-function declaredOutsideLoop(variable: { declarations: readonly T.Node[] }, loop: T.Node): boolean {
+function declaredOutsideLoop(variable: { declarations: readonly ts.Node[] }, loop: ts.Node): boolean {
   const declaration = variable.declarations[0]
   if (!declaration) return true
-  return declaration.range[0] < loop.range[0]
+  return declaration.pos < loop.pos
 }
 
-function isSmallFixedArray(variable: { assignments: readonly { operator: T.AssignmentExpression["operator"] | null; value: T.Expression }[] }): boolean {
-  if (variable.assignments.length === 0) return false
-  const first = variable.assignments[0]
-  if (!first) return false
-  if (first.operator !== null) return false
-  if (first.value.type !== "ArrayExpression") return false
-  const elements = first.value.elements
+function isSmallFixedArray(variable: { initializer: ts.Expression | null }): boolean {
+  const init = variable.initializer
+  if (!init || !ts.isArrayLiteralExpression(init)) return false
+  const elements = init.elements
   if (elements.length > SMALL_FIXED_ARRAY_LIMIT) return false
   for (let i = 0; i < elements.length; i++) {
     const element = elements[i]
-    if (!element || element.type !== "Literal") return false
+    if (!element || !ts.isLiteralExpression(element)) return false
   }
   return true
 }

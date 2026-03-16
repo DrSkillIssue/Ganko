@@ -6,7 +6,6 @@
  */
 
 import { toLowerString } from "@drskillissue/ganko-shared";
-import { getSourceCode } from "../../queries/get";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnosticFromComment } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule";
@@ -132,7 +131,7 @@ export const noAiSlopComments = defineSolidRule({
     const trie = new Trie(options.caseSensitive);
     for (const word of options.words) trie.insert(word);
 
-    const comments = getSourceCode(graph).getAllComments();
+    const comments = graph.comments;
     if (comments.length === 0) return;
 
     for (const comment of comments) {
@@ -143,7 +142,7 @@ export const noAiSlopComments = defineSolidRule({
         const message = messages.forbiddenWord.replace("{{word}}", word);
 
         const fix: Fix = [{
-          range: [comment.range[0], comment.range[1]],
+          range: [comment.pos, comment.end],
           text: "",
         }];
 

@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { parsePxValue } from "../../css/parser/value-util"
 import { LAYOUT_INLINE_STYLE_TOGGLE_PROPERTIES } from "../../css/layout-taxonomy"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
@@ -51,19 +51,20 @@ export const jsxLayoutUnstableStyleToggle = defineCrossRule({
   },
   check(context, emit) {
     forEachStylePropertyAcross(context.solids, (solid, property, element) => {
-      if (property.type !== "Property") return
-      const key = objectKeyName(property.key)
+      if (!ts.isPropertyAssignment(property)) return
+      const key = objectKeyName(property.name)
       if (!key) return
 
       const normalized = normalizeStylePropertyKey(key)
       if (!LAYOUT_INLINE_STYLE_TOGGLE_PROPERTIES.has(normalized)) return
-      if (!hasUnstableLayoutDelta(normalized, property.value)) return
+      if (!hasUnstableLayoutDelta(normalized, property.initializer)) return
       if (isExemptFromCLS(context.layout, solid.file, element, normalized)) return
 
       emit(
         createDiagnostic(
           solid.file,
-          property.value,
+          property.initializer,
+          solid.sourceFile,
           jsxLayoutUnstableStyleToggle.id,
           "unstableLayoutStyleToggle",
           resolveMessage(messages.unstableLayoutStyleToggle, { property: normalized }),
@@ -113,25 +114,25 @@ function isExemptFromCLS(
   return false
 }
 
-function hasUnstableLayoutDelta(property: string, node: T.Node): boolean {
+function hasUnstableLayoutDelta(property: string, node: ts.Node): boolean {
   const unwrapped = unwrapTypeWrapper(node)
 
   if (isStaticComparable(property, unwrapped)) return false
 
-  if (unwrapped.type === "ConditionalExpression") {
+  if (ts.isConditionalExpression(unwrapped)) {
     return conditionalHasDelta(property, unwrapped)
   }
 
-  if (unwrapped.type === "LogicalExpression") {
+  if (ts.isBinaryExpression(unwrapped) && isLogicalOperator(unwrapped.operatorToken.kind)) {
     return logicalHasDelta(property, unwrapped)
   }
 
   return true
 }
 
-function conditionalHasDelta(property: string, node: T.ConditionalExpression): boolean {
-  const consequent = unwrapTypeWrapper(node.consequent)
-  const alternate = unwrapTypeWrapper(node.alternate)
+function conditionalHasDelta(property: string, node: ts.ConditionalExpression): boolean {
+  const consequent = unwrapTypeWrapper(node.whenTrue)
+  const alternate = unwrapTypeWrapper(node.whenFalse)
 
   const consequentValue = readComparableStaticValue(property, consequent)
   const alternateValue = readComparableStaticValue(property, alternate)
@@ -142,18 +143,23 @@ function conditionalHasDelta(property: string, node: T.ConditionalExpression): b
   return true
 }
 
-function logicalHasDelta(property: string, node: T.LogicalExpression): boolean {
+function isLogicalOperator(kind: ts.SyntaxKind): boolean {
+  return kind === ts.SyntaxKind.AmpersandAmpersandToken
+    || kind === ts.SyntaxKind.BarBarToken
+}
+
+function logicalHasDelta(property: string, node: ts.BinaryExpression): boolean {
   const left = unwrapTypeWrapper(node.left)
   const right = unwrapTypeWrapper(node.right)
   const leftTruthiness = constantTruthiness(left)
 
-  if (node.operator === "&&") {
+  if (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
     if (leftTruthiness === false) return hasUnstableLayoutDelta(property, left)
     if (leftTruthiness === true) return hasUnstableLayoutDelta(property, right)
     return true
   }
 
-  if (node.operator === "||") {
+  if (node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
     if (leftTruthiness === true) return hasUnstableLayoutDelta(property, left)
     if (leftTruthiness === false) return hasUnstableLayoutDelta(property, right)
     return true
@@ -162,11 +168,11 @@ function logicalHasDelta(property: string, node: T.LogicalExpression): boolean {
   return true
 }
 
-function isStaticComparable(property: string, node: T.Node): boolean {
+function isStaticComparable(property: string, node: ts.Node): boolean {
   return readComparableStaticValue(property, node) !== null
 }
 
-function readComparableStaticValue(property: string, node: T.Node): string | null {
+function readComparableStaticValue(property: string, node: ts.Node): string | null {
   const staticValue = getStaticValue(node)
   if (staticValue === null) return null
   return normalizeComparableValue(property, staticValue.value)
@@ -204,16 +210,16 @@ function normalizeComparableValue(
   return null
 }
 
-function unwrapTypeWrapper(node: T.Node): T.Node {
+function unwrapTypeWrapper(node: ts.Node): ts.Node {
   let current = node
 
   while (true) {
-    if (current.type === "TSAsExpression" || current.type === "TSTypeAssertion") {
+    if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
       current = current.expression
       continue
     }
 
-    if (current.type === "TSNonNullExpression") {
+    if (ts.isNonNullExpression(current)) {
       current = current.expression
       continue
     }

@@ -18,7 +18,7 @@
  *   });
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
@@ -54,26 +54,27 @@ export const createRootDispose = defineSolidRule({
 
       const callbackNode = callbackArg.node
       if (
-        callbackNode.type !== "ArrowFunctionExpression" &&
-        callbackNode.type !== "FunctionExpression"
+        !ts.isArrowFunction(callbackNode) &&
+        !ts.isFunctionExpression(callbackNode)
       ) continue
 
       // Only flag when the callback declares a dispose parameter
-      const params = callbackNode.params
+      const params = callbackNode.parameters
       if (params.length === 0) continue
 
       const disposeParam = params[0]
       if (!disposeParam) continue;
-      if (disposeParam.type !== "Identifier") continue
+      if (!ts.isIdentifier(disposeParam.name)) continue
 
       // Find the variable entity for the dispose parameter via scope resolution
-      const disposeVar = findParameterVariable(graph, disposeParam.name, callbackNode)
+      const disposeVar = findParameterVariable(graph, disposeParam.name.text, callbackNode)
       if (disposeVar && disposeVar.reads.length > 0) continue
 
       emit(
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "create-root-dispose",
           "unusedDispose",
           messages.unusedDispose,
@@ -92,7 +93,7 @@ export const createRootDispose = defineSolidRule({
 function findParameterVariable(
   graph: SolidGraph,
   name: string,
-  fnNode: T.ArrowFunctionExpression | T.FunctionExpression,
+  fnNode: ts.ArrowFunction | ts.FunctionExpression,
 ): VariableEntity | null {
   // The function's scope contains the parameter as a variable
   const scopes = graph.scopes

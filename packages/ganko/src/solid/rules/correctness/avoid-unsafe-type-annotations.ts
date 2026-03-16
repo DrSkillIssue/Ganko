@@ -86,6 +86,7 @@ export const avoidUnsafeTypeAnnotations = defineSolidRule({
         createDiagnostic(
           graph.file,
           annotation.node,
+          graph.sourceFile,
           "avoid-unsafe-type-annotations",
           messageId,
           msg,

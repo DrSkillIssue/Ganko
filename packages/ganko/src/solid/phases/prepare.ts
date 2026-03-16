@@ -1,27 +1,29 @@
 /**
  * Prepare Phase (Phase 1)
  *
- * Validates that the AST has parent links set by the TypeScript-ESLint parser.
+ * Validates that the TypeScript SourceFile has parent links set.
  * This is a prerequisite for all subsequent phases that traverse the AST.
  *
  * Throws an error if parent links are missing, indicating incorrect parser config.
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 
 /**
- * Validates that AST has parent links set by typescript-eslint parser.
+ * Validates that AST has parent links set by TypeScript parser.
+ * When using ts.createSourceFile with setParentNodes=true, every
+ * child node's .parent points back to its parent.
  */
-function validateParentLinks(ast: T.Program): void {
-  const firstStmt = ast.body[0];
-  if (ast.body.length > 0 && firstStmt && firstStmt.parent !== ast) {
+function validateParentLinks(sourceFile: ts.SourceFile): void {
+  const firstStmt = sourceFile.statements[0];
+  if (firstStmt && !firstStmt.parent) {
     throw new Error(
-      "AST missing parent links. Configure typescript-eslint with parserOptions.project",
+      "AST missing parent links. Use ts.createSourceFile with setParentNodes=true",
     );
   }
 }
 
 export function runPreparePhase(_graph: SolidGraph, input: SolidInput): void {
-    validateParentLinks(input.sourceCode.ast);
+    validateParentLinks(input.sourceFile);
 }

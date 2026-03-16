@@ -11,9 +11,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: [
-    "@typescript-eslint/parser",
-    "@typescript-eslint/typescript-estree",
-    "@typescript-eslint/utils",
     "postcss",
     "postcss-safe-parser",
     "postcss-scss",

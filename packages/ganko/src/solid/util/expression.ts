@@ -4,7 +4,7 @@
  * Helper functions for working with expression nodes.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 
 /**
  * Get a human-readable descriptive name for an expression.
@@ -21,151 +21,185 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
  * getExpressionName(awaitExprNode)         // "awaited value"
  * getExpressionName(literalNode)           // "123" or '"hello"'
  */
-export function getExpressionName(node: T.Node): string {
-  switch (node.type) {
-    case "Identifier":
-      return node.name;
-
-    case "MemberExpression":
-      if (node.property.type === "Identifier") {
-        return node.property.name;
-      }
-      if (node.property.type === "Literal") {
-        return String(node.property.value);
-      }
-      if (node.property.type === "PrivateIdentifier") {
-        return `#${node.property.name}`;
-      }
-      return "property";
-
-    case "CallExpression":
-      return getCallExpressionName(node);
-
-    case "NewExpression":
-      if (node.callee.type === "Identifier") {
-        return `new ${node.callee.name}()`;
-      }
-      return "new instance";
-
-    case "AwaitExpression":
-      return `await ${getExpressionName(node.argument)}`;
-
-    case "YieldExpression":
-      if (node.argument) {
-        return `yield ${getExpressionName(node.argument)}`;
-      }
-      return "yield";
-
-    case "UnaryExpression":
-      return `${node.operator}${getExpressionName(node.argument)}`;
-
-    case "UpdateExpression":
-      return getExpressionName(node.argument);
-
-    case "BinaryExpression":
-    case "LogicalExpression":
-      return "result";
-
-    case "ConditionalExpression":
-      return "conditional";
-
-    case "AssignmentExpression":
-      return getExpressionName(node.left);
-
-    case "SequenceExpression": {
-      const lastExpr = node.expressions[node.expressions.length - 1];
-      if (lastExpr) {
-        return getExpressionName(lastExpr);
-      }
-      return "sequence";
-    }
-
-    case "ArrayExpression":
-      return "array";
-
-    case "ObjectExpression":
-      return "object";
-
-    case "ArrowFunctionExpression":
-    case "FunctionExpression":
-      return "function";
-
-    case "ClassExpression":
-      return node.id ? node.id.name : "class";
-
-    case "TemplateLiteral":
-      return "template";
-
-    case "TaggedTemplateExpression":
-      if (node.tag.type === "Identifier") {
-        return `${node.tag.name}\`\``;
-      }
-      return "tagged template";
-
-    case "ThisExpression":
-      return "this";
-
-    case "Super":
-      return "super";
-
-    case "MetaProperty":
-      return `${node.meta.name}.${node.property.name}`;
-
-    case "ImportExpression":
-      return "dynamic import";
-
-    case "ChainExpression":
-      // ChainElement is CallExpression | MemberExpression | TSNonNullExpression
-      return getExpressionName(node.expression);
-
-    case "TSAsExpression":
-    case "TSSatisfiesExpression":
-    case "TSNonNullExpression":
-      return getExpressionName(node.expression);
-
-    case "TSInstantiationExpression":
-      return getExpressionName(node.expression);
-
-    case "Literal":
-      if (node.value === null) return "null";
-      if (typeof node.value === "string") return `"${node.value}"`;
-      if (typeof node.value === "boolean") return String(node.value);
-      if (typeof node.value === "number") return String(node.value);
-      if (typeof node.value === "bigint") return `${node.value}n`;
-      // RegExpLiteral has value: RegExp | null, check for RegExp instance
-      if (node.value instanceof RegExp) return String(node.value);
-      return "literal";
-
-    default:
-      return "expression";
+export function getExpressionName(node: ts.Node): string {
+  if (ts.isIdentifier(node)) {
+    return node.text;
   }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    return node.name.text;
+  }
+
+  if (ts.isElementAccessExpression(node)) {
+    const arg = node.argumentExpression;
+    if (ts.isStringLiteral(arg)) return arg.text;
+    if (ts.isNumericLiteral(arg)) return arg.text;
+    return "property";
+  }
+
+  if (ts.isCallExpression(node)) {
+    return getCallExpressionName(node);
+  }
+
+  if (ts.isNewExpression(node)) {
+    if (ts.isIdentifier(node.expression)) {
+      return `new ${node.expression.text}()`;
+    }
+    return "new instance";
+  }
+
+  if (ts.isAwaitExpression(node)) {
+    return `await ${getExpressionName(node.expression)}`;
+  }
+
+  if (ts.isYieldExpression(node)) {
+    if (node.expression) {
+      return `yield ${getExpressionName(node.expression)}`;
+    }
+    return "yield";
+  }
+
+  if (ts.isPrefixUnaryExpression(node)) {
+    const opText = ts.tokenToString(node.operator) ?? "";
+    return `${opText}${getExpressionName(node.operand)}`;
+  }
+
+  if (ts.isPostfixUnaryExpression(node)) {
+    return getExpressionName(node.operand);
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    // Assignment operators
+    if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.MinusEqualsToken) {
+      return getExpressionName(node.left);
+    }
+    return "result";
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    return "conditional";
+  }
+
+  if (ts.isCommaListExpression(node)) {
+    const exprs = node.elements;
+    const lastExpr = exprs[exprs.length - 1];
+    if (lastExpr) {
+      return getExpressionName(lastExpr);
+    }
+    return "sequence";
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    return "array";
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    return "object";
+  }
+
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    return "function";
+  }
+
+  if (ts.isClassExpression(node)) {
+    return node.name ? node.name.text : "class";
+  }
+
+  if (ts.isTemplateExpression(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return "template";
+  }
+
+  if (ts.isTaggedTemplateExpression(node)) {
+    if (ts.isIdentifier(node.tag)) {
+      return `${node.tag.text}\`\``;
+    }
+    return "tagged template";
+  }
+
+  if (node.kind === ts.SyntaxKind.ThisKeyword) {
+    return "this";
+  }
+
+  if (node.kind === ts.SyntaxKind.SuperKeyword) {
+    return "super";
+  }
+
+  if (ts.isMetaProperty(node)) {
+    return `${ts.tokenToString(node.keywordToken) ?? ""}.${node.name.text}`;
+  }
+
+  if (node.kind === ts.SyntaxKind.ImportKeyword) {
+    return "dynamic import";
+  }
+
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) {
+    return getExpressionName(node.expression);
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    return getExpressionName(node.expression);
+  }
+
+  if (ts.isStringLiteral(node)) {
+    return `"${node.text}"`;
+  }
+
+  if (ts.isNumericLiteral(node)) {
+    return node.text;
+  }
+
+  if (ts.isBigIntLiteral(node)) {
+    return node.text;
+  }
+
+  if (ts.isRegularExpressionLiteral(node)) {
+    return node.text;
+  }
+
+  if (node.kind === ts.SyntaxKind.NullKeyword) {
+    return "null";
+  }
+
+  if (node.kind === ts.SyntaxKind.TrueKeyword) {
+    return "true";
+  }
+
+  if (node.kind === ts.SyntaxKind.FalseKeyword) {
+    return "false";
+  }
+
+  return "expression";
 }
 
 /**
  * Get a descriptive name for a call expression.
  */
-function getCallExpressionName(node: T.CallExpression): string {
-  const callee = node.callee;
+function getCallExpressionName(node: ts.CallExpression): string {
+  const callee = node.expression;
 
-  if (callee.type === "Identifier") {
-    return `${callee.name}()`;
+  if (ts.isIdentifier(callee)) {
+    return `${callee.text}()`;
   }
 
-  if (callee.type === "MemberExpression") {
-    if (callee.property.type === "Identifier") {
-      return `${callee.property.name}()`;
-    }
-    if (callee.property.type === "Literal" && typeof callee.property.value === "string") {
-      return `${callee.property.value}()`;
+  if (ts.isPropertyAccessExpression(callee)) {
+    return `${callee.name.text}()`;
+  }
+
+  if (ts.isElementAccessExpression(callee)) {
+    const arg = callee.argumentExpression;
+    if (ts.isStringLiteral(arg)) {
+      return `${arg.text}()`;
     }
     return "method()";
   }
 
-  if (callee.type === "CallExpression") {
+  if (ts.isCallExpression(callee)) {
     return "chained call";
   }
 
-  if (callee.type === "ArrowFunctionExpression" || callee.type === "FunctionExpression") {
+  if (ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)) {
     return "IIFE";
   }
 
@@ -179,19 +213,17 @@ function getCallExpressionName(node: T.CallExpression): string {
  * @param node - The expression to check
  * @returns True if simple (identifier or non-computed member chain)
  */
-export function isSimpleExpression(node: T.Expression): boolean {
-  switch (node.type) {
-    case "Identifier":
-    case "ThisExpression":
-    case "Super":
-      return true;
-    case "MemberExpression":
-      return !node.computed && isSimpleExpression(node.object);
-    case "ChainExpression":
-      return isSimpleExpression(node.expression);
-    default:
-      return false;
+export function isSimpleExpression(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return true;
+  if (node.kind === ts.SyntaxKind.ThisKeyword) return true;
+  if (node.kind === ts.SyntaxKind.SuperKeyword) return true;
+  if (ts.isPropertyAccessExpression(node)) {
+    return isSimpleExpression(node.expression);
   }
+  if (ts.isParenthesizedExpression(node)) {
+    return isSimpleExpression(node.expression);
+  }
+  return false;
 }
 
 /**
@@ -214,129 +246,131 @@ export function isSimpleExpression(node: T.Expression): boolean {
  * @param node - The expression to check
  * @returns True if evaluating this expression might modify state
  */
-export function mayHaveSideEffects(node: T.Expression): boolean {
-  switch (node.type) {
-    case "Identifier":
-    case "Literal":
-    case "ThisExpression":
-    case "Super":
-    case "TemplateLiteral":
-    case "ArrowFunctionExpression":
-    case "FunctionExpression":
-    case "ClassExpression":
-      return false;
+export function mayHaveSideEffects(node: ts.Expression): boolean {
+  // Safe: no side effects
+  if (ts.isIdentifier(node)) return false;
+  if (ts.isStringLiteral(node) || ts.isNumericLiteral(node) || ts.isBigIntLiteral(node) ||
+      ts.isRegularExpressionLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return false;
+  if (node.kind === ts.SyntaxKind.ThisKeyword || node.kind === ts.SyntaxKind.SuperKeyword ||
+      node.kind === ts.SyntaxKind.NullKeyword || node.kind === ts.SyntaxKind.TrueKeyword ||
+      node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (ts.isTemplateExpression(node)) return false;
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isClassExpression(node)) return false;
 
-     // These always have or may have side effects
-    case "CallExpression":
-    case "NewExpression":
-    case "AssignmentExpression":
-    case "UpdateExpression":
-    case "AwaitExpression":
-    case "YieldExpression":
-    case "ImportExpression":
-    case "TaggedTemplateExpression":
-      return true;
+  // Always have or may have side effects
+  if (ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isAwaitExpression(node) ||
+      ts.isYieldExpression(node) || ts.isTaggedTemplateExpression(node)) return true;
+  if (ts.isPostfixUnaryExpression(node)) return true;
 
-    case "MemberExpression":
-      if (mayHaveSideEffects(node.object)) return true;
-      // When computed: true, property is Expression
-      if (node.computed) {
-        return mayHaveSideEffects(node.property);
-      }
-      return false;
-
-    case "ArrayExpression":
-      for (const el of node.elements) {
-        if (el && el.type !== "SpreadElement" && mayHaveSideEffects(el)) return true;
-        if (el?.type === "SpreadElement" && mayHaveSideEffects(el.argument)) return true;
-      }
-      return false;
-
-    case "ObjectExpression":
-      for (const prop of node.properties) {
-        if (prop.type === "SpreadElement" && mayHaveSideEffects(prop.argument)) return true;
-        if (prop.type === "Property") {
-          // When computed: true, key is Expression (PropertyNameComputed)
-          if (prop.computed && mayHaveSideEffects(prop.key)) return true;
-          // value can be Expression | AssignmentPattern | BindingName | TSEmptyBodyFunctionExpression
-          // Only check Expression types, others are patterns/declarations (no side effects)
-          const val = prop.value;
-          if (val.type !== "AssignmentPattern" &&
-              val.type !== "ArrayPattern" &&
-              val.type !== "ObjectPattern" &&
-              val.type !== "Identifier" &&
-              val.type !== "TSEmptyBodyFunctionExpression") {
-            return mayHaveSideEffects(val);
-          }
-        }
-      }
-      return false;
-
-    case "UnaryExpression":
-      if (node.operator === "delete") return true;
-      return mayHaveSideEffects(node.argument);
-
-    case "BinaryExpression":
-      // Handle `#prop in obj` where left is PrivateIdentifier
-      if (node.left.type === "PrivateIdentifier") {
-        return mayHaveSideEffects(node.right);
-      }
-      return mayHaveSideEffects(node.left) || mayHaveSideEffects(node.right);
-
-    case "LogicalExpression":
-      return mayHaveSideEffects(node.left) || mayHaveSideEffects(node.right);
-
-    case "ConditionalExpression":
-      return mayHaveSideEffects(node.test) ||
-        mayHaveSideEffects(node.consequent) ||
-        mayHaveSideEffects(node.alternate);
-
-    case "SequenceExpression":
-      return node.expressions.some(mayHaveSideEffects);
-
-    case "TSAsExpression":
-    case "TSSatisfiesExpression":
-    case "TSNonNullExpression":
-    case "TSInstantiationExpression":
-      return mayHaveSideEffects(node.expression);
-
-    case "ChainExpression":
-      // ChainElement is CallExpression | MemberExpression | TSNonNullExpression
-      return mayHaveSideEffects(node.expression);
-
-    default:
-      return true;
+  if (ts.isPropertyAccessExpression(node)) {
+    return mayHaveSideEffects(node.expression);
   }
+
+  if (ts.isElementAccessExpression(node)) {
+    if (mayHaveSideEffects(node.expression)) return true;
+    return mayHaveSideEffects(node.argumentExpression);
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    for (const el of node.elements) {
+      if (ts.isSpreadElement(el)) {
+        if (mayHaveSideEffects(el.expression)) return true;
+      } else {
+        if (mayHaveSideEffects(el)) return true;
+      }
+    }
+    return false;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    for (const prop of node.properties) {
+      if (ts.isSpreadAssignment(prop)) {
+        if (mayHaveSideEffects(prop.expression)) return true;
+      } else if (ts.isPropertyAssignment(prop)) {
+        if (prop.name && ts.isComputedPropertyName(prop.name)) {
+          if (mayHaveSideEffects(prop.name.expression)) return true;
+        }
+        if (mayHaveSideEffects(prop.initializer)) return true;
+      } else if (ts.isShorthandPropertyAssignment(prop)) {
+        // Shorthand is just identifier reference - no side effects
+      }
+    }
+    return false;
+  }
+
+  if (ts.isPrefixUnaryExpression(node)) {
+    if (node.operator === ts.SyntaxKind.ExclamationToken ||
+        node.operator === ts.SyntaxKind.PlusToken ||
+        node.operator === ts.SyntaxKind.MinusToken ||
+        node.operator === ts.SyntaxKind.TildeToken) {
+      return mayHaveSideEffects(node.operand);
+    }
+    return true;
+  }
+
+  if (ts.isDeleteExpression(node)) return true;
+  if (ts.isTypeOfExpression(node)) return mayHaveSideEffects(node.expression);
+  if (ts.isVoidExpression(node)) return mayHaveSideEffects(node.expression);
+
+  if (ts.isBinaryExpression(node)) {
+    // Assignment operators
+    if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
+        node.operatorToken.kind >= ts.SyntaxKind.PlusEqualsToken &&
+        node.operatorToken.kind <= ts.SyntaxKind.CaretEqualsToken) {
+      return true;
+    }
+    return mayHaveSideEffects(node.left) || mayHaveSideEffects(node.right);
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    return mayHaveSideEffects(node.condition) ||
+      mayHaveSideEffects(node.whenTrue) ||
+      mayHaveSideEffects(node.whenFalse);
+  }
+
+  if (ts.isCommaListExpression(node)) {
+    return node.elements.some(mayHaveSideEffects);
+  }
+
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) {
+    return mayHaveSideEffects(node.expression);
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    return mayHaveSideEffects(node.expression);
+  }
+
+  return true;
 }
 
 /**
  * O(1) lookup for TypeScript keyword and simple type names.
- * Keys are AST_NODE_TYPES values, values are the human-readable names.
+ * Keys are ts.SyntaxKind values, values are the human-readable names.
  */
-const TS_TYPE_NAMES: Readonly<Record<string, string>> = {
+const TS_TYPE_NAMES: Readonly<Record<number, string>> = {
   // Keyword types
-  TSAnyKeyword: "any",
-  TSUnknownKeyword: "unknown",
-  TSNeverKeyword: "never",
-  TSVoidKeyword: "void",
-  TSUndefinedKeyword: "undefined",
-  TSNullKeyword: "null",
-  TSStringKeyword: "string",
-  TSNumberKeyword: "number",
-  TSBooleanKeyword: "boolean",
-  TSBigIntKeyword: "bigint",
-  TSSymbolKeyword: "symbol",
-  TSObjectKeyword: "object",
-  TSIntrinsicKeyword: "intrinsic",
+  [ts.SyntaxKind.AnyKeyword]: "any",
+  [ts.SyntaxKind.UnknownKeyword]: "unknown",
+  [ts.SyntaxKind.NeverKeyword]: "never",
+  [ts.SyntaxKind.VoidKeyword]: "void",
+  [ts.SyntaxKind.UndefinedKeyword]: "undefined",
+  [ts.SyntaxKind.NullKeyword]: "null",
+  [ts.SyntaxKind.StringKeyword]: "string",
+  [ts.SyntaxKind.NumberKeyword]: "number",
+  [ts.SyntaxKind.BooleanKeyword]: "boolean",
+  [ts.SyntaxKind.BigIntKeyword]: "bigint",
+  [ts.SyntaxKind.SymbolKeyword]: "symbol",
+  [ts.SyntaxKind.ObjectKeyword]: "object",
+  [ts.SyntaxKind.IntrinsicKeyword]: "intrinsic",
   // Simple named types
-  TSThisType: "this",
-  TSTypeLiteral: "object type",
-  TSFunctionType: "function type",
-  TSConstructorType: "constructor type",
-  TSConditionalType: "conditional type",
-  TSMappedType: "mapped type",
-  TSImportType: "import type",
-  TSTemplateLiteralType: "template literal type",
+  [ts.SyntaxKind.ThisType]: "this",
+  [ts.SyntaxKind.TypeLiteral]: "object type",
+  [ts.SyntaxKind.FunctionType]: "function type",
+  [ts.SyntaxKind.ConstructorType]: "constructor type",
+  [ts.SyntaxKind.ConditionalType]: "conditional type",
+  [ts.SyntaxKind.MappedType]: "mapped type",
+  [ts.SyntaxKind.ImportType]: "import type",
+  [ts.SyntaxKind.TemplateLiteralType]: "template literal type",
 };
 
 /**
@@ -353,73 +387,80 @@ const TS_TYPE_NAMES: Readonly<Record<string, string>> = {
  * getTypeName(arrayType)         // "string[]"
  * getTypeName(unionType)         // "string | number"
  */
-export function getTypeName(node: T.TypeNode): string {
+export function getTypeName(node: ts.TypeNode): string {
   // Fast path: direct lookup
-  const name = TS_TYPE_NAMES[node.type];
+  const name = TS_TYPE_NAMES[node.kind];
   if (name) return name;
 
-  // Compound types need recursion
-  switch (node.type) {
-    case "TSTypeReference":
-      if (node.typeName.type === "Identifier") {
-        return node.typeName.name;
-      }
-      if (node.typeName.type === "TSQualifiedName") {
-        return getQualifiedName(node.typeName);
-      }
-      return "type";
-
-    case "TSArrayType":
-      return `${getTypeName(node.elementType)}[]`;
-
-    case "TSUnionType":
-      return joinTypeNames(node.types, " | ");
-
-    case "TSIntersectionType":
-      return joinTypeNames(node.types, " & ");
-
-    case "TSTupleType":
-      return `[${joinTypeNames(node.elementTypes, ", ")}]`;
-
-    case "TSOptionalType":
-      return `${getTypeName(node.typeAnnotation)}?`;
-
-    case "TSRestType":
-      return `...${getTypeName(node.typeAnnotation)}`;
-
-    case "TSLiteralType":
-      return getLiteralTypeName(node);
-
-    case "TSIndexedAccessType":
-      return `${getTypeName(node.objectType)}[${getTypeName(node.indexType)}]`;
-
-    case "TSTypeOperator":
-      if (node.typeAnnotation) {
-        return `${node.operator} ${getTypeName(node.typeAnnotation)}`;
-      }
-      return node.operator;
-
-    case "TSTypeQuery":
-      if (node.exprName.type === "Identifier") {
-        return `typeof ${node.exprName.name}`;
-      }
-      return "typeof expression";
-
-    case "TSInferType":
-      return `infer ${node.typeParameter.name.name}`;
-
-    case "TSNamedTupleMember":
-      return `${node.label.name}: ${getTypeName(node.elementType)}`;
-
-    default:
-      return "type";
+  if (ts.isTypeReferenceNode(node)) {
+    if (ts.isIdentifier(node.typeName)) {
+      return node.typeName.text;
+    }
+    if (ts.isQualifiedName(node.typeName)) {
+      return getQualifiedName(node.typeName);
+    }
+    return "type";
   }
+
+  if (ts.isArrayTypeNode(node)) {
+    return `${getTypeName(node.elementType)}[]`;
+  }
+
+  if (ts.isUnionTypeNode(node)) {
+    return joinTypeNames(node.types, " | ");
+  }
+
+  if (ts.isIntersectionTypeNode(node)) {
+    return joinTypeNames(node.types, " & ");
+  }
+
+  if (ts.isTupleTypeNode(node)) {
+    return `[${joinTypeNames(node.elements, ", ")}]`;
+  }
+
+  if (ts.isOptionalTypeNode(node)) {
+    return `${getTypeName(node.type)}?`;
+  }
+
+  if (ts.isRestTypeNode(node)) {
+    return `...${getTypeName(node.type)}`;
+  }
+
+  if (ts.isLiteralTypeNode(node)) {
+    return getLiteralTypeName(node);
+  }
+
+  if (ts.isIndexedAccessTypeNode(node)) {
+    return `${getTypeName(node.objectType)}[${getTypeName(node.indexType)}]`;
+  }
+
+  if (ts.isTypeOperatorNode(node)) {
+    const opText = ts.tokenToString(node.operator) ?? "";
+    return `${opText} ${getTypeName(node.type)}`;
+  }
+
+  if (ts.isTypeQueryNode(node)) {
+    if (ts.isIdentifier(node.exprName)) {
+      return `typeof ${node.exprName.text}`;
+    }
+    return "typeof expression";
+  }
+
+  if (ts.isInferTypeNode(node)) {
+    return `infer ${node.typeParameter.name.text}`;
+  }
+
+  if (ts.isNamedTupleMember(node)) {
+    return `${node.name.text}: ${getTypeName(node.type)}`;
+  }
+
+  return "type";
 }
 
 /**
  * Join type names with a separator, avoiding .map() allocation for small arrays.
  */
-function joinTypeNames(types: readonly T.TypeNode[], sep: string): string {
+function joinTypeNames(types: readonly ts.TypeNode[], sep: string): string {
   const len = types.length;
   if (len === 0) return "";
   const first = types[0];
@@ -436,33 +477,39 @@ function joinTypeNames(types: readonly T.TypeNode[], sep: string): string {
 /**
  * Get name for TSLiteralType nodes.
  */
-function getLiteralTypeName(node: T.TSLiteralType): string {
+function getLiteralTypeName(node: ts.LiteralTypeNode): string {
   const lit = node.literal;
-  if (lit.type === "Literal") {
-    if (typeof lit.value === "string") return `"${lit.value}"`;
-    return String(lit.value);
+  if (ts.isStringLiteral(lit)) {
+    return `"${lit.text}"`;
   }
-  if (lit.type === "UnaryExpression" && lit.argument.type === "Literal") {
-    return `${lit.operator}${String(lit.argument.value)}`;
+  if (ts.isNumericLiteral(lit)) {
+    return lit.text;
   }
-  if (lit.type === "TemplateLiteral") {
+  if (ts.isPrefixUnaryExpression(lit) && ts.isNumericLiteral(lit.operand)) {
+    const opText = ts.tokenToString(lit.operator) ?? "";
+    return `${opText}${lit.operand.text}`;
+  }
+  if (ts.isNoSubstitutionTemplateLiteral(lit)) {
     return "template literal type";
   }
+  if (lit.kind === ts.SyntaxKind.TrueKeyword) return "true";
+  if (lit.kind === ts.SyntaxKind.FalseKeyword) return "false";
+  if (lit.kind === ts.SyntaxKind.NullKeyword) return "null";
   return "literal";
 }
 
 /**
  * Get the full name from a qualified name (e.g., `Namespace.Type`).
  */
-function getQualifiedName(node: T.TSQualifiedName): string {
-  const right = node.right.name;
-  if (node.left.type === "Identifier") {
-    return `${node.left.name}.${right}`;
+function getQualifiedName(node: ts.QualifiedName): string {
+  const right = node.right.text;
+  if (ts.isIdentifier(node.left)) {
+    return `${node.left.text}.${right}`;
   }
-  if (node.left.type === "ThisExpression") {
-    return `this.${right}`;
+  if (ts.isQualifiedName(node.left)) {
+    return `${getQualifiedName(node.left)}.${right}`;
   }
-  return `${getQualifiedName(node.left)}.${right}`;
+  return right;
 }
 
 /**
@@ -471,8 +518,23 @@ function getQualifiedName(node: T.TSQualifiedName): string {
  * @param node - The expression node to check
  * @returns True if node is an empty object literal
  */
-export function isEmptyObjectLiteral(node: T.Expression): boolean {
-  return node.type === "ObjectExpression" && node.properties.length === 0;
+export function isEmptyObjectLiteral(node: ts.Expression): boolean {
+  return ts.isObjectLiteralExpression(node) && node.properties.length === 0;
+}
+
+/**
+ * Unwraps ParenthesizedExpression nodes to get the inner expression.
+ *
+ * TypeScript AST wraps `(expr)` in an explicit ParenthesizedExpression node,
+ * unlike ESTree which treats parentheses as transparent. This utility peels
+ * through all layers of parentheses to reach the semantically meaningful node.
+ */
+export function unwrapParenthesized(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
 }
 
 /**
@@ -490,18 +552,15 @@ export const COMPARISON_OPERATORS = new Set([
 ]);
 
 /**
- * Logical operators that typically indicate intentional boolean context.
- */
-const LOGICAL_OPERATORS = new Set(["&&", "||", "??"]);
-
-/**
  * Check if a node is a comparison expression that produces a boolean.
  *
  * @param node - The AST node to check
  * @returns True if the node is a comparison expression
  */
-export function isComparisonExpression(node: T.Node): boolean {
-  return node.type === "BinaryExpression" && COMPARISON_OPERATORS.has(node.operator);
+export function isComparisonExpression(node: ts.Node): boolean {
+  if (!ts.isBinaryExpression(node)) return false;
+  const opText = node.operatorToken.getText();
+  return COMPARISON_OPERATORS.has(opText);
 }
 
 /**
@@ -510,8 +569,12 @@ export function isComparisonExpression(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a logical expression
  */
-export function isLogicalExpression(node: T.Node): boolean {
-  return node.type === "LogicalExpression" && LOGICAL_OPERATORS.has(node.operator);
+export function isLogicalExpression(node: ts.Node): boolean {
+  if (!ts.isBinaryExpression(node)) return false;
+  const kind = node.operatorToken.kind;
+  return kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    kind === ts.SyntaxKind.BarBarToken ||
+    kind === ts.SyntaxKind.QuestionQuestionToken;
 }
 
 /**
@@ -520,8 +583,8 @@ export function isLogicalExpression(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a NOT expression
  */
-export function isNotExpression(node: T.Node): boolean {
-  return node.type === "UnaryExpression" && node.operator === "!";
+export function isNotExpression(node: ts.Node): boolean {
+  return ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken;
 }
 
 /**
@@ -530,10 +593,10 @@ export function isNotExpression(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a Boolean() call
  */
-export function isBooleanCall(node: T.Node): boolean {
-  if (node.type !== "CallExpression") return false;
-  const callee = node.callee;
-  return callee.type === "Identifier" && callee.name === "Boolean";
+export function isBooleanCall(node: ts.Node): boolean {
+  if (!ts.isCallExpression(node)) return false;
+  const callee = node.expression;
+  return ts.isIdentifier(callee) && callee.text === "Boolean";
 }
 
 /**
@@ -542,10 +605,10 @@ export function isBooleanCall(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a double negation expression
  */
-export function isDoubleNegation(node: T.Node): boolean {
-  if (node.type !== "UnaryExpression" || node.operator !== "!") return false;
-  const arg = node.argument;
-  return arg.type === "UnaryExpression" && arg.operator === "!";
+export function isDoubleNegation(node: ts.Node): boolean {
+  if (!ts.isPrefixUnaryExpression(node) || node.operator !== ts.SyntaxKind.ExclamationToken) return false;
+  const arg = node.operand;
+  return ts.isPrefixUnaryExpression(arg) && arg.operator === ts.SyntaxKind.ExclamationToken;
 }
 
 /**
@@ -555,11 +618,11 @@ export function isDoubleNegation(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is a guarded ternary pattern
  */
-export function isGuardedTernary(node: T.Node): boolean {
-  if (node.type !== "ConditionalExpression") return false;
-  const alt = node.alternate;
-  if (alt.type === "Literal" && (alt.value === null || alt.value === false)) return true;
-  if (alt.type === "Identifier" && alt.name === "undefined") return true;
+export function isGuardedTernary(node: ts.Node): boolean {
+  if (!ts.isConditionalExpression(node)) return false;
+  const alt = node.whenFalse;
+  if (alt.kind === ts.SyntaxKind.NullKeyword || alt.kind === ts.SyntaxKind.FalseKeyword) return true;
+  if (ts.isIdentifier(alt) && alt.text === "undefined") return true;
   return false;
 }
 
@@ -579,30 +642,29 @@ export function isGuardedTernary(node: T.Node): boolean {
  * @param node - The AST node to check
  * @returns True if the node is an explicit boolean expression
  */
-export function isExplicitBooleanExpression(node: T.Node): boolean {
+export function isExplicitBooleanExpression(node: ts.Node): boolean {
   if (isComparisonExpression(node)) return true;
   if (isLogicalExpression(node)) return true;
   if (isNotExpression(node)) return true;
   if (isBooleanCall(node)) return true;
   if (isDoubleNegation(node)) return true;
-  if (node.type === "Literal" && typeof node.value === "boolean") return true;
+  if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) return true;
   if (isGuardedTernary(node)) return true;
   return false;
 }
 
-const LOOP_TYPES = new Set([
-  "ForStatement",
-  "ForInStatement",
-  "ForOfStatement",
-  "WhileStatement",
-  "DoWhileStatement",
+const LOOP_KINDS = new Set([
+  ts.SyntaxKind.ForStatement,
+  ts.SyntaxKind.ForInStatement,
+  ts.SyntaxKind.ForOfStatement,
+  ts.SyntaxKind.WhileStatement,
+  ts.SyntaxKind.DoStatement,
 ]);
 
-const CONDITIONAL_TYPES = new Set([
-  "IfStatement",
-  "ConditionalExpression",
-  "SwitchStatement",
-  "LogicalExpression",
+const CONDITIONAL_KINDS = new Set([
+  ts.SyntaxKind.IfStatement,
+  ts.SyntaxKind.ConditionalExpression,
+  ts.SyntaxKind.SwitchStatement,
 ]);
 
 /**
@@ -613,13 +675,13 @@ const CONDITIONAL_TYPES = new Set([
  * @param node - Starting node
  * @returns The loop node, or null if not in a loop
  */
-export function getEnclosingLoop(node: T.Node): T.Node | null {
+export function getEnclosingLoop(node: ts.Node): ts.Node | null {
   let current = node.parent;
   while (current) {
-    if (LOOP_TYPES.has(current.type)) return current;
-    if (current.type === "ArrowFunctionExpression" ||
-        current.type === "FunctionExpression" ||
-        current.type === "FunctionDeclaration") {
+    if (LOOP_KINDS.has(current.kind)) return current;
+    if (ts.isArrowFunction(current) ||
+        ts.isFunctionExpression(current) ||
+        ts.isFunctionDeclaration(current)) {
       return null;
     }
     current = current.parent;
@@ -630,20 +692,26 @@ export function getEnclosingLoop(node: T.Node): T.Node | null {
 /**
  * Checks if a node is inside a loop construct.
  */
-export function isInLoop(node: T.Node): boolean {
+export function isInLoop(node: ts.Node): boolean {
   return getEnclosingLoop(node) !== null;
 }
 
 /**
  * Checks if a node is inside a conditional construct.
  */
-export function isInConditional(node: T.Node): boolean {
+export function isInConditional(node: ts.Node): boolean {
   let current = node.parent;
   while (current) {
-    if (CONDITIONAL_TYPES.has(current.type)) return true;
-    if (current.type === "ArrowFunctionExpression" ||
-        current.type === "FunctionExpression" ||
-        current.type === "FunctionDeclaration") {
+    if (CONDITIONAL_KINDS.has(current.kind)) return true;
+    // Also check for logical expressions (&&, ||, ??)
+    if (ts.isBinaryExpression(current) && (
+      current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+      current.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+      current.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) return true;
+    if (ts.isArrowFunction(current) ||
+        ts.isFunctionExpression(current) ||
+        ts.isFunctionDeclaration(current)) {
       return false;
     }
     current = current.parent;
@@ -664,117 +732,144 @@ export function isInConditional(node: T.Node): boolean {
  * @param names Set of identifier names to look for
  * @returns true if any identifier in the expression matches a name in the set
  */
-export function expressionReferencesAny(node: T.Node, names: Set<string>): boolean {
+export function expressionReferencesAny(node: ts.Node, names: Set<string>): boolean {
   if (names.size === 0) return false;
 
-  const stack: T.Node[] = [node];
+  const stack: ts.Node[] = [node];
   let top = 1;
 
   while (top > 0) {
     const current = stack[--top];
     if (!current) continue;
 
-    switch (current.type) {
-      case "Identifier":
-        if (names.has(current.name)) return true;
-        break;
+    if (ts.isIdentifier(current)) {
+      if (names.has(current.text)) return true;
+      continue;
+    }
 
-      case "MemberExpression":
-        stack[top++] = current.object;
-        break;
+    if (ts.isPropertyAccessExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
 
-      case "CallExpression":
-      case "NewExpression": {
-        stack[top++] = current.callee;
-        const args = current.arguments;
+    if (ts.isElementAccessExpression(current)) {
+      stack[top++] = current.expression;
+      stack[top++] = current.argumentExpression;
+      continue;
+    }
+
+    if (ts.isCallExpression(current) || ts.isNewExpression(current)) {
+      stack[top++] = current.expression;
+      const args = current.arguments;
+      if (args) {
         for (let i = args.length - 1; i >= 0; i--) {
           const arg = args[i];
           if (arg) stack[top++] = arg;
         }
-        break;
       }
-
-      case "BinaryExpression":
-      case "LogicalExpression":
-      case "AssignmentExpression":
-        stack[top++] = current.left;
-        stack[top++] = current.right;
-        break;
-
-      case "ConditionalExpression":
-        stack[top++] = current.test;
-        stack[top++] = current.consequent;
-        stack[top++] = current.alternate;
-        break;
-
-      case "UnaryExpression":
-      case "UpdateExpression":
-      case "SpreadElement":
-      case "AwaitExpression":
-        stack[top++] = current.argument;
-        break;
-
-      case "YieldExpression":
-        if (current.argument) stack[top++] = current.argument;
-        break;
-
-      case "ArrayExpression": {
-        const elements = current.elements;
-        for (let i = elements.length - 1; i >= 0; i--) {
-          const el = elements[i];
-          if (el) stack[top++] = el;
-        }
-        break;
-      }
-
-      case "ObjectExpression": {
-        const props = current.properties;
-        for (let i = props.length - 1; i >= 0; i--) {
-          const prop = props[i];
-          if (!prop) continue;
-          if (prop.type === "Property") {
-            if (prop.computed) stack[top++] = prop.key;
-            stack[top++] = prop.value;
-          } else if (prop.type === "SpreadElement") {
-            stack[top++] = prop.argument;
-          }
-        }
-        break;
-      }
-
-      case "TemplateLiteral":
-      case "SequenceExpression": {
-        const exprs = current.expressions;
-        for (let i = exprs.length - 1; i >= 0; i--) {
-          const expr = exprs[i];
-          if (expr) stack[top++] = expr;
-        }
-        break;
-      }
-
-      case "TaggedTemplateExpression":
-        stack[top++] = current.tag;
-        stack[top++] = current.quasi;
-        break;
-
-      case "TSAsExpression":
-      case "TSTypeAssertion":
-      case "TSNonNullExpression":
-      case "ChainExpression":
-        stack[top++] = current.expression;
-        break;
-
-      // Don't descend into nested functions - they create new scope
-      case "ArrowFunctionExpression":
-      case "FunctionExpression":
-      case "Literal":
-      case "ThisExpression":
-      case "Super":
-      case "MetaProperty":
-      case "JSXElement":
-      case "JSXFragment":
-        break;
+      continue;
     }
+
+    if (ts.isBinaryExpression(current)) {
+      stack[top++] = current.left;
+      stack[top++] = current.right;
+      continue;
+    }
+
+    if (ts.isConditionalExpression(current)) {
+      stack[top++] = current.condition;
+      stack[top++] = current.whenTrue;
+      stack[top++] = current.whenFalse;
+      continue;
+    }
+
+    if (ts.isPrefixUnaryExpression(current)) {
+      stack[top++] = current.operand;
+      continue;
+    }
+
+    if (ts.isPostfixUnaryExpression(current)) {
+      stack[top++] = current.operand;
+      continue;
+    }
+
+    if (ts.isSpreadElement(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isAwaitExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isYieldExpression(current)) {
+      if (current.expression) stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isArrayLiteralExpression(current)) {
+      const elements = current.elements;
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const el = elements[i];
+        if (el) stack[top++] = el;
+      }
+      continue;
+    }
+
+    if (ts.isObjectLiteralExpression(current)) {
+      const props = current.properties;
+      for (let i = props.length - 1; i >= 0; i--) {
+        const prop = props[i];
+        if (!prop) continue;
+        if (ts.isPropertyAssignment(prop)) {
+          if (ts.isComputedPropertyName(prop.name)) stack[top++] = prop.name.expression;
+          stack[top++] = prop.initializer;
+        } else if (ts.isShorthandPropertyAssignment(prop)) {
+          stack[top++] = prop.name;
+        } else if (ts.isSpreadAssignment(prop)) {
+          stack[top++] = prop.expression;
+        }
+      }
+      continue;
+    }
+
+    if (ts.isTemplateExpression(current)) {
+      for (let i = current.templateSpans.length - 1; i >= 0; i--) {
+        const span = current.templateSpans[i];
+        if (span) stack[top++] = span.expression;
+      }
+      continue;
+    }
+
+    if (ts.isCommaListExpression(current)) {
+      const exprs = current.elements;
+      for (let i = exprs.length - 1; i >= 0; i--) {
+        const expr = exprs[i];
+        if (expr) stack[top++] = expr;
+      }
+      continue;
+    }
+
+    if (ts.isTaggedTemplateExpression(current)) {
+      stack[top++] = current.tag;
+      stack[top++] = current.template;
+      continue;
+    }
+
+    if (ts.isAsExpression(current) || ts.isNonNullExpression(current) ||
+        ts.isParenthesizedExpression(current) || ts.isSatisfiesExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isTypeAssertionExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    // Don't descend into nested functions - they create new scope
+    // Also skip literals, this, super, meta properties, JSX
   }
 
   return false;
@@ -793,153 +888,185 @@ export function expressionReferencesAny(node: T.Node, names: Set<string>): boole
  * @param names Set of identifier names to look for
  * @returns true if any identifier in the expression (including inside closures) matches
  */
-export function expressionReferencesAnyDeep(node: T.Node, names: Set<string>): boolean {
+export function expressionReferencesAnyDeep(node: ts.Node, names: Set<string>): boolean {
   if (names.size === 0) return false;
 
-  const stack: T.Node[] = [node];
+  const stack: ts.Node[] = [node];
   let top = 1;
 
   while (top > 0) {
     const current = stack[--top];
     if (!current) continue;
 
-    switch (current.type) {
-      case "Identifier":
-        if (names.has(current.name)) return true;
-        break;
+    if (ts.isIdentifier(current)) {
+      if (names.has(current.text)) return true;
+      continue;
+    }
 
-      case "MemberExpression":
-        stack[top++] = current.object;
-        break;
+    if (ts.isPropertyAccessExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
 
-      case "CallExpression":
-      case "NewExpression": {
-        stack[top++] = current.callee;
-        const args = current.arguments;
+    if (ts.isElementAccessExpression(current)) {
+      stack[top++] = current.expression;
+      stack[top++] = current.argumentExpression;
+      continue;
+    }
+
+    if (ts.isCallExpression(current) || ts.isNewExpression(current)) {
+      stack[top++] = current.expression;
+      const args = current.arguments;
+      if (args) {
         for (let i = args.length - 1; i >= 0; i--) {
           const arg = args[i];
           if (arg) stack[top++] = arg;
         }
-        break;
       }
-
-      case "BinaryExpression":
-      case "LogicalExpression":
-      case "AssignmentExpression":
-        stack[top++] = current.left;
-        stack[top++] = current.right;
-        break;
-
-      case "ConditionalExpression":
-        stack[top++] = current.test;
-        stack[top++] = current.consequent;
-        stack[top++] = current.alternate;
-        break;
-
-      case "UnaryExpression":
-      case "UpdateExpression":
-      case "SpreadElement":
-      case "AwaitExpression":
-        stack[top++] = current.argument;
-        break;
-
-      case "YieldExpression":
-        if (current.argument) stack[top++] = current.argument;
-        break;
-
-      case "ArrayExpression": {
-        const elements = current.elements;
-        for (let i = elements.length - 1; i >= 0; i--) {
-          const el = elements[i];
-          if (el) stack[top++] = el;
-        }
-        break;
-      }
-
-      case "ObjectExpression": {
-        const props = current.properties;
-        for (let i = props.length - 1; i >= 0; i--) {
-          const prop = props[i];
-          if (!prop) continue;
-          if (prop.type === "Property") {
-            if (prop.computed) stack[top++] = prop.key;
-            stack[top++] = prop.value;
-          } else if (prop.type === "SpreadElement") {
-            stack[top++] = prop.argument;
-          }
-        }
-        break;
-      }
-
-      case "TemplateLiteral":
-      case "SequenceExpression": {
-        const exprs = current.expressions;
-        for (let i = exprs.length - 1; i >= 0; i--) {
-          const expr = exprs[i];
-          if (expr) stack[top++] = expr;
-        }
-        break;
-      }
-
-      case "TaggedTemplateExpression":
-        stack[top++] = current.tag;
-        stack[top++] = current.quasi;
-        break;
-
-      case "TSAsExpression":
-      case "TSTypeAssertion":
-      case "TSNonNullExpression":
-      case "ChainExpression":
-        stack[top++] = current.expression;
-        break;
-
-      // Traverse INTO function bodies — the key difference from expressionReferencesAny
-      case "ArrowFunctionExpression":
-      case "FunctionExpression":
-        stack[top++] = current.body;
-        break;
-
-      // Statement traversal (needed for block-body arrow functions)
-      case "BlockStatement": {
-        const stmts = current.body;
-        for (let i = stmts.length - 1; i >= 0; i--) {
-          const stmt = stmts[i];
-          if (stmt) stack[top++] = stmt;
-        }
-        break;
-      }
-
-      case "ReturnStatement":
-        if (current.argument) stack[top++] = current.argument;
-        break;
-
-      case "ExpressionStatement":
-        stack[top++] = current.expression;
-        break;
-
-      case "VariableDeclaration": {
-        const decls = current.declarations;
-        for (let i = decls.length - 1; i >= 0; i--) {
-          const decl = decls[i];
-          if (decl?.init) stack[top++] = decl.init;
-        }
-        break;
-      }
-
-      case "IfStatement":
-        stack[top++] = current.test;
-        stack[top++] = current.consequent;
-        if (current.alternate) stack[top++] = current.alternate;
-        break;
-
-      case "Literal":
-      case "ThisExpression":
-      case "Super":
-      case "MetaProperty":
-      case "JSXElement":
-      case "JSXFragment":
-        break;
+      continue;
     }
+
+    if (ts.isBinaryExpression(current)) {
+      stack[top++] = current.left;
+      stack[top++] = current.right;
+      continue;
+    }
+
+    if (ts.isConditionalExpression(current)) {
+      stack[top++] = current.condition;
+      stack[top++] = current.whenTrue;
+      stack[top++] = current.whenFalse;
+      continue;
+    }
+
+    if (ts.isPrefixUnaryExpression(current) || ts.isPostfixUnaryExpression(current)) {
+      stack[top++] = current.operand;
+      continue;
+    }
+
+    if (ts.isSpreadElement(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isAwaitExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isYieldExpression(current)) {
+      if (current.expression) stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isArrayLiteralExpression(current)) {
+      const elements = current.elements;
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const el = elements[i];
+        if (el) stack[top++] = el;
+      }
+      continue;
+    }
+
+    if (ts.isObjectLiteralExpression(current)) {
+      const props = current.properties;
+      for (let i = props.length - 1; i >= 0; i--) {
+        const prop = props[i];
+        if (!prop) continue;
+        if (ts.isPropertyAssignment(prop)) {
+          if (ts.isComputedPropertyName(prop.name)) stack[top++] = prop.name.expression;
+          stack[top++] = prop.initializer;
+        } else if (ts.isShorthandPropertyAssignment(prop)) {
+          stack[top++] = prop.name;
+        } else if (ts.isSpreadAssignment(prop)) {
+          stack[top++] = prop.expression;
+        }
+      }
+      continue;
+    }
+
+    if (ts.isTemplateExpression(current)) {
+      for (let i = current.templateSpans.length - 1; i >= 0; i--) {
+        const span = current.templateSpans[i];
+        if (span) stack[top++] = span.expression;
+      }
+      continue;
+    }
+
+    if (ts.isCommaListExpression(current)) {
+      const exprs = current.elements;
+      for (let i = exprs.length - 1; i >= 0; i--) {
+        const expr = exprs[i];
+        if (expr) stack[top++] = expr;
+      }
+      continue;
+    }
+
+    if (ts.isTaggedTemplateExpression(current)) {
+      stack[top++] = current.tag;
+      stack[top++] = current.template;
+      continue;
+    }
+
+    if (ts.isAsExpression(current) || ts.isNonNullExpression(current) ||
+        ts.isParenthesizedExpression(current) || ts.isSatisfiesExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isTypeAssertionExpression(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    // Traverse INTO function bodies — the key difference from expressionReferencesAny
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      stack[top++] = current.body;
+      continue;
+    }
+
+    // Statement traversal (needed for block-body arrow functions)
+    if (ts.isBlock(current)) {
+      const stmts = current.statements;
+      for (let i = stmts.length - 1; i >= 0; i--) {
+        const stmt = stmts[i];
+        if (stmt) stack[top++] = stmt;
+      }
+      continue;
+    }
+
+    if (ts.isReturnStatement(current)) {
+      if (current.expression) stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isExpressionStatement(current)) {
+      stack[top++] = current.expression;
+      continue;
+    }
+
+    if (ts.isVariableStatement(current)) {
+      const decls = current.declarationList.declarations;
+      for (let i = decls.length - 1; i >= 0; i--) {
+        const decl = decls[i];
+        if (decl?.initializer) stack[top++] = decl.initializer;
+      }
+      continue;
+    }
+
+    if (ts.isVariableDeclaration(current)) {
+      if (current.initializer) stack[top++] = current.initializer;
+      continue;
+    }
+
+    if (ts.isIfStatement(current)) {
+      stack[top++] = current.expression;
+      stack[top++] = current.thenStatement;
+      if (current.elseStatement) stack[top++] = current.elseStatement;
+      continue;
+    }
+
+    // Skip literals, this, super, meta properties, JSX
   }
 
   return false;
@@ -959,55 +1086,43 @@ export function expressionReferencesAnyDeep(node: T.Node, names: Set<string>): b
  * @param node The starting node
  * @returns The containing expression, or the node itself if at expression root
  */
-export function getContainingExpression(node: T.Node): T.Node {
+export function getContainingExpression(node: ts.Node): ts.Node {
   let current = node;
   let parent = node.parent;
 
   while (parent) {
-    switch (parent.type) {
-      // Expression or statement boundary - stop here
-      case "ExpressionStatement":
-      case "VariableDeclarator":
-      case "ReturnStatement":
-      case "ThrowStatement":
-      case "JSXExpressionContainer":
-      case "JSXAttribute":
-      case "BlockStatement":
-      case "IfStatement":
-      case "ForStatement":
-      case "WhileStatement":
-      case "SwitchStatement":
-      case "TryStatement":
-        return current;
-
-      // Object property - stop if current is the value
-      case "Property":
-        if (parent.value === current) {
-          return current;
-        }
-        break;
-
-      // CallExpression - stop if current is an argument
-      case "CallExpression":
-        if (parent.callee !== current) {
-          return current;
-        }
-        break;
-
-      // Expressions that contain our node - continue up
-      case "ArrayExpression":
-      case "ObjectExpression":
-      case "BinaryExpression":
-      case "LogicalExpression":
-      case "ConditionalExpression":
-      case "UnaryExpression":
-      case "MemberExpression":
-      case "SequenceExpression":
-      case "AssignmentExpression":
-      case "TemplateLiteral":
-      case "TaggedTemplateExpression":
-        break;
+    // Expression or statement boundary - stop here
+    if (ts.isExpressionStatement(parent) ||
+        ts.isVariableDeclaration(parent) ||
+        ts.isReturnStatement(parent) ||
+        ts.isThrowStatement(parent) ||
+        ts.isJsxExpression(parent) ||
+        ts.isJsxAttribute(parent) ||
+        ts.isBlock(parent) ||
+        ts.isIfStatement(parent) ||
+        ts.isForStatement(parent) ||
+        ts.isWhileStatement(parent) ||
+        ts.isSwitchStatement(parent) ||
+        ts.isTryStatement(parent)) {
+      return current;
     }
+
+    // Object property - stop if current is the value
+    if (ts.isPropertyAssignment(parent)) {
+      if (parent.initializer === current) {
+        return current;
+      }
+    }
+
+    // CallExpression - stop if current is an argument
+    else if (ts.isCallExpression(parent)) {
+      if (parent.expression !== current) {
+        return current;
+      }
+    }
+
+    // Expressions that contain our node - continue up
+    // (array, object, binary, conditional, unary, member, template, tagged template - all just continue)
 
     current = parent;
     parent = parent.parent;
@@ -1027,13 +1142,12 @@ export const STRING_RETURNING_METHODS = new Set([
 /**
  * Checks if an expression is provably a string value.
  */
-export function isStringExpression(node: T.Expression): boolean {
-  if (node.type === "Literal" && typeof node.value === "string") return true;
-  if (node.type === "TemplateLiteral") return true;
-  if (node.type === "CallExpression" &&
-      node.callee.type === "MemberExpression" &&
-      node.callee.property.type === "Identifier") {
-    if (STRING_RETURNING_METHODS.has(node.callee.property.name)) return true;
+export function isStringExpression(node: ts.Expression): boolean {
+  if (ts.isStringLiteral(node)) return true;
+  if (ts.isTemplateExpression(node) || ts.isNoSubstitutionTemplateLiteral(node)) return true;
+  if (ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression)) {
+    if (STRING_RETURNING_METHODS.has(node.expression.name.text)) return true;
   }
   return false;
 }

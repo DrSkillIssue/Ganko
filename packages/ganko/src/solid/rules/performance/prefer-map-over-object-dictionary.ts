@@ -7,6 +7,7 @@
  * making this pattern architecturally equivalent to Map for one-time builds.
  */
 
+import ts from "typescript"
 import type { TypeInfo } from "../../typescript"
 import type { PropertyAssignmentEntity } from "../../entities/property-assignment"
 import { getPropertyAssignments, getVariablesByName } from "../../queries/get"
@@ -44,10 +45,7 @@ export const preferMapOverObjectDictionary = defineSolidRule({
       if (!pa.computed) continue
 
       const prop = pa.property
-      if (prop.type === "Literal") {
-        const val = prop.value
-        if (typeof val === "string" || typeof val === "number") continue
-      }
+      if (ts.isStringLiteral(prop) || ts.isNumericLiteral(prop)) continue
 
       const typeInfo = getTypeInfo(graph, pa.object)
       if (!isDictionaryType(typeInfo)) continue
@@ -58,6 +56,7 @@ export const preferMapOverObjectDictionary = defineSolidRule({
         createDiagnostic(
           graph.file,
           pa.node,
+          graph.sourceFile,
           "prefer-map-over-object-dictionary",
           "preferMap",
           messages.preferMap,
@@ -100,18 +99,15 @@ function isDictionaryType(typeInfo: TypeInfo | null): boolean {
  */
 function isBuildOnceInLoop(graph: SolidGraph, pa: PropertyAssignmentEntity): boolean {
   const obj = pa.object
-  if (obj.type !== "Identifier") return false
+  if (!ts.isIdentifier(obj)) return false
 
-  const vars = getVariablesByName(graph, obj.name)
+  const vars = getVariablesByName(graph, obj.text)
   if (vars.length === 0) return false
 
   const variable = vars[0]
   if (!variable) return false
-  const first = variable.assignments[0]
-  if (!first) return false
+  const init = variable.initializer
+  if (!init) return false
 
-  // Must be a declarator init (operator null), not a reassignment
-  if (first.operator !== null) return false
-
-  return isEmptyObjectLiteral(first.value)
+  return isEmptyObjectLiteral(init)
 }

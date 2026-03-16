@@ -14,7 +14,7 @@
  * Either strategy alone indicates deliberate cleanup intent and suppresses the warning.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../../impl"
 import type { SolidRule } from "../../rule"
 import { defineSolidRule } from "../../rule"
@@ -116,26 +116,25 @@ export function findEnclosingEffectScope(graph: SolidGraph, scope: ScopeEntity):
 
 /**
  * Extract the function name from a callee expression.
- * Handles both bare identifiers (e.g., `setTimeout`) and member expressions
- * (e.g., `window.setTimeout`, `globalThis.clearInterval`).
+ * Handles both bare identifiers (e.g., `setTimeout`) and property access
+ * expressions (e.g., `window.setTimeout`, `globalThis.clearInterval`).
  */
-export function extractCalleeName(callee: T.Expression): string | null {
-  if (callee.type === "Identifier") return callee.name
+export function extractCalleeName(callee: ts.Expression): string | null {
+  if (ts.isIdentifier(callee)) return callee.text
   if (
-    callee.type === "MemberExpression" &&
-    callee.property.type === "Identifier" &&
-    !callee.computed
+    ts.isPropertyAccessExpression(callee) &&
+    ts.isIdentifier(callee.name)
   ) {
-    return callee.property.name
+    return callee.name.text
   }
   return null
 }
 
 /**
- * Check if an AST node is contained within another node using range comparison.
+ * Check if an AST node is contained within another node using position comparison.
  */
-export function isInsideNode(node: T.Node, ancestor: T.Node): boolean {
-  return node.range[0] >= ancestor.range[0] && node.range[1] <= ancestor.range[1]
+export function isInsideNode(node: ts.Node, ancestor: ts.Node): boolean {
+  return node.pos >= ancestor.pos && node.end <= ancestor.end
 }
 
 /**
@@ -146,8 +145,8 @@ export function isInsideNode(node: T.Node, ancestor: T.Node): boolean {
  *   they were declared in (component body, custom primitive, etc.)
  */
 export interface CleanupCollection {
-  readonly byEffect: Map<ScopeEntity, T.Node[]>;
-  readonly bySibling: Map<ScopeEntity, T.Node[]>;
+  readonly byEffect: Map<ScopeEntity, ts.Node[]>;
+  readonly bySibling: Map<ScopeEntity, ts.Node[]>;
 }
 
 /**
@@ -160,27 +159,27 @@ export interface CleanupCollection {
  * @param cleanup - the onCleanup call entity
  * @returns the resolved callback AST node, or null if unresolvable
  */
-function resolveCleanupCallback(graph: SolidGraph, cleanup: CallEntity): T.Node | null {
+function resolveCleanupCallback(graph: SolidGraph, cleanup: CallEntity): ts.Node | null {
   const callbackArg = cleanup.arguments[0]
   if (!callbackArg) return null
 
   const callbackNode = callbackArg.node
 
   if (
-    callbackNode.type === "ArrowFunctionExpression" ||
-    callbackNode.type === "FunctionExpression"
+    ts.isArrowFunction(callbackNode) ||
+    ts.isFunctionExpression(callbackNode)
   ) {
     return callbackNode
   }
 
-  if (callbackNode.type !== "Identifier") return null
+  if (!ts.isIdentifier(callbackNode)) return null
 
   // Resolve named function reference: onCleanup(cleanup)
-  const callRange = cleanup.node.range[0]
-  let resolved: T.Node | null = null
+  const callRange = cleanup.node.pos
+  let resolved: ts.Node | null = null
 
   // Check variable assignments for arrow/function expressions
-  const vars = graph.variablesByName.get(callbackNode.name)
+  const vars = graph.variablesByName.get(callbackNode.text)
   if (vars) {
     for (let vi = 0, vlen = vars.length; vi < vlen; vi++) {
       const v = vars[vi]
@@ -190,10 +189,10 @@ function resolveCleanupCallback(graph: SolidGraph, cleanup: CallEntity): T.Node 
       const decls = v.declarations
       for (let di = 0, dlen = decls.length; di < dlen; di++) {
         const declarator = decls[di]?.parent
-        if (declarator?.type === "VariableDeclarator" && declarator.init) {
-          const init = declarator.init
-          if (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression") {
-            if (!resolved || init.range[0] <= callRange) {
+        if (declarator && ts.isVariableDeclaration(declarator) && declarator.initializer) {
+          const init = declarator.initializer
+          if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+            if (!resolved || init.pos <= callRange) {
               resolved = init
             }
             break
@@ -205,7 +204,7 @@ function resolveCleanupCallback(graph: SolidGraph, cleanup: CallEntity): T.Node 
 
   // Fallback to function declarations
   if (!resolved) {
-    const fns = graph.functionsByName.get(callbackNode.name)
+    const fns = graph.functionsByName.get(callbackNode.text)
     if (fns) {
       for (let fi = 0, flen = fns.length; fi < flen; fi++) {
         const fn = fns[fi]
@@ -232,8 +231,8 @@ function resolveCleanupCallback(graph: SolidGraph, cleanup: CallEntity): T.Node 
  */
 export function collectCleanupCallbacks(graph: SolidGraph): CleanupCollection {
   const cleanupCalls = getCallsByPrimitive(graph, "onCleanup")
-  const byEffect = new Map<ScopeEntity, T.Node[]>()
-  const bySibling = new Map<ScopeEntity, T.Node[]>()
+  const byEffect = new Map<ScopeEntity, ts.Node[]>()
+  const bySibling = new Map<ScopeEntity, ts.Node[]>()
 
   for (let i = 0, len = cleanupCalls.length; i < len; i++) {
     const cleanup = cleanupCalls[i]
@@ -292,7 +291,7 @@ export function hasMatchingCleanupCall(
  */
 function hasMatchingCallInCallbacks(
   graph: SolidGraph,
-  map: Map<ScopeEntity, T.Node[]>,
+  map: Map<ScopeEntity, ts.Node[]>,
   key: ScopeEntity,
   predicate: (call: CallEntity) => boolean,
 ): boolean {
@@ -434,7 +433,7 @@ export function hasAnyCleanup(
 /**
  * Check if any cleanup callback in the effect scope contains a method call
  * (e.g., `.disconnect()`, `.close()`, `.abort()`) on an instance created
- * in that scope. Uses a simple name-based check on member expressions.
+ * in that scope. Uses a simple name-based check on property access expressions.
  */
 export function hasMethodCallInCleanup(
   graph: SolidGraph,
@@ -444,9 +443,9 @@ export function hasMethodCallInCleanup(
 ): boolean {
   const predicate = (c: CallEntity): boolean => {
     const callee = c.callee
-    if (callee.type !== "MemberExpression") return false
-    const prop = callee.property
-    return prop.type === "Identifier" && prop.name === methodName
+    if (!ts.isPropertyAccessExpression(callee)) return false
+    const prop = callee.name
+    return ts.isIdentifier(prop) && prop.text === methodName
   }
 
   return hasAnyCleanup(graph, cleanups, effectScope, predicate)
@@ -504,6 +503,7 @@ export function defineConstructorLeakRule(config: {
             createDiagnostic(
               graph.file,
               expr,
+              graph.sourceFile,
               config.id,
               config.messageKey,
               resolveMessage(config.messageTemplate, { type }),

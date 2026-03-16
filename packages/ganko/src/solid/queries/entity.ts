@@ -1,7 +1,7 @@
 /**
  * Entity relationship and analysis functions
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { VariableEntity, ReadEntity, AssignmentEntity } from "../entities/variable";
 import type { FunctionEntity } from "../entities/function";
@@ -90,67 +90,46 @@ export function isFunctionExported(graph: SolidGraph, fn: FunctionEntity): boole
 }
 
 export function isSplitPropsVariable(variable: VariableEntity): boolean {
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return false;
-  const first = assignments[0];
-  if (!first) return false;
-  const value = first.value;
-  if (!value) return false;
-  
-  // Traverse up to find VariableDeclarator
-  // Pattern: Identifier -> ArrayPattern -> VariableDeclarator
-  let node = value.parent;
-  while (node && node.type === "ArrayPattern") {
-    node = node.parent;
-  }
-  if (node?.type !== "VariableDeclarator") return false;
-  
-  const init = node.init;
-  if (init?.type !== "CallExpression") return false;
-  const callee = init.callee;
-  return callee.type === "Identifier" && callee.name === "splitProps";
+  const init = variable.initializer;
+  if (!init || !ts.isCallExpression(init)) return false;
+  const callee = init.expression;
+  return ts.isIdentifier(callee) && callee.text === "splitProps";
 }
 
 export function isMergePropsVariable(variable: VariableEntity): boolean {
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return false;
-  const firstAssign = assignments[0];
-  if (!firstAssign) return false;
-  const value = firstAssign.value;
-  if (value?.type !== "CallExpression") return false;
-  const callee = value.callee;
-  return callee.type === "Identifier" && callee.name === "mergeProps";
+  const init = variable.initializer;
+  if (!init || !ts.isCallExpression(init)) return false;
+  const callee = init.expression;
+  return ts.isIdentifier(callee) && callee.text === "mergeProps";
 }
 
 export function getVariableSourceKind(variable: VariableEntity): SpreadSourceKind {
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return "other";
-  const firstAssignment = assignments[0];
-  if (!firstAssignment) return "other";
-  const value = firstAssignment.value;
+  const value = variable.initializer;
   if (!value) return "other";
 
-  switch (value.type) {
-    case "Identifier": return "identifier";
-    case "MemberExpression": return "member";
-    case "CallExpression": return "call";
-    case "ObjectExpression": return "literal";
-    case "LogicalExpression": return "logical";
-    case "ConditionalExpression": return "conditional";
-    default: return "other";
-  }
+  if (ts.isIdentifier(value)) return "identifier";
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) return "member";
+  if (ts.isCallExpression(value)) return "call";
+  if (ts.isObjectLiteralExpression(value)) return "literal";
+  if (ts.isBinaryExpression(value) && (
+    value.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+    value.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+    value.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+  )) return "logical";
+  if (ts.isConditionalExpression(value)) return "conditional";
+  return "other";
 }
 
 export function getFunctionVariable(fn: FunctionEntity): VariableEntity | null {
   return fn.variable;
 }
 
-export function getContainingFunction(graph: SolidGraph, node: T.Node): FunctionEntity | null {
-  let current: T.Node | undefined = node.parent;
+export function getContainingFunction(graph: SolidGraph, node: ts.Node): FunctionEntity | null {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "FunctionDeclaration" ||
-        current.type === "FunctionExpression" ||
-        current.type === "ArrowFunctionExpression") {
+    if (ts.isFunctionDeclaration(current) ||
+        ts.isFunctionExpression(current) ||
+        ts.isArrowFunction(current)) {
       return graph.functionsByNode.get(current) ?? null;
     }
     current = current.parent;
@@ -202,17 +181,14 @@ export function getHiddenClassTransitions(graph: SolidGraph): readonly PropertyA
  */
 function isObjectLiteralTarget(graph: SolidGraph, pa: PropertyAssignmentEntity): boolean {
   const obj = pa.object;
-  if (obj.type !== "Identifier") return false;
-  const variable = getVariableByNameInScope(graph, obj.name, pa.scope);
+  if (!ts.isIdentifier(obj)) return false;
+  const variable = getVariableByNameInScope(graph, obj.text, pa.scope);
   if (!variable) return false;
-  const assignments = variable.assignments;
-  if (assignments.length === 0) return false;
-  const firstA = assignments[0];
-  if (!firstA) return false;
-  return firstA.value.type === "ObjectExpression";
+  const init = variable.initializer;
+  return init !== null && ts.isObjectLiteralExpression(init);
 }
 
-export function getMemberAccessesOnIdentifier(fn: FunctionEntity, identifierName: string): readonly T.MemberExpression[] {
+export function getMemberAccessesOnIdentifier(fn: FunctionEntity, identifierName: string): readonly ts.PropertyAccessExpression[] {
   const cache = fn._memberAccessesByIdentifier;
   if (!cache) return [];
   return cache.get(identifierName) ?? [];
@@ -279,8 +255,8 @@ function getDirectReactiveCaptures(fn: FunctionEntity): readonly VariableEntity[
   if (reactiveCaptures.length === 0) return reactiveCaptures;
 
   const fnNode = fn.node;
-  const fnStart = fnNode.range[0];
-  const fnEnd = fnNode.range[1];
+  const fnStart = fnNode.pos;
+  const fnEnd = fnNode.end;
   const out: VariableEntity[] = [];
 
   for (let i = 0, len = reactiveCaptures.length; i < len; i++) {
@@ -296,7 +272,7 @@ function getDirectReactiveCaptures(fn: FunctionEntity): readonly VariableEntity[
 
 function hasDirectReadInFunction(
   variable: VariableEntity,
-  fnNode: T.Node,
+  fnNode: ts.Node,
   fnStart: number,
   fnEnd: number,
 ): boolean {
@@ -306,7 +282,7 @@ function hasDirectReadInFunction(
     const readEntry = reads[i];
     if (!readEntry) continue;
     const readNode = readEntry.node;
-    const readPos = readNode.range[0];
+    const readPos = readNode.pos;
     if (readPos < fnStart || readPos >= fnEnd) continue;
 
     if (isDirectChildOfFunction(readNode, fnNode)) return true;
@@ -315,16 +291,16 @@ function hasDirectReadInFunction(
   return false;
 }
 
-function isDirectChildOfFunction(node: T.Node, targetFnNode: T.Node): boolean {
-  let current: T.Node | undefined = node.parent;
+function isDirectChildOfFunction(node: ts.Node, targetFnNode: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
 
   while (current) {
     if (current === targetFnNode) return true;
 
     if (
-      current.type === "FunctionDeclaration"
-      || current.type === "FunctionExpression"
-      || current.type === "ArrowFunctionExpression"
+      ts.isFunctionDeclaration(current)
+      || ts.isFunctionExpression(current)
+      || ts.isArrowFunction(current)
     ) {
       return false;
     }

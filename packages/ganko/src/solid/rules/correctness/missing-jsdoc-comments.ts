@@ -4,11 +4,11 @@
  * Flags functions, classes, and class members missing required JSDoc documentation.
  */
 
-import type { TSESLint, TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage} from "../../../diagnostic"
+import type { CommentEntry } from "../../../diagnostic"
 import type { FunctionEntity, PropertyEntity } from "../../entities/index"
-import { getSourceCode } from "../../queries/get"
 import { isFunctionExported } from "../../queries/entity"
 import { CHAR_NEWLINE, CHAR_ASTERISK, CHAR_SPACE, CHAR_TAB } from "@drskillissue/ganko-shared"
 
@@ -103,23 +103,26 @@ function extractLine(str: string, start: number, end: number): string {
  * Finds the JSDoc comment immediately preceding a node.
  *
  * @param node - The declaration node to check
- * @param sourceCode - ESLint source code object
+ * @param comments - All comments extracted from the source file
+ * @param sourceFile - The TypeScript source file
  * @returns The JSDoc comment or null if not found
  */
-function findJsDoc(node: T.Node, sourceCode: TSESLint.SourceCode): T.Comment | null {
-  const comments = sourceCode.getCommentsBefore(node)
-  if (comments.length === 0) return null
+function findJsDoc(node: ts.Node, comments: readonly CommentEntry[], sourceFile: ts.SourceFile): CommentEntry | null {
+  const nodeStart = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile)).line + 1
 
-  const last = comments[comments.length - 1]
-  if (!last) return null
-  if (last.type !== "Block") return null
-  if (!last.value.startsWith("*")) return null
+  // Find the last block comment that ends just before this node and starts with '*'
+  let best: CommentEntry | null = null
+  for (let i = 0, len = comments.length; i < len; i++) {
+    const comment = comments[i]
+    if (!comment) continue
+    if (comment.kind !== ts.SyntaxKind.MultiLineCommentTrivia) continue
+    if (!comment.value.startsWith("*")) continue
+    if (comment.endLine >= nodeStart) continue
+    if (nodeStart - comment.endLine > 1) continue
+    best = comment
+  }
 
-  const nodeStart = node.loc?.start.line ?? 0
-  const commentEnd = last.loc?.end.line ?? 0
-  if (nodeStart - commentEnd > 1) return null
-
-  return last
+  return best
 }
 
 interface Options extends Record<string, boolean> {
@@ -147,12 +150,12 @@ interface Options extends Record<string, boolean> {
  * @returns True if the function should be skipped
  */
 function shouldSkipFunction(fn: FunctionEntity): boolean {
-  if (fn.declarationNode.type === "MethodDefinition") return false
+  if (ts.isMethodDeclaration(fn.declarationNode)) return false
 
-  const type = fn.node.type
-  if (type === "ArrowFunctionExpression" || type === "FunctionExpression") return true
+  const node = fn.node
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return true
 
-  if (type === "FunctionDeclaration") {
+  if (ts.isFunctionDeclaration(node)) {
     const parentScope = fn.scope.parent
     if (parentScope !== null && parentScope.kind === "function") return true
   }
@@ -169,13 +172,16 @@ function shouldSkipFunction(fn: FunctionEntity): boolean {
  */
 function shouldCheckMethod(fn: FunctionEntity, opts: Options): boolean {
   const decl = fn.declarationNode
-  if (decl.type !== "MethodDefinition") return false
+  if (!ts.isMethodDeclaration(decl)) return false
   if (opts.checkAllClassMethods) return true
 
-  const access = decl.accessibility
-  if (access === undefined || access === "public") return opts.checkPublicClassMethods
-  if (access === "private") return opts.checkPrivateClassMethods
-  if (access === "protected") return opts.checkProtectedClassMethods
+  const modifiers = ts.getModifiers(decl)
+  const hasPrivate = modifiers?.some(m => m.kind === ts.SyntaxKind.PrivateKeyword) ?? false
+  const hasProtected = modifiers?.some(m => m.kind === ts.SyntaxKind.ProtectedKeyword) ?? false
+
+  if (!hasPrivate && !hasProtected) return opts.checkPublicClassMethods
+  if (hasPrivate) return opts.checkPrivateClassMethods
+  if (hasProtected) return opts.checkProtectedClassMethods
   return false
 }
 
@@ -207,7 +213,7 @@ function shouldCheckFunction(
   isExported: boolean,
   opts: Options,
 ): boolean {
-  if (fn.declarationNode.type === "MethodDefinition") {
+  if (ts.isMethodDeclaration(fn.declarationNode)) {
     return shouldCheckMethod(fn, opts)
   }
   if (opts.checkAllFunctions) return true
@@ -256,26 +262,27 @@ export const missingJsdocComments = defineSolidRule({
   },
   options,
   check(graph, emit) {
-    const sourceCode = getSourceCode(graph)
+    const sourceFile = graph.sourceFile
+    const comments = graph.comments
 
     if (options.checkClasses) {
       for (const cls of graph.classes) {
-        if (findJsDoc(cls.declarationNode, sourceCode) !== null) continue
+        if (findJsDoc(cls.declarationNode, comments, sourceFile) !== null) continue
 
         const name = cls.name ?? "<anonymous>"
         emit(
-          createDiagnostic(graph.file, cls.node, "missing-jsdoc-comments", "missingClassJsdoc", resolveMessage(messages.missingClassJsdoc, { name }), "error"),
+          createDiagnostic(graph.file, cls.node, sourceFile, "missing-jsdoc-comments", "missingClassJsdoc", resolveMessage(messages.missingClassJsdoc, { name }), "error"),
         )
       }
     }
 
     for (const prop of graph.properties) {
       if (!shouldCheckProperty(prop, options)) continue
-      if (findJsDoc(prop.declarationNode, sourceCode) !== null) continue
+      if (findJsDoc(prop.declarationNode, comments, sourceFile) !== null) continue
 
       const name = prop.name ?? "<anonymous>"
       emit(
-        createDiagnostic(graph.file, prop.node, "missing-jsdoc-comments", "missingPropertyJsdoc", resolveMessage(messages.missingPropertyJsdoc, { name }), "error"),
+        createDiagnostic(graph.file, prop.node, sourceFile, "missing-jsdoc-comments", "missingPropertyJsdoc", resolveMessage(messages.missingPropertyJsdoc, { name }), "error"),
       )
     }
 
@@ -286,10 +293,10 @@ export const missingJsdocComments = defineSolidRule({
       if (!shouldCheckFunction(fn, isExported, options)) continue
 
       const name = fn.name ?? fn.variableName ?? "<anonymous>"
-      const jsDocComment = findJsDoc(fn.declarationNode, sourceCode)
+      const jsDocComment = findJsDoc(fn.declarationNode, comments, sourceFile)
 
       if (jsDocComment === null) {
-        emit(createDiagnostic(graph.file, fn.node, "missing-jsdoc-comments", "missingJsdoc", resolveMessage(messages.missingJsdoc, { name }), "error"))
+        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingJsdoc", resolveMessage(messages.missingJsdoc, { name }), "error"))
         continue
       }
 
@@ -302,22 +309,22 @@ export const missingJsdocComments = defineSolidRule({
           if (!param) continue;
           if (param.name !== null && !jsDoc.params.has(param.name)) {
             emit(
-              createDiagnostic(graph.file, fn.node, "missing-jsdoc-comments", "missingParam", resolveMessage(messages.missingParam, { name, param: param.name }), "error"),
+              createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingParam", resolveMessage(messages.missingParam, { name, param: param.name }), "error"),
             )
           }
         }
       }
 
       if (options.requireReturn && fn.hasNonVoidReturn && !jsDoc.hasReturn) {
-        emit(createDiagnostic(graph.file, fn.node, "missing-jsdoc-comments", "missingReturn", resolveMessage(messages.missingReturn, { name }), "error"))
+        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingReturn", resolveMessage(messages.missingReturn, { name }), "error"))
       }
 
       if (options.requireThrows && fn.hasThrowStatement && !jsDoc.hasThrows) {
-        emit(createDiagnostic(graph.file, fn.node, "missing-jsdoc-comments", "missingThrows", resolveMessage(messages.missingThrows, { name }), "error"))
+        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingThrows", resolveMessage(messages.missingThrows, { name }), "error"))
       }
 
       if (options.requireExample && !jsDoc.hasExample) {
-        emit(createDiagnostic(graph.file, fn.node, "missing-jsdoc-comments", "missingExample", resolveMessage(messages.missingExample, { name }), "error"))
+        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingExample", resolveMessage(messages.missingExample, { name }), "error"))
       }
     }
   },

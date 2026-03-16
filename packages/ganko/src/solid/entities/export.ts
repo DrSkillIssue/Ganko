@@ -6,8 +6,9 @@
  * and provides metadata for cross-file analysis.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { ReactiveKind } from "./variable";
+import type { SourceLocation } from "../../diagnostic";
 
 /**
  * Export kind classification.
@@ -61,10 +62,10 @@ export interface ExportEntity {
   readonly signature: string;
 
   /** AST node for go-to-definition */
-  readonly node: T.Node;
+  readonly node: ts.Node;
 
   /** Location for quick access */
-  readonly loc: T.SourceLocation | null;
+  readonly loc: SourceLocation | null;
 
   /**
    * Source module for re-exports, null for local exports.

@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { forEachClassListPropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
@@ -18,18 +19,19 @@ export const jsxClasslistNoConstantLiterals = defineCrossRule({
   check(context, emit) {
     const { solids } = context
     forEachClassListPropertyAcross(solids, (solid, p) => {
-      if (p.type !== "Property") return
-      const n = objectKeyName(p.key)
+      if (!ts.isPropertyAssignment(p)) return
+      const n = objectKeyName(p.name)
       if (!n) return
-      if (p.value.type !== "Literal") return
-      if (typeof p.value.value !== "boolean") return
+      const val = p.initializer
+      if (val.kind !== ts.SyntaxKind.TrueKeyword && val.kind !== ts.SyntaxKind.FalseKeyword) return
 
       emit(createDiagnostic(
         solid.file,
-        p.value,
+        val,
+        solid.sourceFile,
         jsxClasslistNoConstantLiterals.id,
         "constantEntry",
-        resolveMessage(messages.constantEntry, { name: n, value: String(p.value.value) }),
+        resolveMessage(messages.constantEntry, { name: n, value: val.kind === ts.SyntaxKind.TrueKeyword ? "true" : "false" }),
         "warn",
       ))
     })

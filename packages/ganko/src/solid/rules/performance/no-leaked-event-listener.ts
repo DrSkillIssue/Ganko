@@ -35,6 +35,7 @@
  *   });
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getCallsByMethodName } from "../../queries"
@@ -62,9 +63,9 @@ const options = {}
  * @returns True if the call is to removeEventListener
  */
 function isRemoveEventListener(c: CallEntity): boolean {
-  if (c.callee.type !== "MemberExpression") return false
-  const prop = c.callee.property
-  return prop.type === "Identifier" && prop.name === "removeEventListener"
+  if (!ts.isPropertyAccessExpression(c.callee)) return false
+  const prop = c.callee.name
+  return ts.isIdentifier(prop) && prop.text === "removeEventListener"
 }
 
 /**
@@ -72,15 +73,15 @@ function isRemoveEventListener(c: CallEntity): boolean {
  *
  * For `es.addEventListener(...)` returns "es".
  * For `window.addEventListener(...)` returns "window".
- * Returns null for non-MemberExpression callees or computed targets.
+ * Returns null for non-PropertyAccessExpression callees or computed targets.
  *
  * @param call - The addEventListener call entity
  * @returns The target identifier name, or null
  */
 function getTarget(call: CallEntity): string | null {
-  if (call.callee.type !== "MemberExpression") return null
-  const obj = call.callee.object
-  if (obj.type === "Identifier") return obj.name
+  if (!ts.isPropertyAccessExpression(call.callee)) return null
+  const obj = call.callee.expression
+  if (ts.isIdentifier(obj)) return obj.text
   return null
 }
 
@@ -93,11 +94,11 @@ function getTarget(call: CallEntity): string | null {
  */
 function makeTargetDestroyPredicate(name: string): (c: CallEntity) => boolean {
   return (c) => {
-    if (c.callee.type !== "MemberExpression") return false
-    const obj = c.callee.object
-    if (obj.type !== "Identifier" || obj.name !== name) return false
-    const prop = c.callee.property
-    return prop.type === "Identifier" && TARGET_DESTROY_METHODS.has(prop.name)
+    if (!ts.isPropertyAccessExpression(c.callee)) return false
+    const obj = c.callee.expression
+    if (!ts.isIdentifier(obj) || obj.text !== name) return false
+    const prop = c.callee.name
+    return ts.isIdentifier(prop) && TARGET_DESTROY_METHODS.has(prop.text)
   }
 }
 
@@ -108,8 +109,8 @@ function makeTargetDestroyPredicate(name: string): (c: CallEntity) => boolean {
  *   addEventListener("event", handler, { signal: controller.signal })
  *
  * Returns the controller name ("controller") when the third argument is an
- * ObjectExpression containing a `signal` property whose value is a
- * MemberExpression of the form `<identifier>.signal`.
+ * ObjectLiteralExpression containing a `signal` property whose value is a
+ * PropertyAccessExpression of the form `<identifier>.signal`.
  *
  * @param call - The addEventListener call entity
  * @returns The controller identifier name, or null
@@ -119,19 +120,19 @@ function getSignalControllerName(call: CallEntity): string | null {
   if (!opts) return null
 
   const node = opts.node
-  if (node.type !== "ObjectExpression") return null
+  if (!ts.isObjectLiteralExpression(node)) return null
 
   for (let i = 0, len = node.properties.length; i < len; i++) {
     const prop = node.properties[i]
     if (!prop) continue;
-    if (prop.type !== "Property") continue
-    if (prop.key.type !== "Identifier" || prop.key.name !== "signal") continue
+    if (!ts.isPropertyAssignment(prop)) continue
+    if (!ts.isIdentifier(prop.name) || prop.name.text !== "signal") continue
 
-    const val = prop.value
-    if (val.type !== "MemberExpression") return null
-    if (val.property.type !== "Identifier" || val.property.name !== "signal") return null
-    if (val.object.type !== "Identifier") return null
-    return val.object.name
+    const val = prop.initializer
+    if (!ts.isPropertyAccessExpression(val)) return null
+    if (!ts.isIdentifier(val.name) || val.name.text !== "signal") return null
+    if (!ts.isIdentifier(val.expression)) return null
+    return val.expression.text
   }
 
   return null
@@ -145,11 +146,11 @@ function getSignalControllerName(call: CallEntity): string | null {
  */
 function makeAbortPredicate(name: string): (c: CallEntity) => boolean {
   return (c) => {
-    if (c.callee.type !== "MemberExpression") return false
-    const obj = c.callee.object
-    if (obj.type !== "Identifier" || obj.name !== name) return false
-    const prop = c.callee.property
-    return prop.type === "Identifier" && prop.name === "abort"
+    if (!ts.isPropertyAccessExpression(c.callee)) return false
+    const obj = c.callee.expression
+    if (!ts.isIdentifier(obj) || obj.text !== name) return false
+    const prop = c.callee.name
+    return ts.isIdentifier(prop) && prop.text === "abort"
   }
 }
 
@@ -197,6 +198,7 @@ export const noLeakedEventListener = defineSolidRule({
         createDiagnostic(
           graph.file,
           call.node,
+          graph.sourceFile,
           "no-leaked-event-listener",
           "leakedListener",
           messages.leakedListener,

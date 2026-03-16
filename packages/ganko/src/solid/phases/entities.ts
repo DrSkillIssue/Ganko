@@ -20,7 +20,6 @@
  * - spreadElements
  * - newExpressionsByCallee
  * - identifiersByName (via addIdentifierReference)
- * - positionIndex (via addToPositionIndex)
  *
  * Also identifies component functions (PascalCase naming).
  *
@@ -37,6 +36,6 @@ import { visitProgram } from "./entities/visitors";
 
 export function runEntitiesPhase(graph: SolidGraph, input: SolidInput): void {
   const ctx = createVisitorContext(graph);
-  visitProgram(ctx, input.sourceCode.ast);
+  visitProgram(ctx, input.sourceFile);
   graph.componentFunctions = ctx.componentFunctions;
 }

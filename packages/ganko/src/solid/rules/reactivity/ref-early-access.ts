@@ -16,6 +16,7 @@
  * - GOOD: const fn = () => { if (!ref) return; ref.focus(); };  // Runtime guarded
  */
 
+import ts from "typescript"
 import type { ScopeEntity } from "../../entities/scope"
 import type { VariableEntity } from "../../entities/variable"
 import { getEffectiveTrackingContext, getEnclosingComponentScope, getScopeFor, getVariableByNameInScope, isInDeferredContext } from "../../queries/scope"
@@ -123,11 +124,11 @@ export const refEarlyAccess = defineSolidRule({
       const valueNode = attr.valueNode;
 
       // Skip non-identifier refs (e.g., ref={(el) => ...})
-      if (!valueNode || valueNode.type !== "Identifier") {
+      if (!valueNode || !ts.isIdentifier(valueNode)) {
         continue;
       }
 
-      const refName = valueNode.name;
+      const refName = valueNode.text;
 
       // Get the scope where the ref attribute is used (inside JSX = inside component)
       const attrScope = getScopeFor(graph, valueNode);
@@ -179,6 +180,7 @@ export const refEarlyAccess = defineSolidRule({
               createDiagnostic(
                 graph.file,
                 read.node,
+                graph.sourceFile,
                 "ref-early-access",
                 "refBeforeMount",
                 resolveMessage(messages.refBeforeMount, { name: variable.name }),
@@ -201,6 +203,7 @@ export const refEarlyAccess = defineSolidRule({
           createDiagnostic(
             graph.file,
             read.node,
+            graph.sourceFile,
             "ref-early-access",
             "refBeforeMount",
             resolveMessage(messages.refBeforeMount, { name: variable.name }),

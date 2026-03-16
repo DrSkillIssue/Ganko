@@ -56,7 +56,7 @@ export const asyncTracked = defineSolidRule({
       if (context.type === "tracked") {
         const { messageId, data } = getMessageForSource(context.source, fn)
         const msg = resolveMessage(messages[messageId], data)
-        emit(createDiagnostic(graph.file, fn.node, "async-tracked", messageId, msg, "error"))
+        emit(createDiagnostic(graph.file, fn.node, graph.sourceFile, "async-tracked", messageId, msg, "error"))
       }
     }
   },

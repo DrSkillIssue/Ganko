@@ -7,12 +7,9 @@
 
 import type { FoldingRangeParams, FoldingRange } from "vscode-languageserver";
 import { FoldingRangeKind } from "vscode-languageserver";
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { HandlerContext } from "./handler-context";
 import { uriToPath } from "@drskillissue/ganko-shared";
-
-/** Key for accessing comments on AST program node. */
-const COMMENTS_KEY = "comments";
 
 /** Folding kind constants. */
 const KIND_REGION = FoldingRangeKind.Region;
@@ -34,7 +31,7 @@ let bufferCapacity = INITIAL_BUFFER_SIZE;
 let count = 0;
 
 /** Stack for traversal (nullable to allow releasing references). */
-let stack: (T.Node | null)[] = new Array(INITIAL_STACK_SIZE);
+let stack: (ts.Node | null)[] = new Array(INITIAL_STACK_SIZE);
 let stackCapacity = INITIAL_STACK_SIZE;
 
 /**
@@ -67,7 +64,7 @@ function ensureStackCapacity(required: number): void {
   if (required <= stackCapacity) return;
   let newCapacity = stackCapacity;
   while (newCapacity < required) newCapacity <<= 1;
-  const newStack: (T.Node | null)[] = new Array<T.Node | null>(newCapacity).fill(null);
+  const newStack: (ts.Node | null)[] = new Array<ts.Node | null>(newCapacity).fill(null);
   for (let i = 0; i < stackCapacity; i++) {
     const existing = stack[i];
     if (existing !== undefined) newStack[i] = existing;
@@ -105,17 +102,19 @@ function kindToEnum(k: number): FoldingRangeKind {
 }
 
 /**
- * Get comments from AST if present.
+ * Get start and end lines (0-based) for a node.
  *
- * @param ast - The Program AST node
- * @returns Array of comments or null if none present
+ * @param node - TypeScript AST node
+ * @param sf - Source file for position resolution
+ * @returns [startLine, endLine] tuple (0-based)
  */
-function getComments(ast: T.Program): T.Comment[] | null {
-  if (!(COMMENTS_KEY in ast)) return null;
-  const comments = Object.getOwnPropertyDescriptor(ast, COMMENTS_KEY)?.value;
-  if (!Array.isArray(comments)) return null;
-  return comments;
+function getNodeLines(node: ts.Node, sf: ts.SourceFile): [number, number] {
+  const startLine = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
+  const endLine = sf.getLineAndCharacterOfPosition(node.end).line;
+  return [startLine, endLine];
 }
+
+/** Cached source file reference for the current request. */
 
 /**
  * Handles textDocument/foldingRange LSP request.
@@ -129,19 +128,21 @@ export function handleFoldingRanges(
   ctx: HandlerContext,
 ): FoldingRange[] | null {
   const filePath = uriToPath(params.textDocument.uri);
-  const ast = ctx.getAST(filePath);
-  if (!ast) return null;
+  const sf = ctx.getAST(filePath);
+  if (!sf) return null;
   const { log } = ctx;
+
 
   count = 0;
   let stackTop = 0;
   let importStart = -1;
   let importEnd = -1;
 
-  const bodyLen = ast.body.length;
+  const stmts = sf.statements;
+  const bodyLen = stmts.length;
   ensureStackCapacity(bodyLen);
   for (let i = bodyLen - 1; i >= 0; i--) {
-    const item = ast.body[i];
+    const item = stmts[i];
     if (item) stack[stackTop++] = item;
   }
 
@@ -150,269 +151,187 @@ export function handleFoldingRanges(
 
     const node = stack[--stackTop];
     if (!node) continue;
-    const loc = node.loc;
-    if (!loc) continue;
 
-    const startLine = loc.start.line - 1;
-    const endLine = loc.end.line - 1;
+    const [startLine, endLine] = getNodeLines(node, sf);
     const isMultiLine = endLine > startLine;
 
-    switch (node.type) {
-      case "ImportDeclaration": {
-        if (importStart === -1) importStart = startLine;
-        importEnd = endLine;
-        if (isMultiLine) addFold(startLine, endLine, 1);
-        break;
-      }
-
-      case "FunctionDeclaration":
-      case "FunctionExpression": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        if (node.body) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.body;
-        }
-        break;
-      }
-
-      case "ArrowFunctionExpression": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
+    if (ts.isImportDeclaration(node)) {
+      if (importStart === -1) importStart = startLine;
+      importEnd = endLine;
+      if (isMultiLine) addFold(startLine, endLine, 1);
+    } else if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      if (node.body) {
         ensureStackCapacity(stackTop + 1);
         stack[stackTop++] = node.body;
-        break;
       }
-
-      case "ClassDeclaration":
-      case "ClassExpression": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
+    } else if (ts.isArrowFunction(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      ensureStackCapacity(stackTop + 1);
+      stack[stackTop++] = node.body;
+    } else if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      // Push class members
+      const members = node.members;
+      const len = members.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const item = members[i];
+        if (item) stack[stackTop++] = item;
+      }
+    } else if (ts.isIfStatement(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      ensureStackCapacity(stackTop + 2);
+      stack[stackTop++] = node.thenStatement;
+      if (node.elseStatement) stack[stackTop++] = node.elseStatement;
+    } else if (ts.isSwitchStatement(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const clauses = node.caseBlock.clauses;
+      let totalStatements = 0;
+      for (let i = 0; i < clauses.length; i++) {
+        const sc = clauses[i];
+        if (sc) totalStatements += sc.statements.length;
+      }
+      ensureStackCapacity(stackTop + totalStatements);
+      for (let i = clauses.length - 1; i >= 0; i--) {
+        const c = clauses[i];
+        if (!c) continue;
+        const [cStartLine, cEndLine] = getNodeLines(c, sf);
+        if (cEndLine > cStartLine) {
+          addFold(cStartLine, cEndLine, 0);
+        }
+        const stmts = c.statements;
+        for (let j = stmts.length - 1; j >= 0; j--) {
+          const stmtItem = stmts[j];
+          if (stmtItem) stack[stackTop++] = stmtItem;
+        }
+      }
+    } else if (ts.isTryStatement(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      ensureStackCapacity(stackTop + 3);
+      stack[stackTop++] = node.tryBlock;
+      if (node.catchClause) {
+        const [hStartLine, hEndLine] = getNodeLines(node.catchClause, sf);
+        if (hEndLine > hStartLine) {
+          addFold(hStartLine, hEndLine, 0);
+        }
+        stack[stackTop++] = node.catchClause.block;
+      }
+      if (node.finallyBlock) stack[stackTop++] = node.finallyBlock;
+    } else if (
+      ts.isForStatement(node) ||
+      ts.isForInStatement(node) ||
+      ts.isForOfStatement(node) ||
+      ts.isWhileStatement(node) ||
+      ts.isDoStatement(node)
+    ) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      ensureStackCapacity(stackTop + 1);
+      stack[stackTop++] = node.statement;
+    } else if (ts.isBlock(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const len = node.statements.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const item = node.statements[i];
+        if (item) stack[stackTop++] = item;
+      }
+    } else if (ts.isJsxElement(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const len = node.children.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const item = node.children[i];
+        if (item) stack[stackTop++] = item;
+      }
+    } else if (ts.isJsxFragment(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const len = node.children.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const item = node.children[i];
+        if (item) stack[stackTop++] = item;
+      }
+    } else if (ts.isObjectLiteralExpression(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const len = node.properties.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const item = node.properties[i];
+        if (item) stack[stackTop++] = item;
+      }
+    } else if (ts.isArrayLiteralExpression(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      const elements = node.elements;
+      const len = elements.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const el = elements[i];
+        if (el) stack[stackTop++] = el;
+      }
+    } else if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isEnumDeclaration(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+    } else if (ts.isModuleDeclaration(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      if (node.body) {
         ensureStackCapacity(stackTop + 1);
         stack[stackTop++] = node.body;
-        break;
       }
-
-      case "ClassBody": {
-        const len = node.body.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const item = node.body[i];
-          if (item) stack[stackTop++] = item;
-        }
-        break;
-      }
-
-      case "IfStatement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        ensureStackCapacity(stackTop + 2);
-        stack[stackTop++] = node.consequent;
-        if (node.alternate) stack[stackTop++] = node.alternate;
-        break;
-      }
-
-      case "SwitchStatement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const cases = node.cases;
-        let totalConsequents = 0;
-        for (let i = 0; i < cases.length; i++) {
-          const sc = cases[i];
-          if (sc) totalConsequents += sc.consequent.length;
-        }
-        ensureStackCapacity(stackTop + totalConsequents);
-        for (let i = cases.length - 1; i >= 0; i--) {
-          const c = cases[i];
-          if (!c) continue;
-          const cLoc = c.loc;
-          if (cLoc && cLoc.end.line > cLoc.start.line) {
-            addFold(cLoc.start.line - 1, cLoc.end.line - 1, 0);
-          }
-          const cons = c.consequent;
-          for (let j = cons.length - 1; j >= 0; j--) {
-            const consItem = cons[j];
-            if (consItem) stack[stackTop++] = consItem;
-          }
-        }
-        break;
-      }
-
-      case "TryStatement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        ensureStackCapacity(stackTop + 3);
-        stack[stackTop++] = node.block;
-        if (node.handler) {
-          const hLoc = node.handler.loc;
-          if (hLoc && hLoc.end.line > hLoc.start.line) {
-            addFold(hLoc.start.line - 1, hLoc.end.line - 1, 0);
-          }
-          stack[stackTop++] = node.handler.body;
-        }
-        if (node.finalizer) stack[stackTop++] = node.finalizer;
-        break;
-      }
-
-      case "ForStatement":
-      case "ForInStatement":
-      case "ForOfStatement":
-      case "WhileStatement":
-      case "DoWhileStatement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        ensureStackCapacity(stackTop + 1);
-        stack[stackTop++] = node.body;
-        break;
-      }
-
-      case "BlockStatement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const len = node.body.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const item = node.body[i];
-          if (item) stack[stackTop++] = item;
-        }
-        break;
-      }
-
-      case "JSXElement": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const len = node.children.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const item = node.children[i];
-          if (item) stack[stackTop++] = item;
-        }
-        break;
-      }
-
-      case "JSXFragment": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const len = node.children.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const item = node.children[i];
-          if (item) stack[stackTop++] = item;
-        }
-        break;
-      }
-
-      case "ObjectExpression": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const len = node.properties.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const item = node.properties[i];
-          if (item) stack[stackTop++] = item;
-        }
-        break;
-      }
-
-      case "ArrayExpression": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        const elements = node.elements;
-        const len = elements.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const el = elements[i];
-          if (el) stack[stackTop++] = el;
-        }
-        break;
-      }
-
-      case "TSInterfaceDeclaration":
-      case "TSTypeAliasDeclaration":
-      case "TSEnumDeclaration": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        break;
-      }
-
-      case "TSModuleDeclaration": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        if (node.body) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.body;
-        }
-        break;
-      }
-
-      case "ExportDefaultDeclaration": {
-        if (node.declaration) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.declaration;
-        }
-        break;
-      }
-
-      case "ExportNamedDeclaration": {
-        if (node.declaration) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.declaration;
-        }
-        break;
-      }
-
-      case "VariableDeclaration": {
-        const declarations = node.declarations;
-        const len = declarations.length;
-        ensureStackCapacity(stackTop + len);
-        for (let i = len - 1; i >= 0; i--) {
-          const decl = declarations[i];
-          if (!decl) continue;
-          const init = decl.init;
-          if (init) stack[stackTop++] = init;
-        }
-        break;
-      }
-
-      case "ReturnStatement": {
-        if (node.argument) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.argument;
-        }
-        break;
-      }
-
-      case "ExpressionStatement": {
+    } else if (ts.isExportAssignment(node)) {
+      if (node.expression) {
         ensureStackCapacity(stackTop + 1);
         stack[stackTop++] = node.expression;
-        break;
       }
-
-      case "CallExpression": {
-        const args = node.arguments;
-        ensureStackCapacity(stackTop + args.length + 1);
-        stack[stackTop++] = node.callee;
-        for (let i = args.length - 1; i >= 0; i--) {
-          const arg = args[i];
-          if (arg) stack[stackTop++] = arg;
-        }
-        break;
+    } else if (ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier) {
+        // Named export with specifier — no children to recurse
       }
-
-      case "Property": {
+    } else if (ts.isVariableStatement(node)) {
+      const declarations = node.declarationList.declarations;
+      const len = declarations.length;
+      ensureStackCapacity(stackTop + len);
+      for (let i = len - 1; i >= 0; i--) {
+        const decl = declarations[i];
+        if (!decl) continue;
+        const init = decl.initializer;
+        if (init) stack[stackTop++] = init;
+      }
+    } else if (ts.isReturnStatement(node)) {
+      if (node.expression) {
         ensureStackCapacity(stackTop + 1);
-        stack[stackTop++] = node.value;
-        break;
+        stack[stackTop++] = node.expression;
       }
-
-      case "ConditionalExpression": {
-        ensureStackCapacity(stackTop + 3);
-        stack[stackTop++] = node.alternate;
-        stack[stackTop++] = node.consequent;
-        stack[stackTop++] = node.test;
-        break;
+    } else if (ts.isExpressionStatement(node)) {
+      ensureStackCapacity(stackTop + 1);
+      stack[stackTop++] = node.expression;
+    } else if (ts.isCallExpression(node)) {
+      const args = node.arguments;
+      ensureStackCapacity(stackTop + args.length + 1);
+      stack[stackTop++] = node.expression;
+      for (let i = args.length - 1; i >= 0; i--) {
+        const arg = args[i];
+        if (arg) stack[stackTop++] = arg;
       }
-
-      case "MethodDefinition":
-      case "PropertyDefinition": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        if (node.value) {
-          ensureStackCapacity(stackTop + 1);
-          stack[stackTop++] = node.value;
-        }
-        break;
+    } else if (ts.isPropertyAssignment(node)) {
+      ensureStackCapacity(stackTop + 1);
+      stack[stackTop++] = node.initializer;
+    } else if (ts.isConditionalExpression(node)) {
+      ensureStackCapacity(stackTop + 3);
+      stack[stackTop++] = node.whenFalse;
+      stack[stackTop++] = node.whenTrue;
+      stack[stackTop++] = node.condition;
+    } else if (ts.isMethodDeclaration(node) || ts.isPropertyDeclaration(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
+      if (ts.isMethodDeclaration(node) && node.body) {
+        ensureStackCapacity(stackTop + 1);
+        stack[stackTop++] = node.body;
       }
-
-      case "TemplateLiteral": {
-        if (isMultiLine) addFold(startLine, endLine, 0);
-        break;
+      if (ts.isPropertyDeclaration(node) && node.initializer) {
+        ensureStackCapacity(stackTop + 1);
+        stack[stackTop++] = node.initializer;
       }
+    } else if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
+      if (isMultiLine) addFold(startLine, endLine, 0);
     }
   }
 
@@ -422,16 +341,14 @@ export function handleFoldingRanges(
   }
 
   // Add comment folds
-  const comments = getComments(ast);
-  if (comments !== null) {
-    addCommentFolds(comments);
-  }
+  addCommentFolds(sf);
 
   /* Release AST node references from the module-level stack so the
      last-processed file's AST can be garbage-collected between requests. */
   for (let i = 0; i < stackTop; i++) {
     stack[i] = null;
   }
+
 
   if (count === 0) return null;
 
@@ -448,30 +365,44 @@ export function handleFoldingRanges(
 }
 
 /**
- * Adds folding ranges for comments in the AST.
+ * Adds folding ranges for comments in the source file.
  *
- * Uses module-level `count` and `addFold` to append ranges.
+ * Uses the TypeScript scanner to find all comments in the source text,
+ * then creates folding ranges for multi-line block comments and
+ * consecutive single-line comment groups.
  *
- * @param comments - Array of comment nodes from AST
+ * @param sf - Source file to scan for comments
  */
-function addCommentFolds(comments: T.Comment[]): void {
+function addCommentFolds(sf: ts.SourceFile): void {
+  const text = sf.text;
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    false,
+    sf.languageVariant,
+    text,
+  );
+
   let blockStart = -1;
   let blockEnd = -1;
-  const len = comments.length;
 
-  for (let i = 0; i < len; i++) {
+  let token = scanner.scan();
+  while (token !== ts.SyntaxKind.EndOfFileToken) {
     if (count >= MAX_RANGES) break;
-    const comment = comments[i];
-    if (!comment) continue;
-    const loc = comment.loc;
-    if (!loc) continue;
 
-    const commentStart = loc.start.line - 1;
-    const commentEnd = loc.end.line - 1;
-
-    if (comment.type === "Block" && commentEnd > commentStart) {
-      addFold(commentStart, commentEnd, 2);
-    } else if (comment.type === "Line") {
+    if (token === ts.SyntaxKind.MultiLineCommentTrivia) {
+      const commentStart = sf.getLineAndCharacterOfPosition(scanner.getTokenStart()).line;
+      const commentEnd = sf.getLineAndCharacterOfPosition(scanner.getTokenEnd()).line;
+      // Flush any pending single-line block before this block comment
+      if (blockEnd > blockStart) {
+        addFold(blockStart, blockEnd, 2);
+        blockStart = -1;
+        blockEnd = -1;
+      }
+      if (commentEnd > commentStart) {
+        addFold(commentStart, commentEnd, 2);
+      }
+    } else if (token === ts.SyntaxKind.SingleLineCommentTrivia) {
+      const commentStart = sf.getLineAndCharacterOfPosition(scanner.getTokenStart()).line;
       if (blockStart === -1) {
         blockStart = commentStart;
         blockEnd = commentStart;
@@ -484,7 +415,12 @@ function addCommentFolds(comments: T.Comment[]): void {
         blockStart = commentStart;
         blockEnd = commentStart;
       }
+    } else {
+      // Non-comment token: flush any pending single-line block if not adjacent
+      // (we continue accumulating through whitespace — adjacency checked via line number)
     }
+
+    token = scanner.scan();
   }
 
   if (blockEnd > blockStart) {

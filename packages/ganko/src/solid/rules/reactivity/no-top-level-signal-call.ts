@@ -18,7 +18,7 @@
  * tracking effects), or wrap derived computations in createMemo().
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { ReadEntity } from "../../entities/variable";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
@@ -116,6 +116,7 @@ export const noTopLevelSignalCall = defineSolidRule({
         emit(createDiagnostic(
           graph.file,
           read.node,
+          graph.sourceFile,
           "no-top-level-signal-call",
           messageId,
           resolveMessage(messages[messageId as keyof typeof messages], data),
@@ -137,6 +138,7 @@ export const noTopLevelSignalCall = defineSolidRule({
           emit(createDiagnostic(
             graph.file,
             read.node,
+            graph.sourceFile,
             "no-top-level-signal-call",
             "syncCallback",
             resolveMessage(messages.syncCallback, syncData),
@@ -160,10 +162,10 @@ interface PatternInfo {
   isArrayCreation: boolean;
   isConditional: boolean;
   isComputation: boolean;
-  varDeclarator: T.VariableDeclarator | null;
+  varDeclarator: ts.VariableDeclaration | null;
 }
 
-const patternCache = new WeakMap<T.Node, PatternInfo>();
+const patternCache = new WeakMap<ts.Node, PatternInfo>();
 
 const EMPTY_PATTERN_INFO: PatternInfo = Object.freeze({
   isEarlyReturn: false,
@@ -186,7 +188,7 @@ const EMPTY_PATTERN_INFO: PatternInfo = Object.freeze({
  * @param callExpr - The call expression to analyze
  * @returns Object containing all detected pattern flags
  */
-function detectPatterns(callExpr: T.Node | undefined): PatternInfo {
+function detectPatterns(callExpr: ts.Node | undefined): PatternInfo {
   if (!callExpr) return EMPTY_PATTERN_INFO;
 
   const cached = patternCache.get(callExpr);
@@ -207,7 +209,7 @@ function detectPatterns(callExpr: T.Node | undefined): PatternInfo {
  * @param callExpr - The call expression to analyze
  * @returns Object with flags for each detected pattern type
  */
-function computePatterns(callExpr: T.Node): PatternInfo {
+function computePatterns(callExpr: ts.Node): PatternInfo {
   const result: PatternInfo = {
     isEarlyReturn: false,
     isFunctionArgument: false,
@@ -224,71 +226,56 @@ function computePatterns(callExpr: T.Node): PatternInfo {
 
   // Function argument check: signal() passed as argument to any function call
   // e.g., console.log(signal()), myFunc(signal()), arr.map(x => signal())
-  if (immediateParent?.type === "CallExpression" && immediateParent.callee !== callExpr) {
+  if (immediateParent && ts.isCallExpression(immediateParent) && immediateParent.expression !== callExpr) {
     result.isFunctionArgument = true;
   }
 
   // Computation check (binary expression on immediate parent)
-  if (immediateParent?.type === "BinaryExpression") {
+  if (immediateParent && ts.isBinaryExpression(immediateParent)) {
     result.isComputation = true;
   }
 
-  let current: T.Node | undefined = callExpr.parent;
+  let current: ts.Node | undefined = callExpr.parent;
   while (current) {
-    switch (current.type) {
-      case "IfStatement": {
-        // Check for early return pattern: if (!signal()) return null;
-        if (isEarlyReturnPattern(current)) {
-          result.isEarlyReturn = true;
-        }
-        break;
+    if (ts.isIfStatement(current)) {
+      // Check for early return pattern: if (!signal()) return null;
+      if (isEarlyReturnPattern(current)) {
+        result.isEarlyReturn = true;
       }
-
-      case "TemplateLiteral":
-        result.isTemplateLiteral = true;
-        break;
-
-      case "ObjectExpression":
-        result.isObjectLiteral = true;
-        break;
-
-      case "ArrayExpression":
+    } else if (ts.isTemplateExpression(current) || ts.isNoSubstitutionTemplateLiteral(current)) {
+      result.isTemplateLiteral = true;
+    } else if (ts.isObjectLiteralExpression(current)) {
+      result.isObjectLiteral = true;
+    } else if (ts.isArrayLiteralExpression(current)) {
+      result.isArrayCreation = true;
+    } else if (ts.isConditionalExpression(current)) {
+      result.isConditional = true;
+    } else if (ts.isCallExpression(current)) {
+      // Check for Array.from(...) pattern
+      const callee = current.expression;
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === "Array"
+      ) {
         result.isArrayCreation = true;
-        break;
+      }
+    } else if (ts.isVariableDeclaration(current)) {
+      result.varDeclarator = current;
 
-      case "ConditionalExpression":
-        result.isConditional = true;
-        break;
-
-      case "CallExpression": {
-        // Check for Array.from(...) pattern
-        const callee = current.callee;
-        if (
-          callee.type === "MemberExpression" &&
-          callee.object.type === "Identifier" &&
-          callee.object.name === "Array"
-        ) {
-          result.isArrayCreation = true;
-        }
-        break;
+      if (ts.isObjectBindingPattern(current.name) || ts.isArrayBindingPattern(current.name)) {
+        result.isDestructuring = true;
       }
 
-      case "VariableDeclarator":
-        result.varDeclarator = current;
-
-        if (current.id.type === "ObjectPattern" || current.id.type === "ArrayPattern") {
-          result.isDestructuring = true;
-        }
-
-        return result;
-
-      case "FunctionDeclaration":
-      case "FunctionExpression":
-      case "ArrowFunctionExpression":
-      case "ExpressionStatement":
-      case "ReturnStatement":
-
-        return result;
+      return result;
+    } else if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current) ||
+      ts.isExpressionStatement(current) ||
+      ts.isReturnStatement(current)
+    ) {
+      return result;
     }
 
     current = current.parent;

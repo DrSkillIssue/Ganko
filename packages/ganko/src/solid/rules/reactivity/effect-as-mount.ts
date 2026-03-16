@@ -29,7 +29,7 @@
  * Using `onMount` makes the one-shot intent explicit.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { Fix } from "../../../diagnostic";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import type { SolidGraph } from "../../impl";
@@ -74,11 +74,11 @@ export const effectAsMount = defineSolidRule({
       if (!callbackArg) continue;
 
       const callbackNode = callbackArg.node;
-      if (callbackNode.type !== "ArrowFunctionExpression" && callbackNode.type !== "FunctionExpression") {
+      if (!ts.isArrowFunction(callbackNode) && !ts.isFunctionExpression(callbackNode)) {
         continue;
       }
 
-      if (callbackNode.params.length > 0) continue;
+      if (callbackNode.parameters.length > 0) continue;
 
       const fnEntity = getFunctionByNode(graph, callbackNode);
       if (!fnEntity) continue;
@@ -95,7 +95,7 @@ export const effectAsMount = defineSolidRule({
       const name = calleeName(call.node);
       const fix = buildFix(call.node, name, graph);
       const resolved = resolveMessage(messages.effectAsMount, { primitive: name });
-      emit(createDiagnostic(graph.file, call.node, "effect-as-mount", "effectAsMount", resolved, "error", fix));
+      emit(createDiagnostic(graph.file, call.node, graph.sourceFile, "effect-as-mount", "effectAsMount", resolved, "error", fix));
     }
   },
 });
@@ -103,8 +103,8 @@ export const effectAsMount = defineSolidRule({
 /**
  * Extract callee name from a call expression.
  */
-function calleeName(node: T.CallExpression | T.NewExpression): string {
-  if (node.callee.type === "Identifier") return node.callee.name;
+function calleeName(node: ts.CallExpression | ts.NewExpression): string {
+  if (ts.isIdentifier(node.expression)) return node.expression.text;
   return "createEffect";
 }
 
@@ -175,15 +175,15 @@ function hasAmbiguousCallsInScope(graph: SolidGraph, fn: FunctionEntity): boolea
     if (!call) continue;
     if (call.primitive) continue;
     if (call.resolvedTarget) continue;
-    if (call.callee.type === "Identifier") continue;
+    if (ts.isIdentifier(call.callee)) continue;
     if (!isScopeDescendant(call.scope, fnScope)) continue;
     // calleeRootVariable is non-null → callee roots at a local variable
     if (call.calleeRootVariable !== null) return true;
     // calleeRootVariable is null → either global OR non-identifier root.
-    // For MemberExpression callees, check if the root is actually an
+    // For PropertyAccessExpression callees, check if the root is actually an
     // Identifier (global like console) vs something else (CallExpression,
     // ThisExpression, etc. — conservative bail out).
-    if (call.callee.type === "MemberExpression" && !hasIdentifierRoot(call.callee)) return true;
+    if (ts.isPropertyAccessExpression(call.callee) && !hasIdentifierRoot(call.callee)) return true;
   }
   return false;
 }
@@ -207,7 +207,7 @@ function hasUnresolvedLocalCalls(graph: SolidGraph, fn: FunctionEntity): boolean
     if (call.resolvedTarget) continue;
     if (!isScopeDescendant(call.scope, fnScope)) continue;
     if (call.calleeRootVariable !== null) return true;
-    if (call.callee.type === "MemberExpression" && !hasIdentifierRoot(call.callee)) return true;
+    if (ts.isPropertyAccessExpression(call.callee) && !hasIdentifierRoot(call.callee)) return true;
   }
   return false;
 }
@@ -220,12 +220,12 @@ function hasUnresolvedLocalCalls(graph: SolidGraph, fn: FunctionEntity): boolean
  * `getObj().method` → root is `getObj()` (CallExpression) → false
  * `this.foo` → root is `this` (ThisExpression) → false
  */
-function hasIdentifierRoot(node: T.MemberExpression): boolean {
-  let current: T.Expression | T.Super = node.object;
-  while (current.type === "MemberExpression") {
-    current = current.object;
+function hasIdentifierRoot(node: ts.PropertyAccessExpression): boolean {
+  let current: ts.Expression = node.expression;
+  while (ts.isPropertyAccessExpression(current)) {
+    current = current.expression;
   }
-  return current.type === "Identifier";
+  return ts.isIdentifier(current);
 }
 
 /**
@@ -257,11 +257,11 @@ function isScopeDescendant(scope: ScopeEntity, ancestor: ScopeEntity): boolean {
 /**
  * Build fix to convert createEffect/createRenderEffect to onMount.
  */
-function buildFix(effectNode: T.CallExpression | T.NewExpression, name: string, graph: SolidGraph): Fix | undefined {
-  if (effectNode.callee.type !== "Identifier" || effectNode.callee.name !== name) {
+function buildFix(effectNode: ts.CallExpression | ts.NewExpression, name: string, graph: SolidGraph): Fix | undefined {
+  if (!ts.isIdentifier(effectNode.expression) || effectNode.expression.text !== name) {
     return undefined;
   }
-  const replaceFix = { range: [effectNode.callee.range[0], effectNode.callee.range[1]] as const, text: "onMount" };
+  const replaceFix = { range: [effectNode.expression.getStart(graph.sourceFile), effectNode.expression.end] as const, text: "onMount" };
   const importFix = buildSolidImportFix(graph, "onMount");
   return importFix ? [replaceFix, importFix] : [replaceFix];
 }

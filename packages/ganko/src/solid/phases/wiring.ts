@@ -9,7 +9,7 @@
  * - Resolves call targets (links CallEntity to FunctionEntity)
  * - Builds call site lists on functions
  */
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import { getVariableByNameInScope } from "../queries/scope";
@@ -51,10 +51,10 @@ function wireJSXHierarchy(graph: SolidGraph): void {
  * @param node - The JSX node
  * @returns The parent JSX node or null
  */
-function findParentJSXNode(node: T.JSXElement | T.JSXFragment): T.JSXElement | T.JSXFragment | null {
-  let current: T.Node | undefined = node.parent;
+function findParentJSXNode(node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment): ts.JsxElement | ts.JsxFragment | null {
+  let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (current.type === "JSXElement" || current.type === "JSXFragment") {
+    if (ts.isJsxElement(current) || ts.isJsxFragment(current)) {
       return current;
     }
     current = current.parent;
@@ -100,10 +100,10 @@ function resolveCallTargets(graph: SolidGraph): void {
   for (let i = 0, len = calls.length; i < len; i++) {
     const call = calls[i];
     if (!call) continue;
-    const callee = call.node.callee;
+    const callee = call.node.expression;
 
-    if (callee.type === "Identifier") {
-      const fns = functionsByName.get(callee.name);
+    if (ts.isIdentifier(callee)) {
+      const fns = functionsByName.get(callee.text);
       if (fns && fns.length === 1) {
         const target = fns[0];
         if (!target) continue;
@@ -148,11 +148,11 @@ function wireCalleeRootVariables(graph: SolidGraph): void {
  * @param node - The callee expression to extract from
  * @returns The root identifier name or null
  */
-function extractCalleeRootName(node: T.Expression | T.Super): string | null {
-  let current: T.Expression | T.Super = node;
+function extractCalleeRootName(node: ts.Expression): string | null {
+  let current: ts.Expression = node;
   for (;;) {
-    if (current.type === "Identifier") return current.name;
-    if (current.type === "MemberExpression") { current = current.object; continue; }
+    if (ts.isIdentifier(current)) return current.text;
+    if (ts.isPropertyAccessExpression(current)) { current = current.expression; continue; }
     return null;
   }
 }

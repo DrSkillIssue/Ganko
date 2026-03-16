@@ -45,6 +45,7 @@ export const noHeavyParserConstructorInLoop = defineSolidRule({
           createDiagnostic(
             graph.file,
             expression,
+            graph.sourceFile,
             "no-heavy-parser-constructor-in-loop",
             "heavyParserConstructor",
             resolveMessage(messages.heavyParserConstructor, { ctor }),

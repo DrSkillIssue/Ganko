@@ -21,10 +21,11 @@
  * import { render } from "solid-js/web";
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript";
 import type { ImportEntity, ImportSpecifierEntity } from "../../entities/import"
 import type { Diagnostic } from "../../../diagnostic"
 import type { Emit } from "../../../graph"
+import type { SolidGraph } from "../../impl"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { iterateImports } from "../../queries/iterate"
@@ -155,17 +156,18 @@ const typeMap = new Map<string, Source>([
  * @param declaration - The parent import declaration node
  * @returns True if this is a type-only import
  */
-function isTypeImport(specifier: T.ImportSpecifier, declaration: T.ImportDeclaration): boolean {
-  return specifier.importKind === "type" || declaration.importKind === "type"
+function isTypeImport(specifier: ts.ImportSpecifier, declaration: ts.ImportDeclaration): boolean {
+  return specifier.isTypeOnly || declaration.importClause?.isTypeOnly === true
 }
 
 
 
 function checkSpecifier(
   specEntity: ImportSpecifierEntity,
-  declaration: T.ImportDeclaration,
+  declaration: ts.ImportDeclaration,
   source: Source,
   file: string,
+  sourceFile: ts.SourceFile,
 ): Diagnostic | undefined {
   if (specEntity.kind !== "named") return undefined
 
@@ -173,7 +175,7 @@ function checkSpecifier(
   if (name === null) return undefined
 
   const specNode = specEntity.node
-  if (specNode.type !== "ImportSpecifier") return undefined
+  if (!ts.isImportSpecifier(specNode)) return undefined
 
   const isType = isTypeImport(specNode, declaration)
   const map = isType ? typeMap : primitiveMap
@@ -184,6 +186,7 @@ function checkSpecifier(
   return createDiagnostic(
     file,
     specNode,
+    sourceFile,
     "imports",
     "preferSource",
     resolveMessage(messages.preferSource, { name, source: correctSource }),
@@ -191,7 +194,7 @@ function checkSpecifier(
   )
 }
 
-function checkImport(entity: ImportEntity, emit: Emit, file: string): void {
+function checkImport(entity: ImportEntity, emit: Emit, graph: SolidGraph): void {
   const source = entity.source
   let validSource: Source
   if (source === "solid-js") {
@@ -210,7 +213,7 @@ function checkImport(entity: ImportEntity, emit: Emit, file: string): void {
   for (let i = 0, len = specifiers.length; i < len; i++) {
     const spec = specifiers[i];
     if (!spec) continue;
-    const diagnostic = checkSpecifier(spec, declaration, validSource, file)
+    const diagnostic = checkSpecifier(spec, declaration, validSource, graph.file, graph.sourceFile)
     if (diagnostic) {
       emit(diagnostic)
     }
@@ -232,7 +235,7 @@ export const imports = defineSolidRule({
   options,
   check(graph, emit) {
     for (const entity of iterateImports(graph)) {
-      checkImport(entity, emit, graph.file)
+      checkImport(entity, emit, graph)
     }
   },
 })

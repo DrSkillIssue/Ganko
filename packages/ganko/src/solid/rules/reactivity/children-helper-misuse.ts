@@ -8,7 +8,7 @@
  * 2. Accessing `props.children` in tracked contexts without the helper
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { ScopeEntity } from "../../entities";
 import type { Diagnostic } from "../../../diagnostic"
@@ -68,7 +68,7 @@ export const childrenHelperMisuse = defineSolidRule({
  */
 function checkMultipleChildrenCalls(
   graph: SolidGraph,
-  calls: readonly { node: T.CallExpression | T.NewExpression; scope: ScopeEntity }[],
+  calls: readonly { node: ts.CallExpression | ts.NewExpression; scope: ScopeEntity }[],
   diagnostics: Diagnostic[],
   file: string,
 ): void {
@@ -86,7 +86,7 @@ function checkMultipleChildrenCalls(
 
     if (count > 1) {
       diagnostics.push(
-        createDiagnostic(file, call.node, "children-helper-misuse", "multipleChildrenCalls", messages.multipleChildrenCalls, "error"),
+        createDiagnostic(file, call.node, graph.sourceFile, "children-helper-misuse", "multipleChildrenCalls", messages.multipleChildrenCalls, "error"),
       );
     }
   }
@@ -101,7 +101,7 @@ function checkMultipleChildrenCalls(
  */
 function checkPropsChildrenAccess(
   graph: SolidGraph,
-  propsVars: readonly { reads: readonly { node: T.Node; scope: ScopeEntity }[] }[],
+  propsVars: readonly { reads: readonly { node: ts.Node; scope: ScopeEntity }[] }[],
   diagnostics: Diagnostic[],
   file: string,
 ): void {
@@ -114,12 +114,12 @@ function checkPropsChildrenAccess(
       if (!read) continue;
       const parent = read.node.parent;
 
-      if (!parent || parent.type !== "MemberExpression" || parent.object !== read.node) continue;
+      if (!parent || !ts.isPropertyAccessExpression(parent) || parent.expression !== read.node) continue;
       if (!isChildrenProperty(parent)) continue;
       if (getEffectiveTrackingContext(graph, read.scope).type !== "tracked") continue;
 
       diagnostics.push(
-        createDiagnostic(file, parent, "children-helper-misuse", "directChildrenAccess", messages.directChildrenAccess, "error"),
+        createDiagnostic(file, parent, graph.sourceFile, "children-helper-misuse", "directChildrenAccess", messages.directChildrenAccess, "error"),
       );
     }
   }
@@ -131,10 +131,6 @@ function checkPropsChildrenAccess(
  * @param expr - The member expression to check
  * @returns true if accessing .children or ["children"]
  */
-function isChildrenProperty(expr: T.MemberExpression): boolean {
-  const prop = expr.property;
-  if (expr.computed) {
-    return prop.type === "Literal" && prop.value === "children";
-  }
-  return prop.type === "Identifier" && prop.name === "children";
+function isChildrenProperty(expr: ts.PropertyAccessExpression): boolean {
+  return ts.isIdentifier(expr.name) && expr.name.text === "children";
 }

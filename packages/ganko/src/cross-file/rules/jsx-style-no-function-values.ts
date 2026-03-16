@@ -1,3 +1,4 @@
+import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { forEachStylePropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
@@ -18,16 +19,16 @@ export const jsxStyleNoFunctionValues = defineCrossRule({
   check(context, emit) {
     const { solids } = context
     forEachStylePropertyAcross(solids, (solid, p) => {
-      if (p.type !== "Property") return
-      const n = objectKeyName(p.key)
+      if (!ts.isPropertyAssignment(p)) return
+      const n = objectKeyName(p.name)
       if (!n) return
-      const v = p.value
-      if (v.type === "ArrowFunctionExpression" || v.type === "FunctionExpression") {
-        emit(createDiagnostic(solid.file, v, jsxStyleNoFunctionValues.id, "functionStyleValue", resolveMessage(messages.functionStyleValue, { name: n }), "error"))
+      const v = p.initializer
+      if (ts.isArrowFunction(v) || ts.isFunctionExpression(v)) {
+        emit(createDiagnostic(solid.file, v, solid.sourceFile, jsxStyleNoFunctionValues.id, "functionStyleValue", resolveMessage(messages.functionStyleValue, { name: n }), "error"))
         return
       }
-      if (v.type === "Identifier" && solid.typeResolver.isCallableType(v)) {
-        emit(createDiagnostic(solid.file, v, jsxStyleNoFunctionValues.id, "functionStyleValue", resolveMessage(messages.functionStyleValue, { name: n }), "error"))
+      if (ts.isIdentifier(v) && solid.typeResolver.isCallableType(v)) {
+        emit(createDiagnostic(solid.file, v, solid.sourceFile, jsxStyleNoFunctionValues.id, "functionStyleValue", resolveMessage(messages.functionStyleValue, { name: n }), "error"))
       }
     })
   },

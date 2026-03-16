@@ -2,7 +2,7 @@
  * Flags defensive array copies passed into scalar statistic functions.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 
@@ -42,21 +42,22 @@ export const avoidDefensiveCopyForScalarStat = defineSolidRule({
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i]
       if (!call) continue;
-      if (call.node.type !== "CallExpression") continue
+      if (!ts.isCallExpression(call.node)) continue
 
-      const statName = calleeName(call.node.callee)
+      const statName = calleeName(call.node.expression)
       if (!statName) continue
       if (!SCALAR_STATS.has(statName)) continue
 
       const firstArg = call.node.arguments[0]
       if (!firstArg) continue
-      if (firstArg.type === "SpreadElement") continue
+      if (ts.isSpreadElement(firstArg)) continue
       if (!isDefensiveArrayCopy(firstArg)) continue
 
       emit(
         createDiagnostic(
           graph.file,
           firstArg,
+          graph.sourceFile,
           "avoid-defensive-copy-for-scalar-stat",
           "defensiveCopy",
           resolveMessage(messages.defensiveCopy, { stat: statName }),
@@ -67,25 +68,27 @@ export const avoidDefensiveCopyForScalarStat = defineSolidRule({
   },
 })
 
-function calleeName(callee: T.CallExpression["callee"]): string | null {
-  if (callee.type === "Identifier") return callee.name
-  if (callee.type === "MemberExpression") {
-    if (callee.property.type === "Identifier") return callee.property.name
-    if (callee.property.type === "Literal" && typeof callee.property.value === "string") {
-      return callee.property.value
+function calleeName(callee: ts.Expression): string | null {
+  if (ts.isIdentifier(callee)) return callee.text
+  if (ts.isPropertyAccessExpression(callee)) {
+    return callee.name.text
+  }
+  if (ts.isElementAccessExpression(callee)) {
+    if (ts.isStringLiteral(callee.argumentExpression)) {
+      return callee.argumentExpression.text
     }
   }
   return null
 }
 
-function isDefensiveArrayCopy(argument: T.Expression): boolean {
-  if (argument.type === "ArrayExpression") {
+function isDefensiveArrayCopy(argument: ts.Expression): boolean {
+  if (ts.isArrayLiteralExpression(argument)) {
     if (argument.elements.length !== 1) return false
     const first = argument.elements[0]
-    return first?.type === "SpreadElement"
+    return first !== undefined && ts.isSpreadElement(first)
   }
 
-  if (argument.type !== "CallExpression") return false
+  if (!ts.isCallExpression(argument)) return false
 
   if (isZeroArgSliceCall(argument)) return true
   if (isArrayFromCall(argument)) return true
@@ -93,21 +96,16 @@ function isDefensiveArrayCopy(argument: T.Expression): boolean {
   return false
 }
 
-function isZeroArgSliceCall(node: T.CallExpression): boolean {
+function isZeroArgSliceCall(node: ts.CallExpression): boolean {
   if (node.arguments.length !== 0) return false
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return false
-
-  const property = callee.property
-  if (property.type === "Identifier") return property.name === "slice"
-  if (property.type === "Literal" && typeof property.value === "string") return property.value === "slice"
-  return false
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return false
+  return callee.name.text === "slice"
 }
 
-function isArrayFromCall(node: T.CallExpression): boolean {
-  const callee = node.callee
-  if (callee.type !== "MemberExpression") return false
-  if (callee.object.type !== "Identifier" || callee.object.name !== "Array") return false
-  const property = callee.property
-  return property.type === "Identifier" && property.name === "from"
+function isArrayFromCall(node: ts.CallExpression): boolean {
+  const callee = node.expression
+  if (!ts.isPropertyAccessExpression(callee)) return false
+  if (!ts.isIdentifier(callee.expression) || callee.expression.text !== "Array") return false
+  return callee.name.text === "from"
 }

@@ -1,6 +1,7 @@
 /**
  * Spread-related query functions
  */
+import ts from "typescript";
 import type { SolidGraph } from "../impl";
 import type { ObjectSpreadEntity, SpreadSourceReactivity } from "../entities/spread";
 import { getScopeFor, getVariableByNameInScope } from "./scope";
@@ -96,7 +97,7 @@ export function isPropsPassThrough(graph: SolidGraph, spread: ObjectSpreadEntity
 
   // Check if the only read is this spread itself
   // Pure pass-through means no other accesses to the variable in the function
-  const spreadNode = spread.node.type === "JSXSpreadAttribute" ? spread.node.argument : null;
+  const spreadNode = ts.isJsxSpreadAttribute(spread.node) ? spread.node.expression : null;
   if (!spreadNode) return false;
 
   // Count reads that aren't the spread itself

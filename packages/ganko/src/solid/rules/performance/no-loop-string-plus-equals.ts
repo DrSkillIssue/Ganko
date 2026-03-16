@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { getContainingFunction, iterateVariables } from "../../queries"
@@ -26,11 +26,11 @@ export const noLoopStringPlusEquals = defineSolidRule({
     for (const variable of iterateVariables(graph)) {
       if (!isStringLikeVariable(graph, variable)) continue
 
-      const byFunction = new Map<string, { count: number; node: T.Node }>()
+      const byFunction = new Map<string, { count: number; node: ts.Node }>()
       for (let i = 0; i < variable.assignments.length; i++) {
         const assignment = variable.assignments[i]
         if (!assignment) continue;
-        if (assignment.operator !== "+=") continue
+        if (assignment.operator !== ts.SyntaxKind.PlusEqualsToken) continue
         if (!assignment.isInLoop) continue
         if (!isLikelyStringParsingContext(graph, assignment.node)) continue
 
@@ -50,6 +50,7 @@ export const noLoopStringPlusEquals = defineSolidRule({
           createDiagnostic(
             graph.file,
             entry.node,
+            graph.sourceFile,
             "no-loop-string-plus-equals",
             "loopStringPlusEquals",
             messages.loopStringPlusEquals,

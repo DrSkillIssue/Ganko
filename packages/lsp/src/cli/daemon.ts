@@ -1,9 +1,9 @@
 /**
  * Ganko Daemon Server
  *
- * Long-running background process that keeps a TypeScript project service,
+ * Long-running background process that keeps a TypeScript program,
  * graph caches, file index, and Tailwind validator warm between `ganko lint`
- * invocations. Eliminates both the ~2-5s TS project service startup cost
+ * invocations. Eliminates both the TS program build cost
  * and the per-file graph rebuild cost on repeated runs.
  *
  * Architecture follows Biome's daemon pattern:
@@ -16,14 +16,14 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
+import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex, type FileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
-import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
+import { createEmit, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
 import { createFileWriter, type Logger } from "../core/logger";
 import {
   daemonSocketPath,
@@ -219,11 +219,36 @@ async function handleLintRequest(
     filesToLint = fileIndex.allFiles();
   }
 
+  const allDiagnostics: Diagnostic[] = [];
+
+  const solidPathsToSync = params.crossFile
+    ? [...fileIndex.solidFiles]
+    : filesToLint.filter(path => classifyFile(path) === "solid");
+  const solidContentByPath = new Map<string, string>();
+
+  for (let i = 0, len = solidPathsToSync.length; i < len; i++) {
+    const path = solidPathsToSync[i];
+    if (!path) continue;
+
+    let content: string;
+    try {
+      content = await readFile(path, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const key = canonicalPath(path);
+    solidContentByPath.set(key, content);
+
+    const sf = project.getSourceFile(key);
+    if (sf === undefined || sf.text !== content) {
+      project.updateFile(key, content);
+    }
+  }
+
   if (filesToLint.length === 0) {
     return { kind: "lint-response", id: request.id, diagnostics: [] };
   }
-
-  const allDiagnostics: Diagnostic[] = [];
 
   /** Re-read CSS files from disk and diff against cached content.
    * Only invalidate the GraphCache CSS generation when content actually
@@ -304,56 +329,49 @@ async function handleLintRequest(
   }
   const cache = state.cache;
 
-  /** M3: Use async file reads to avoid blocking the event loop.
-   * Only rebuild SolidGraphs when the TS script version changed —
+  /** Only rebuild SolidGraphs when the content hash changed —
    * avoids bumping solidGeneration on no-op runs, which would
    * invalidate CSSGraph/LayoutGraph/cross-file caches. */
+  const program = project.getProgram();
   for (let i = 0, len = filesToLint.length; i < len; i++) {
     const path = filesToLint[i];
     if (!path) continue;
     if (classifyFile(path) === "css") continue;
-    let content: string;
-    try {
-      content = await readFile(path, "utf-8");
-    } catch {
+    const key = canonicalPath(path);
+    const content = solidContentByPath.get(key);
+    if (content === undefined) {
       continue;
     }
 
-    const key = canonicalPath(path);
-    project.updateFile(key, content);
-
-    const version = project.getScriptVersion(key)
-      ?? `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
+    const version = contentHash(content);
     const needsRebuild = !cache.hasSolidGraph(key, version);
 
     if (needsRebuild) {
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
-      const input = parseWithOptionalProgram(key, content, program, log);
+      const input = createSolidInput(key, program, log);
       const graph = buildSolidGraph(input);
       cache.setSolidGraph(key, version, graph);
 
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(graph, input.sourceCode, emit);
+      runSolidRules(graph, input.sourceFile, emit);
       for (let j = 0, dLen = results.length; j < dLen; j++) {
         const result = results[j];
         if (!result) continue;
         allDiagnostics.push(result);
       }
     } else {
-      // File unchanged — re-run single-file rules from cached graph.
-      // Parse is still needed for sourceCode, but graph build is skipped.
-      const cachedGraph = cache.getCachedSolidGraph(key, version);
-      if (cachedGraph === null) {
+      // File unchanged — re-run rules on cached graph, no re-parse needed.
+      // The cached graph contains all resolved type information from
+      // buildSolidGraph. Rules read entity data, not the TypeChecker.
+      const graph = cache.getCachedSolidGraph(key, version);
+      if (graph === null) {
         log.warning(`getCachedSolidGraph miss after hasSolidGraph hit for ${key} v=${version}`);
+        continue;
       }
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
-      const input = parseWithOptionalProgram(key, content, program, log);
-      const graphToUse = cachedGraph ?? buildSolidGraph(input);
-      if (cachedGraph === null) {
-        cache.setSolidGraph(key, version, graphToUse);
-      }
+      const sourceFile = program.getSourceFile(key);
+      if (!sourceFile) continue;
+
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(graphToUse, input.sourceCode, emit);
+      runSolidRules(graph, sourceFile, emit);
       for (let j = 0, dLen = results.length; j < dLen; j++) {
         const result = results[j];
         if (!result) continue;
@@ -403,22 +421,6 @@ async function handleLintRequest(
         allDiagnostics.push(cd);
       }
     }
-  }
-
-  /* Close files in the TS project service that are no longer in the
-     file index. Without this, every file opened via updateFile/getLanguageService
-     across all requests accumulates in the project service, leaking memory. */
-  const activeFiles = new Set(fileIndex.solidFiles);
-  const openFiles = project.openFiles();
-  let closed = 0;
-  for (const openPath of openFiles) {
-    if (!activeFiles.has(openPath)) {
-      project.closeFile(openPath);
-      closed++;
-    }
-  }
-  if (closed > 0 && log.enabled) {
-    log.debug(`closed ${closed} stale files from TS project service (${openFiles.size - closed} remain)`);
   }
 
   return { kind: "lint-response", id: request.id, diagnostics: allDiagnostics };
@@ -557,14 +559,13 @@ async function writePidFile(pidPath: string): Promise<void> {
 }
 
 /**
- * Pre-warm the TS ProjectService in the background after daemon startup.
+ * Pre-warm the TS program in the background after daemon startup.
  *
  * Only warms resources that are expensive AND stable across request
- * configurations: the ESLint config, the TS project service constructor,
- * and the TS program build (the dominant 10-15s cost). File index,
- * Tailwind validator, CSS content map, and dependency scan all depend on
- * `--exclude` patterns from the CLI invocation and are deferred to the
- * first lint request.
+ * configurations: the ESLint config and the TS program build (the
+ * dominant cost). File index, Tailwind validator, CSS content map,
+ * and dependency scan all depend on `--exclude` patterns from the CLI
+ * invocation and are deferred to the first lint request.
  *
  * This matches the pattern used by Biome, oxlint, and eslint_d: only
  * pre-warm what doesn't depend on request params.
@@ -591,20 +592,12 @@ async function prewarmDaemon(state: DaemonState): Promise<void> {
       });
     }
 
-    /** Trigger TS program build — the 10-15s cost. Find a sentinel
-     *  solid file via a minimal file index (ESLint ignores only).
-     *  The file index itself is not cached — the first lint request
-     *  rebuilds it with the full exclude set from CLI params. */
-    const tempIndex = createFileIndex(projectRoot, eslintResult.globalIgnores, log);
-    const firstSolidFile = tempIndex.solidFiles.values().next();
-    if (!firstSolidFile.done && firstSolidFile.value !== undefined) {
-      const sentinel = firstSolidFile.value;
-      log.info(`pre-warm: triggering TS program build via ${sentinel}`);
-      const content = readFileSync(sentinel, "utf-8");
-      const project = state.project;
-      project.updateFile(sentinel, content);
-      project.getLanguageService(sentinel);
-    }
+    /** Trigger full TS program build via createBatchProgram.
+     *  The batch program is disposed immediately — its only purpose is
+     *  to warm the filesystem cache and TypeScript's internal caches. */
+    log.info("pre-warm: triggering TS program build via createBatchProgram");
+    const batch = createBatchProgram(projectRoot);
+    batch.dispose();
     if (state.shutdownStarted) return;
 
     log.info(`pre-warm: completed in ${(performance.now() - t0).toFixed(0)}ms`);

@@ -10,7 +10,6 @@
  *
  * Reachability flags are stored as a bitmask on FunctionEntity._reachability.
  */
-import type { TSESTree as _T } from "@typescript-eslint/utils";
 import type { SolidGraph } from "../impl";
 import type { SolidInput } from "../input";
 import type { FunctionEntity } from "../entities/function";

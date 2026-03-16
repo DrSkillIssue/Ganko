@@ -6,7 +6,7 @@
  * - Pre-allocated buffer: `const/let buf = new Array(256)` outside loops
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { isInLoop } from "../../util/expression"
@@ -39,43 +39,41 @@ export const avoidSparseArrays = defineSolidRule({
       const expr = constructors[i]
       if (!expr) continue;
       const args = expr.arguments
-      if (args.length !== 1) continue
+      if (!args || args.length !== 1) continue
 
       const arg = args[0]
       if (!arg) continue
 
-      const numeric = arg.type === "Literal" && typeof arg.value === "number"
-      const variable = arg.type === "Identifier"
+      const numeric = ts.isNumericLiteral(arg)
+      const variable = ts.isIdentifier(arg)
       if (!numeric && !variable) continue
-      if (numeric && arg.value === 0) continue
+      if (numeric && Number(arg.text) === 0) continue
 
       if (hasChainedFill(expr)) continue
       if (isFilledByNextForLoop(expr)) continue
       if (isFixedCapacityBuffer(expr, arg)) continue
 
       emit(
-        createDiagnostic(graph.file, expr, "avoid-sparse-arrays", "sparseArray", messages.sparseArray, "warn"),
+        createDiagnostic(graph.file, expr, graph.sourceFile, "avoid-sparse-arrays", "sparseArray", messages.sparseArray, "warn"),
       )
     }
   },
 })
 
 /** `new Array(n).fill(...)` — parent or grandparent is a .fill member/call. */
-function hasChainedFill(expr: T.NewExpression): boolean {
+function hasChainedFill(expr: ts.NewExpression): boolean {
   const parent = expr.parent
   if (!parent) return false
 
-  if (parent.type === "MemberExpression" &&
-      parent.object === expr &&
-      parent.property.type === "Identifier" &&
-      parent.property.name === "fill") {
+  if (ts.isPropertyAccessExpression(parent) &&
+      parent.expression === expr &&
+      parent.name.text === "fill") {
     return true
   }
 
-  if (parent.type === "CallExpression" &&
-      parent.callee.type === "MemberExpression" &&
-      parent.callee.property.type === "Identifier" &&
-      parent.callee.property.name === "fill") {
+  if (ts.isCallExpression(parent) &&
+      ts.isPropertyAccessExpression(parent.expression) &&
+      parent.expression.name.text === "fill") {
     return true
   }
 
@@ -86,39 +84,45 @@ function hasChainedFill(expr: T.NewExpression): boolean {
  * `const r = new Array(n); for (...) r[i] = ...` — the very next sibling
  * statement is a for-loop that index-assigns into the same variable.
  */
-function isFilledByNextForLoop(expr: T.NewExpression): boolean {
+function isFilledByNextForLoop(expr: ts.NewExpression): boolean {
   const declarator = findContainingVariableDeclarator(expr)
   if (!declarator) return false
-  if (declarator.id.type !== "Identifier") return false
+  if (!ts.isIdentifier(declarator.name)) return false
 
   const decl = declarator.parent
-  if (!decl || decl.type !== "VariableDeclaration") return false
+  if (!decl || !ts.isVariableDeclarationList(decl)) return false
 
-  const block = decl.parent
+  const declStatement = decl.parent
+  if (!declStatement || !ts.isVariableStatement(declStatement)) return false
+
+  const block = declStatement.parent
   if (!block) return false
-  if (block.type !== "BlockStatement" && block.type !== "Program") return false
+  if (!ts.isBlock(block) && !ts.isSourceFile(block)) return false
 
-  const body = block.body
-  const idx = body.indexOf(decl)
+  const body = block.statements
+  let idx = -1
+  for (let j = 0; j < body.length; j++) {
+    if (body[j] === declStatement) { idx = j; break }
+  }
   if (idx < 0 || idx + 1 >= body.length) return false
 
   const next = body[idx + 1]
   if (!next) return false
-  if (next.type !== "ForStatement") return false
+  if (!ts.isForStatement(next)) return false
 
-  return forBodyIndexAssigns(next.body, declarator.id.name)
+  return forBodyIndexAssigns(next.statement, declarator.name.text)
 }
 
 /** Scans a for-loop body for `name[expr] = expr`. */
-function forBodyIndexAssigns(body: T.Statement, name: string): boolean {
-  if (body.type === "ExpressionStatement") return isIndexAssignment(body.expression, name)
+function forBodyIndexAssigns(body: ts.Statement, name: string): boolean {
+  if (ts.isExpressionStatement(body)) return isIndexAssignment(body.expression, name)
 
-  if (body.type === "BlockStatement") {
-    const stmts = body.body
+  if (ts.isBlock(body)) {
+    const stmts = body.statements
     for (let i = 0, len = stmts.length; i < len; i++) {
       const s = stmts[i]
       if (!s) continue;
-      if (s.type === "ExpressionStatement" && isIndexAssignment(s.expression, name)) {
+      if (ts.isExpressionStatement(s) && isIndexAssignment(s.expression, name)) {
         return true
       }
     }
@@ -128,13 +132,12 @@ function forBodyIndexAssigns(body: T.Statement, name: string): boolean {
 }
 
 /** `name[expr] = expr` */
-function isIndexAssignment(node: T.Expression, name: string): boolean {
-  if (node.type !== "AssignmentExpression" || node.operator !== "=") return false
+function isIndexAssignment(node: ts.Expression, name: string): boolean {
+  if (!ts.isBinaryExpression(node) || node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false
   const left = node.left
-  return left.type === "MemberExpression" &&
-         left.computed &&
-         left.object.type === "Identifier" &&
-         left.object.name === name
+  return ts.isElementAccessExpression(left) &&
+         ts.isIdentifier(left.expression) &&
+         left.expression.text === name
 }
 
 /**
@@ -143,21 +146,24 @@ function isIndexAssignment(node: T.Expression, name: string): boolean {
  * A fixed-capacity buffer declared at function/module scope is intentional
  * pre-allocation with manual index management.
  */
-function isFixedCapacityBuffer(expr: T.NewExpression, arg: T.Node): boolean {
+function isFixedCapacityBuffer(expr: ts.NewExpression, arg: ts.Node): boolean {
   if (!isConstantSize(arg)) return false
 
   const declarator = findContainingVariableDeclarator(expr)
   if (!declarator) return false
 
   const decl = declarator.parent
-  if (!decl || decl.type !== "VariableDeclaration") return false
+  if (!decl || !ts.isVariableDeclarationList(decl)) return false
 
-  return !isInLoop(decl)
+  const declStatement = decl.parent
+  if (!declStatement || !ts.isVariableStatement(declStatement)) return false
+
+  return !isInLoop(declStatement)
 }
 
 /** Numeric literal or SCREAMING_SNAKE_CASE identifier. */
-function isConstantSize(node: T.Node): boolean {
-  if (node.type === "Literal" && typeof node.value === "number") return true
-  if (node.type === "Identifier" && SCREAMING_SNAKE.test(node.name)) return true
+function isConstantSize(node: ts.Node): boolean {
+  if (ts.isNumericLiteral(node)) return true
+  if (ts.isIdentifier(node) && SCREAMING_SNAKE.test(node.text)) return true
   return false
 }

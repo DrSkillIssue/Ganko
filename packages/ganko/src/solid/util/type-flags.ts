@@ -5,7 +5,7 @@
  * See: https://github.com/microsoft/TypeScript/blob/main/src/compiler/types.ts
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import type ts from "typescript";
 import type { SolidGraph } from "../impl"
 
 /** ts.TypeFlags.Any | ts.TypeFlags.Unknown */
@@ -28,7 +28,7 @@ export const TS_OBJECT_LIKE = 524288;
  * Returns false for any/unknown, union types containing non-boolean members,
  * or nodes whose type cannot be resolved.
  */
-export function isBooleanType(solid: SolidGraph, node: T.Node): boolean {
+export function isBooleanType(solid: SolidGraph, node: ts.Node): boolean {
   const info = solid.typeResolver.getType(node);
   if (!info) return false;
 
@@ -44,7 +44,7 @@ export function isBooleanType(solid: SolidGraph, node: T.Node): boolean {
  * Check if a node's TypeScript type is definitively not boolean.
  * Returns false for any/unknown (ambiguous) or actual boolean types.
  */
-export function isDefinitelyNonBooleanType(solid: SolidGraph, node: T.Node): boolean {
+export function isDefinitelyNonBooleanType(solid: SolidGraph, node: ts.Node): boolean {
   const info = solid.typeResolver.getType(node);
   if (!info) return false;
 

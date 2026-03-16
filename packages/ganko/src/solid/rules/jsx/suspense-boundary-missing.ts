@@ -17,6 +17,7 @@
  * Without proper boundaries, loading states and errors will cause issues.
  */
 
+import ts from "typescript";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { JSXElementEntity } from "../../entities/jsx";
@@ -95,16 +96,16 @@ function createSuspenseAncestorChecker(): (element: JSXElementEntity) => boolean
  */
 function getLazyComponentName(call: CallEntity): string | null {
   const parent = call.node.parent;
-  if (!parent || parent.type !== "VariableDeclarator") {
+  if (!parent || !ts.isVariableDeclaration(parent)) {
     return null;
   }
-  if (parent.init !== call.node) {
+  if (parent.initializer !== call.node) {
     return null;
   }
-  if (parent.id.type !== "Identifier") {
+  if (!ts.isIdentifier(parent.name)) {
     return null;
   }
-  return parent.id.name;
+  return parent.name.text;
 }
 
 
@@ -143,9 +144,9 @@ export const suspenseBoundaryMissing = defineSolidRule({
       }
 
       if (getJSXAttributeValue(graph, element, "fallback") === null) {
-        if (element.node.type !== "JSXElement") continue;
+        if (!ts.isJsxElement(element.node)) continue;
         emit(
-          createDiagnostic(graph.file, element.node.openingElement, "suspense-boundary-missing", "suspenseNoFallback", messages.suspenseNoFallback, "error"),
+          createDiagnostic(graph.file, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "suspenseNoFallback", messages.suspenseNoFallback, "error"),
         );
       }
     }
@@ -159,9 +160,9 @@ export const suspenseBoundaryMissing = defineSolidRule({
         continue;
       }
       if (getJSXAttributeValue(graph, element, "fallback") === null) {
-        if (element.node.type !== "JSXElement") continue;
+        if (!ts.isJsxElement(element.node)) continue;
         emit(
-          createDiagnostic(graph.file, element.node.openingElement, "suspense-boundary-missing", "errorBoundaryNoFallback", messages.errorBoundaryNoFallback, "error"),
+          createDiagnostic(graph.file, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "errorBoundaryNoFallback", messages.errorBoundaryNoFallback, "error"),
         );
       }
     }
@@ -205,11 +206,17 @@ export const suspenseBoundaryMissing = defineSolidRule({
         if (!element) continue;
         // Lazy components are always non-DOM (PascalCase), so no isDomElement check needed
         if (!hasSuspenseAncestor(element)) {
-          if (element.node.type !== "JSXElement") continue;
+          const reportNode = ts.isJsxElement(element.node)
+            ? element.node.openingElement
+            : ts.isJsxSelfClosingElement(element.node)
+              ? element.node
+              : null;
+          if (!reportNode) continue;
           emit(
             createDiagnostic(
               graph.file,
-              element.node.openingElement,
+              reportNode,
+              graph.sourceFile,
               "suspense-boundary-missing",
               "lazyNoSuspense",
               resolveMessage(messages.lazyNoSuspense, { name }),

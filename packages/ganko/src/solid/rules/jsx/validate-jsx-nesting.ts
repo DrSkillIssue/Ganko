@@ -14,6 +14,7 @@
  * rendering bugs, accessibility issues, or unexpected behavior.
  */
 
+import ts from "typescript";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { JSXElementEntity } from "../../entities/jsx";
@@ -325,7 +326,7 @@ function hasChildren(element: JSXElementEntity): boolean {
     if (child.kind === "text") {
       // Text nodes need their actual content checked for whitespace
       const node = child.node;
-      if (node.type === "JSXText" && !isBlank(node.value)) {
+      if (ts.isJsxText(node) && !isBlank(node.text)) {
         return true;
       }
     } else {
@@ -366,11 +367,12 @@ export const validateJsxNesting = defineSolidRule({
       // Check for void elements with children
       if (HTML_VOID_ELEMENTS.has(childTag) && hasChildren(element)) {
         // Only JSXElement nodes have openingElement - fragments don't have tags
-        if (node.type === "JSXElement") {
+        if (ts.isJsxElement(node)) {
           emit(
             createDiagnostic(
               graph.file,
               node.openingElement,
+              graph.sourceFile,
               "validate-jsx-nesting",
               "voidElementWithChildren",
               resolveMessage(messages.voidElementWithChildren, { parent: childTag, child: "content" }),
@@ -399,11 +401,12 @@ export const validateJsxNesting = defineSolidRule({
       const error = checkNesting(parentTag, childTag);
       if (error) {
         // Only JSXElement nodes have openingElement - fragments don't have tags
-        if (node.type === "JSXElement") {
+        if (ts.isJsxElement(node)) {
           emit(
             createDiagnostic(
               graph.file,
               node.openingElement,
+              graph.sourceFile,
               "validate-jsx-nesting",
               error.messageKey,
               resolveMessage(messages[error.messageKey], error.data),

@@ -20,7 +20,7 @@
  * - Event delegation is automatic in Solid
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -191,11 +191,11 @@ function isAmbiguouslyCased(name: string): boolean {
  * @param valueNode - The JSX attribute value node
  * @returns The static value, or null if the value is dynamic
  */
-function getStaticAttributeValue(valueNode: T.Node | null): string | number | boolean | null {
+function getStaticAttributeValue(valueNode: ts.Node | null): string | number | boolean | null {
   if (!valueNode) return true // Boolean attributes (no value) are truthy
 
   // Skip array expressions (array syntax prevents inlining)
-  if (valueNode.type === "ArrayExpression") return null
+  if (ts.isArrayLiteralExpression(valueNode)) return null
 
   const staticValue = getStaticValue(valueNode)
   if (staticValue === null) return null
@@ -208,7 +208,7 @@ function getStaticAttributeValue(valueNode: T.Node | null): string | number | bo
 }
 
 interface EventHandlerIssue {
-  node: T.Node
+  node: ts.Node
   messageId: keyof typeof messages
   data: Record<string, string>
   fix?: Fix
@@ -244,9 +244,10 @@ function detectNonstandardEventIssue(
    attr: JSXAttributeEntity,
    name: string,
    lowercaseName: string,
+   sourceFile: ts.SourceFile,
  ): EventHandlerIssue | null {
   if (!isNonstandardEventName(lowercaseName)) return null
-  if (attr.node.type !== "JSXAttribute") return null
+  if (!ts.isJsxAttribute(attr.node)) return null
 
   const fixedName = getStandardEventHandlerName(lowercaseName)
   const attrNode = attr.node
@@ -254,7 +255,7 @@ function detectNonstandardEventIssue(
     node: attrNode.name,
     messageId: "nonstandard",
     data: { name, fixedName },
-    fix: [{ range: attrNode.name.range, text: fixedName }],
+    fix: [{ range: [attrNode.name.getStart(sourceFile), attrNode.name.end], text: fixedName }],
   }
 }
 
@@ -270,20 +271,21 @@ function detectCapitalizationIssue(
    attr: JSXAttributeEntity,
    name: string,
    lowercaseName: string,
+   sourceFile: ts.SourceFile,
  ): EventHandlerIssue | null {
   if (!isCommonHandlerName(lowercaseName)) return null
 
   const fixedName = getCommonEventHandlerName(lowercaseName)
   if (!fixedName) return null
   if (fixedName === name) return null
-  if (attr.node.type !== "JSXAttribute") return null
+  if (!ts.isJsxAttribute(attr.node)) return null
   const attrNode = attr.node
 
   return {
     node: attrNode.name,
     messageId: "capitalization",
     data: { name, fixedName },
-    fix: [{ range: attrNode.name.range, text: fixedName }],
+    fix: [{ range: [attrNode.name.getStart(sourceFile), attrNode.name.end], text: fixedName }],
   }
 }
 
@@ -299,7 +301,7 @@ function detectAmbiguousNamingIssue(
    name: string,
  ): EventHandlerIssue | null {
   if (!isAmbiguouslyCased(name)) return null
-  if (attr.node.type !== "JSXAttribute") return null
+  if (!ts.isJsxAttribute(attr.node)) return null
 
   const thirdChar = name[2];
   if (!thirdChar) return null;
@@ -350,6 +352,8 @@ export const eventHandlers = defineSolidRule({
       return
     }
 
+    const sourceFile = graph.sourceFile
+
     for (let i = 0, len = eventHandlerAttrs.length; i < len; i++) {
       const entry = eventHandlerAttrs[i]
       if (!entry) continue
@@ -368,6 +372,7 @@ export const eventHandlers = defineSolidRule({
           createDiagnostic(
             graph.file,
             staticIssue.node,
+            sourceFile,
             "event-handlers",
             staticIssue.messageId,
             resolveMessage(messages[staticIssue.messageId], staticIssue.data),
@@ -378,12 +383,13 @@ export const eventHandlers = defineSolidRule({
       }
 
       const lowercaseName = name.toLowerCase()
-      const nonstandardIssue = detectNonstandardEventIssue(attr, name, lowercaseName)
+      const nonstandardIssue = detectNonstandardEventIssue(attr, name, lowercaseName, sourceFile)
       if (nonstandardIssue) {
         emit(
           createDiagnostic(
             graph.file,
             nonstandardIssue.node,
+            sourceFile,
             "event-handlers",
             nonstandardIssue.messageId,
             resolveMessage(messages[nonstandardIssue.messageId], nonstandardIssue.data),
@@ -402,10 +408,10 @@ export const eventHandlers = defineSolidRule({
       if (!element.isDomElement) continue
 
       if (attr.name === null) continue
-      if (attr.node.type !== "JSXAttribute") continue
+      if (!ts.isJsxAttribute(attr.node)) continue
 
       const attrNode = attr.node
-      if (attrNode.name.type === "JSXNamespacedName") continue
+      if (ts.isJsxNamespacedName(attrNode.name)) continue
 
       const name = attr.name
 
@@ -417,6 +423,7 @@ export const eventHandlers = defineSolidRule({
           createDiagnostic(
             graph.file,
             staticIssue.node,
+            sourceFile,
             "event-handlers",
             staticIssue.messageId,
             resolveMessage(messages[staticIssue.messageId], staticIssue.data),
@@ -428,12 +435,13 @@ export const eventHandlers = defineSolidRule({
 
       const lowercaseName = name.toLowerCase()
 
-      const nonstandardIssue = detectNonstandardEventIssue(attr, name, lowercaseName)
+      const nonstandardIssue = detectNonstandardEventIssue(attr, name, lowercaseName, sourceFile)
       if (nonstandardIssue) {
         emit(
           createDiagnostic(
             graph.file,
             nonstandardIssue.node,
+            sourceFile,
             "event-handlers",
             nonstandardIssue.messageId,
             resolveMessage(messages[nonstandardIssue.messageId], nonstandardIssue.data),
@@ -444,12 +452,13 @@ export const eventHandlers = defineSolidRule({
         continue
       }
 
-      const capitalizationIssue = detectCapitalizationIssue(attr, name, lowercaseName)
+      const capitalizationIssue = detectCapitalizationIssue(attr, name, lowercaseName, sourceFile)
       if (capitalizationIssue) {
         emit(
           createDiagnostic(
             graph.file,
             capitalizationIssue.node,
+            sourceFile,
             "event-handlers",
             capitalizationIssue.messageId,
             resolveMessage(messages[capitalizationIssue.messageId], capitalizationIssue.data),
@@ -466,6 +475,7 @@ export const eventHandlers = defineSolidRule({
           createDiagnostic(
             graph.file,
             ambiguousIssue.node,
+            sourceFile,
             "event-handlers",
             ambiguousIssue.messageId,
             resolveMessage(messages[ambiguousIssue.messageId], ambiguousIssue.data),

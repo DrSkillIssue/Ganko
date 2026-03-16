@@ -6,7 +6,7 @@ import { buildSolidGraph } from "../solid/plugin"
 import { buildCSSGraph } from "../css/plugin"
 import { SOLID_EXTENSIONS, CSS_EXTENSIONS, canonicalPath as canonicalizePath, matchesExtension, noopLogger } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { parseFile } from "../solid/parse"
+import { createSolidInput } from "../solid/create-input"
 import { rules } from "./rules"
 import { rules as cssGraphRules } from "../css/rules"
 import type { CrossRuleContext } from "./rule"
@@ -142,7 +142,10 @@ export const CrossFilePlugin: Plugin<"cross-file"> = {
    * Separates files into Solid and CSS groups, builds both graphs,
    * then runs all cross-file rules.
    */
-  analyze(files: readonly string[], emit: Emit): void {
+  analyze(files: readonly string[], emit: Emit, context?: { program: import("typescript").Program }): void {
+    if (!context?.program) {
+      throw new Error("CrossFilePlugin requires a TypeScript program")
+    }
     const cssFiles: CSSFile[] = []
     const solidInputs: SolidInput[] = []
     const seenCSS = new Set<string>()
@@ -163,7 +166,8 @@ export const CrossFilePlugin: Plugin<"cross-file"> = {
         if (seenSolid.has(key)) continue
         seenSolid.add(key)
         try {
-          solidInputs.push(parseFile(key))
+          const input = createSolidInput(key, context.program)
+          solidInputs.push(input)
         } catch {
           // Skip files with syntax errors — they cannot be analyzed
         }
@@ -178,13 +182,13 @@ export const CrossFilePlugin: Plugin<"cross-file"> = {
     const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles }
     if (resolvedTw !== undefined) cssInput.tailwind = resolvedTw
     const cssGraph = buildCSSGraph(cssInput)
-    const context: CrossRuleContext = {
+    const ruleContext: CrossRuleContext = {
       solids: solidGraphs,
       css: cssGraph,
       layout: buildLayoutGraph(solidGraphs, cssGraph),
       logger: noopLogger,
     }
 
-    runCrossFileRules(context, emit)
+    runCrossFileRules(ruleContext, emit)
   },
 }

@@ -93,6 +93,7 @@ export function emitLayoutDiagnostic(
     createDiagnostic(
       ref.solid.file,
       ref.element.node,
+      ref.solid.sourceFile,
       ruleId,
       messageId,
       resolveMessage(template, merged),

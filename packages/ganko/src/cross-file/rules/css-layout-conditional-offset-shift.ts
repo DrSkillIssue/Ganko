@@ -52,6 +52,7 @@ export const cssLayoutConditionalOffsetShift = defineCrossRule({
         createDiagnostic(
           ref.solid.file,
           ref.element.node,
+          ref.solid.sourceFile,
           cssLayoutConditionalOffsetShift.id,
           "conditionalOffsetShift",
           resolveMessage(messages.conditionalOffsetShift, {

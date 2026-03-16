@@ -2,6 +2,7 @@
  * Flags use of the arguments object which can prevent TurboFan from compiling.
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 import { getIdentifierReferences } from "../../queries/get"
@@ -39,7 +40,7 @@ export const avoidArgumentsObject = defineSolidRule({
       if (!ref) return;
       const fn = getContainingFunction(graph, ref)
       if (!fn) continue
-      if (fn.node.type === "ArrowFunctionExpression") continue
+      if (ts.isArrowFunction(fn.node)) continue
 
       const params = fn.params
       let isShadowed = false
@@ -57,6 +58,7 @@ export const avoidArgumentsObject = defineSolidRule({
         createDiagnostic(
           graph.file,
           ref,
+          graph.sourceFile,
           "avoid-arguments-object",
           "avoidArguments",
           messages.avoidArguments,

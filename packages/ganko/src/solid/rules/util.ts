@@ -1,7 +1,7 @@
 /**
  * Shared utilities for rule implementations.
  */
-import type { TSESTree as T } from "@typescript-eslint/utils"
+import ts from "typescript"
 import type { SolidGraph } from "../impl"
 import type { FixOperation } from "../../diagnostic"
 import type { CallEntity, VariableEntity } from "../entities"
@@ -19,17 +19,17 @@ export function buildSolidImportFix(graph: SolidGraph, specifier: string): FixOp
   if (specifiers?.length) {
     const last = specifiers[specifiers.length - 1]
     if (!last) return null
-    return { range: [last.node.range[1], last.node.range[1]], text: `, ${specifier}` }
+    return { range: [last.node.end, last.node.end], text: `, ${specifier}` }
   }
 
   const imports = getImports(graph)
   if (imports.length) {
     const firstImport = imports[0]
     if (!firstImport) return null
-    return { range: [firstImport.node.range[0], firstImport.node.range[0]], text: `import { ${specifier} } from "solid-js";\n` }
+    return { range: [firstImport.node.getStart(), firstImport.node.getStart()], text: `import { ${specifier} } from "solid-js";\n` }
   }
 
-  const text = graph.sourceCode.text
+  const text = graph.sourceFile.text
   return { range: [0, 0], text: `import { ${specifier} } from "solid-js";\n${text.length > 0 && text.charCodeAt(0) !== 10 ? "\n" : ""}` }
 }
 
@@ -41,12 +41,12 @@ export function buildSolidImportFix(graph: SolidGraph, specifier: string): FixOp
 export interface SignalDestructure {
   call: CallEntity
   signalName: string
-  signalElement: T.Identifier
+  signalElement: ts.Identifier
   setterName: string
-  setterElement: T.Identifier
+  setterElement: ts.Identifier
   signalVariable: VariableEntity
   setterVariable: VariableEntity
-  declarator: T.VariableDeclarator
+  declarator: ts.VariableDeclaration
 }
 
 /**
@@ -70,10 +70,10 @@ export function extractSignalDestructures(
     if (!call) continue
 
     const parent = call.node.parent
-    if (parent?.type !== "VariableDeclarator") continue
+    if (!parent || !ts.isVariableDeclaration(parent)) continue
 
-    const pattern = parent.id
-    if (pattern.type !== "ArrayPattern") continue
+    const pattern = parent.name
+    if (!ts.isArrayBindingPattern(pattern)) continue
 
     const elements = pattern.elements
     if (elements.length < 2) continue
@@ -81,21 +81,24 @@ export function extractSignalDestructures(
     const signalElement = elements[0]
     const setterElement = elements[1]
 
-    if (!signalElement || signalElement.type !== "Identifier") continue
-    if (!setterElement || setterElement.type !== "Identifier") continue
+    if (!signalElement || !ts.isBindingElement(signalElement) || !ts.isIdentifier(signalElement.name)) continue
+    if (!setterElement || !ts.isBindingElement(setterElement) || !ts.isIdentifier(setterElement.name)) continue
 
-    const signalVariable = getVariableByNameInScope(graph, signalElement.name, call.scope)
+    const signalId = signalElement.name
+    const setterId = setterElement.name
+
+    const signalVariable = getVariableByNameInScope(graph, signalId.text, call.scope)
     if (!signalVariable) continue
 
-    const setterVariable = getVariableByNameInScope(graph, setterElement.name, call.scope)
+    const setterVariable = getVariableByNameInScope(graph, setterId.text, call.scope)
     if (!setterVariable) continue
 
     result.push({
       call,
-      signalName: signalElement.name,
-      signalElement,
-      setterName: setterElement.name,
-      setterElement,
+      signalName: signalId.text,
+      signalElement: signalId,
+      setterName: setterId.text,
+      setterElement: setterId,
       signalVariable,
       setterVariable,
       declarator: parent,
@@ -105,8 +108,29 @@ export function extractSignalDestructures(
   return result
 }
 
+/**
+ * Check if a node is a statement or declaration (analogous to ESTree type name
+ * ending in "Statement" or "Declaration").
+ */
+function isStatementOrDeclaration(node: ts.Node): boolean {
+  const k = node.kind;
+  // Statement range: FirstStatement (243) to LastStatement (262)
+  if (k >= ts.SyntaxKind.FirstStatement && k <= ts.SyntaxKind.LastStatement) return true;
+  // Declaration kinds
+  return ts.isFunctionDeclaration(node) ||
+    ts.isClassDeclaration(node) ||
+    ts.isVariableStatement(node) ||
+    ts.isEnumDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isModuleDeclaration(node) ||
+    ts.isImportDeclaration(node) ||
+    ts.isExportDeclaration(node) ||
+    ts.isExportAssignment(node);
+}
+
 /** Cache: Node -> containing statement */
-const containingStatementCache = new WeakMap<T.Node, T.Node | null>()
+const containingStatementCache = new WeakMap<ts.Node, ts.Node | null>()
 
 /**
  * Find the containing statement node by walking up the parent chain.
@@ -117,13 +141,13 @@ const containingStatementCache = new WeakMap<T.Node, T.Node | null>()
  * @param node - The AST node to find the containing statement for
  * @returns The containing statement, or null if not found
  */
-export function getContainingStatement(node: T.Node): T.Node | null {
+export function getContainingStatement(node: ts.Node): ts.Node | null {
   const cached = containingStatementCache.get(node)
   if (cached !== undefined) return cached
 
-  const path: T.Node[] = []
-  for (let n: T.Node | undefined = node; n; n = n.parent) {
-    if (n.type.endsWith("Statement") || n.type.endsWith("Declaration")) {
+  const path: ts.Node[] = []
+  for (let n: ts.Node | undefined = node; n; n = n.parent) {
+    if (isStatementOrDeclaration(n)) {
       containingStatementCache.set(node, n)
       for (let i = 0, len = path.length; i < len; i++) {
         const pathNode = path[i]
@@ -154,8 +178,8 @@ export function getContainingStatement(node: T.Node): T.Node | null {
  * @param node - The node to find the line start for
  * @returns Character position at the start of the line (after newline)
  */
-export function getStatementLineStart(sourceText: string, node: T.Node): number {
-  let start = node.range[0]
+export function getStatementLineStart(sourceText: string, node: ts.Node): number {
+  let start = node.getStart()
 
   while (start > 0) {
     const prevChar = sourceText[start - 1]
@@ -179,8 +203,8 @@ export function getStatementLineStart(sourceText: string, node: T.Node): number 
  * @param node - The node to find the end for
  * @returns Character position after the node and its trailing newline
  */
-export function getStatementEndWithNewline(sourceText: string, node: T.Node): number {
-  const end = node.range[1]
+export function getStatementEndWithNewline(sourceText: string, node: ts.Node): number {
+  const end = node.end
 
   if (sourceText[end] === "\n") {
     return end + 1

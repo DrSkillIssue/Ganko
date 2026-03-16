@@ -27,7 +27,7 @@
  * Use <For> when you have objects/complex data, <Index> for primitives.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { SolidGraph } from "../../impl";
 import type { CallEntity } from "../../entities";
 import { isMethodCallWithName, getMethodObject } from "../../util";
@@ -50,13 +50,13 @@ type CallbackPattern =
  */
 interface MapCallIssue {
   /** The CallExpression node for the map call */
-  callNode: T.CallExpression;
-  /** The JSXExpressionContainer wrapping the map call */
-  jsxContainer: T.JSXExpressionContainer;
+  callNode: ts.CallExpression;
+  /** The JsxExpression wrapping the map call */
+  jsxContainer: ts.JsxExpression;
   /** The array being mapped over */
-  arrayNode: T.Expression;
+  arrayNode: ts.Expression;
   /** The callback function passed to map */
-  callbackNode: T.ArrowFunctionExpression | T.FunctionExpression;
+  callbackNode: ts.ArrowFunction | ts.FunctionExpression;
   /** The detected callback parameter pattern */
   callbackPattern: CallbackPattern;
   /** Whether this is an optional chain (?.map) */
@@ -75,12 +75,12 @@ interface MapCallIssue {
  */
 function getCallbackArgument(
   call: CallEntity,
-): T.FunctionExpression | T.ArrowFunctionExpression | undefined {
+): ts.FunctionExpression | ts.ArrowFunction | undefined {
   const firstArg = call.arguments[0];
   if (!firstArg) return undefined;
   const node = firstArg.node;
-  // Direct type check for TypeScript narrowing (isFunctionExpression doesn't narrow)
-  if (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression") {
+  // Direct type check for TypeScript narrowing
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     return node;
   }
   return undefined;
@@ -96,9 +96,9 @@ function getCallbackArgument(
  * @returns The detected parameter pattern
  */
 function analyzeCallbackPattern(
-  callback: T.FunctionExpression | T.ArrowFunctionExpression,
+  callback: ts.FunctionExpression | ts.ArrowFunction,
 ): CallbackPattern {
-  const params = callback.params;
+  const params = callback.parameters;
 
   if (params.length === 0) {
     return "no-params";
@@ -108,7 +108,7 @@ function analyzeCallbackPattern(
     // Check for rest parameter: (...args)
     const firstParam = params[0];
     if (!firstParam) return "no-params";
-    if (firstParam.type === "RestElement") {
+    if (firstParam.dotDotDotToken) {
       return "rest-params";
     }
     return "single-param";
@@ -133,7 +133,7 @@ function analyzeCallbackPattern(
  */
 function analyzeMapCall(call: CallEntity, graph: SolidGraph): MapCallIssue | null {
   // Must be a .map() call on a CallExpression (not NewExpression)
-  if (call.node.type !== "CallExpression") return null;
+  if (!ts.isCallExpression(call.node)) return null;
   if (!isMethodCallWithName(call.node, "map")) return null;
 
   const callNode = call.node;
@@ -153,16 +153,12 @@ function analyzeMapCall(call: CallEntity, graph: SolidGraph): MapCallIssue | nul
 
   // Check for optional chaining: the call might be wrapped in a ChainExpression
   let isOptionalChain = false;
-  let jsxContainer: T.JSXExpressionContainer | null = jsxContext.containerNode;
+  const jsxContainer: ts.JsxExpression | null = jsxContext.containerNode;
 
   // Handle optional chaining: items?.map(...) wraps call in ChainExpression
-  if (callNode.parent?.type === "ChainExpression") {
+  // In TS AST, optional chaining is represented differently
+  if (callNode.questionDotToken) {
     isOptionalChain = true;
-    // For optional chaining, the container is the parent of the ChainExpression
-    const chainParent = callNode.parent.parent;
-    if (chainParent?.type === "JSXExpressionContainer") {
-      jsxContainer = chainParent;
-    }
   }
 
   if (!jsxContainer) return null;
@@ -192,17 +188,26 @@ function analyzeMapCall(call: CallEntity, graph: SolidGraph): MapCallIssue | nul
  *
  * @param issue - The detected map call issue with node locations
  * @param component - The target component to transform to ("For" or "Index")
+ * @param graph - The solid graph for sourceFile access
  * @returns An array of fix operations
  */
 function generateFix(
   issue: MapCallIssue,
   component: "For" | "Index",
+  graph: SolidGraph,
 ): readonly FixOperation[] {
   const { jsxContainer, arrayNode, callbackNode, isOptionalChain } = issue;
 
-  const beforeArray: readonly [number, number] = [jsxContainer.range[0], arrayNode.range[0]];
-  const betweenArrayAndCallback: readonly [number, number] = [arrayNode.range[1], callbackNode.range[0]];
-  const afterCallback: readonly [number, number] = [callbackNode.range[1], jsxContainer.range[1]];
+  const containerStart = jsxContainer.getStart(graph.sourceFile);
+  const containerEnd = jsxContainer.end;
+  const arrayStart = arrayNode.getStart(graph.sourceFile);
+  const arrayEnd = arrayNode.end;
+  const callbackStart = callbackNode.getStart(graph.sourceFile);
+  const callbackEnd = callbackNode.end;
+
+  const beforeArray: readonly [number, number] = [containerStart, arrayStart];
+  const betweenArrayAndCallback: readonly [number, number] = [arrayEnd, callbackStart];
+  const afterCallback: readonly [number, number] = [callbackEnd, containerEnd];
 
   if (isOptionalChain) {
     return [
@@ -261,11 +266,12 @@ export const preferFor = defineSolidRule({
         createDiagnostic(
           graph.file,
           issue.callNode,
+          graph.sourceFile,
           "prefer-for",
           messageId,
           messages[messageId],
           "warn",
-          component ? generateFix(issue, component) : undefined,
+          component ? generateFix(issue, component, graph) : undefined,
         ),
       );
     }

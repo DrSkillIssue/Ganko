@@ -1,4 +1,4 @@
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 import type { VisitorContext } from "../context";
 import type { JSXAttributeEntity, JSXChildEntity } from "../../../entities/jsx";
 import { getScopeFor } from "../../../queries/scope";
@@ -7,7 +7,7 @@ import { handleJSXSpread } from "./spread";
 import { getJSXElementTag, buildJSXAttribute, getJSXChildKind } from "../helpers";
 import { isDomElement } from "@drskillissue/ganko-shared";
 
-export function handleJSXElement(ctx: VisitorContext, node: T.JSXElement): void {
+export function handleJSXElement(ctx: VisitorContext, node: ts.JsxElement): void {
   const graph = ctx.graph;
   const file = ctx.file;
   const scope = getScopeFor(graph, node);
@@ -16,14 +16,14 @@ export function handleJSXElement(ctx: VisitorContext, node: T.JSXElement): void 
   // Build attributes and register JSX spread entities
   const attributes: JSXAttributeEntity[] = [];
   const openingElement = node.openingElement;
-  const openingAttrs = openingElement.attributes;
+  const openingAttrs = openingElement.attributes.properties;
   for (let i = 0, len = openingAttrs.length; i < len; i++) {
     const attr = openingAttrs[i];
     if (!attr) continue;
     attributes.push(buildJSXAttribute(attr, graph.nextMiscId()));
-    
+
     // Register JSX spread attributes as ObjectSpreadEntity
-    if (attr.type === "JSXSpreadAttribute") {
+    if (ts.isJsxSpreadAttribute(attr)) {
       handleJSXSpread(ctx, attr, openingElement, tag);
     }
   }
@@ -55,7 +55,41 @@ export function handleJSXElement(ctx: VisitorContext, node: T.JSXElement): void 
   ctx.jsxStack.push(element);
 }
 
-export function handleJSXFragment(ctx: VisitorContext, node: T.JSXFragment): void {
+export function handleJSXSelfClosingElement(ctx: VisitorContext, node: ts.JsxSelfClosingElement): void {
+  const graph = ctx.graph;
+  const file = ctx.file;
+  const scope = getScopeFor(graph, node);
+  const tag = getJSXElementTag(node);
+
+  // Build attributes
+  const attributes: JSXAttributeEntity[] = [];
+  const attrs = node.attributes.properties;
+  for (let i = 0, len = attrs.length; i < len; i++) {
+    const attr = attrs[i];
+    if (!attr) continue;
+    attributes.push(buildJSXAttribute(attr, graph.nextMiscId()));
+
+    if (ts.isJsxSpreadAttribute(attr)) {
+      handleJSXSpread(ctx, attr, node, tag);
+    }
+  }
+
+  const element = createJSXElement({
+    id: graph.nextJsxId(),
+    node,
+    file,
+    tag,
+    isDomElement: isDomElement(tag),
+    attributes,
+    children: [],
+    scope,
+  });
+
+  graph.addJSXElement(element);
+  ctx.jsxStack.push(element);
+}
+
+export function handleJSXFragment(ctx: VisitorContext, node: ts.JsxFragment): void {
   const graph = ctx.graph;
   const file = ctx.file;
   const scope = getScopeFor(graph, node);

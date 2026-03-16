@@ -6,7 +6,7 @@
  * because they can cause V8 hidden class transitions.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { ScopeEntity } from "./scope";
 import type { FileEntity } from "./file";
 
@@ -20,19 +20,19 @@ import type { FileEntity } from "./file";
 export interface PropertyAssignmentEntity {
   readonly id: number;
   /** The AssignmentExpression node */
-  readonly node: T.AssignmentExpression;
+  readonly node: ts.BinaryExpression;
   /** The MemberExpression on the left side */
-  readonly target: T.MemberExpression;
+  readonly target: ts.PropertyAccessExpression | ts.ElementAccessExpression;
   /** The object being assigned to */
-  readonly object: T.Expression;
+  readonly object: ts.Expression;
   /** The property name (if computed, this may be an expression) */
-  readonly property: T.Expression | T.PrivateIdentifier;
+  readonly property: ts.Expression | ts.PrivateIdentifier;
   /** Whether property is computed (obj[prop] vs obj.prop) */
   readonly computed: boolean;
   /** The assigned value expression */
-  readonly value: T.Expression;
+  readonly value: ts.Expression;
   /** The assignment operator */
-  readonly operator: T.AssignmentExpression["operator"];
+  readonly operator: ts.SyntaxKind;
   /** Containing scope */
   readonly scope: ScopeEntity;
   /** Containing file */

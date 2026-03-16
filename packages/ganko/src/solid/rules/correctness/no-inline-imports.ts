@@ -45,6 +45,7 @@ export const noInlineImports = defineSolidRule({
         createDiagnostic(
           graph.file,
           entity.node,
+          graph.sourceFile,
           "no-inline-imports",
           "inlineImport",
           message,

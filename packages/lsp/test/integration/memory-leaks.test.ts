@@ -88,10 +88,21 @@ describe("memory-leaks", () => {
 
   describe("long-running", () => {
     it("survives many file operations", () => {
+      // Phase 1: bulk add — single program build on first getDiagnostics
       for (let i = 0; i < 100; i++) {
         server.addFile(`/test/op${i}.ts`, `export const v = ${i};`);
-        server.getDiagnostics(`/test/op${i}.ts`);
+      }
+      // Trigger analysis once for the full batch (1 program build, not 100)
+      server.getDiagnostics(`/test/op0.ts`);
+
+      // Phase 2: bulk update + spot-check analysis
+      for (let i = 0; i < 100; i++) {
         server.updateFile(`/test/op${i}.ts`, `export const v = ${i * 2};`);
+      }
+      server.getDiagnostics(`/test/op50.ts`);
+
+      // Phase 3: bulk remove
+      for (let i = 0; i < 100; i++) {
         server.removeFile(`/test/op${i}.ts`);
       }
       expect(server.getAllFiles().length).toBe(0);

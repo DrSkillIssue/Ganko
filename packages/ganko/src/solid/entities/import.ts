@@ -4,7 +4,7 @@
  * Represents import declarations in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 
 /**
@@ -12,7 +12,7 @@ import type { FileEntity } from "./file";
  */
 export interface ImportEntity {
   readonly id: number;
-  readonly node: T.ImportDeclaration;
+  readonly node: ts.ImportDeclaration;
   readonly file: FileEntity;
   readonly source: string;
   readonly specifiers: readonly ImportSpecifierEntity[];
@@ -29,7 +29,7 @@ export interface ImportEntity {
  */
 export interface ImportSpecifierEntity {
   readonly id: number;
-  readonly node: T.ImportSpecifier | T.ImportDefaultSpecifier | T.ImportNamespaceSpecifier;
+  readonly node: ts.ImportSpecifier | ts.ImportClause | ts.NamespaceImport;
   readonly localName: string;
   readonly importedName: string | null;
   readonly kind: "named" | "default" | "namespace";

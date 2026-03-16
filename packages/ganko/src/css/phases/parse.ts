@@ -3,7 +3,7 @@
  *
  * Parse CSS/SCSS files from input and create FileEntities.
  */
-import postcss, { CssSyntaxError, Root } from "postcss"
+import postcss, { CssSyntaxError, type Root } from "postcss"
 import safeParse from "postcss-safe-parser"
 import postcssScss from "postcss-scss"
 import type { CSSGraph } from "../impl"

@@ -9,6 +9,7 @@
  * severity without modifying rule definitions. The runner intercepts the
  * Emit callback to enforce overrides before diagnostics reach the caller.
  */
+import type ts from "typescript"
 import type { Diagnostic } from "./diagnostic"
 import type { Plugin, Emit } from "./graph"
 import type { RuleOverrides } from "@drskillissue/ganko-shared"
@@ -17,6 +18,7 @@ import type { RuleOverrides } from "@drskillissue/ganko-shared"
 export interface RunnerConfig {
   readonly plugins: readonly Plugin<string>[]
   readonly rules?: RuleOverrides
+  readonly program?: ts.Program
 }
 
 /** Runner interface */
@@ -24,6 +26,8 @@ export interface Runner {
   run(files: readonly string[]): readonly Diagnostic[]
   /** Replace rule overrides. Takes effect on the next run() call. */
   setRuleOverrides(overrides: RuleOverrides): void
+  /** Replace the TypeScript program. Takes effect on the next run() call. */
+  setProgram(program: ts.Program): void
 }
 
 /**
@@ -48,18 +52,10 @@ export function createOverrideEmit(target: Emit, overrides: RuleOverrides): Emit
 
 /**
  * Create a runner from configuration.
- *
- * @example
- * ```ts
- * const runner = createRunner({
- *   plugins: [SolidPlugin, CSSPlugin, CrossFilePlugin],
- *   rules: { "missing-jsdoc-comments": "off", "signal-call": "warn" },
- * })
- * const diagnostics = runner.run(projectFiles)
- * ```
  */
 export function createRunner(config: RunnerConfig): Runner {
   let overrides: RuleOverrides = config.rules ?? {}
+  let program: ts.Program | undefined = config.program
 
   return {
     run(files) {
@@ -67,14 +63,19 @@ export function createRunner(config: RunnerConfig): Runner {
       const raw: Emit = (d) => diagnostics.push(d)
       const hasOverrides = Object.keys(overrides).length > 0
       const emit = hasOverrides ? createOverrideEmit(raw, overrides) : raw
+      const context = program ? { program } : undefined
       for (const plugin of config.plugins) {
-        plugin.analyze(files, emit)
+        plugin.analyze(files, emit, context)
       }
       return diagnostics
     },
 
     setRuleOverrides(next) {
       overrides = next
+    },
+
+    setProgram(next) {
+      program = next
     },
   }
 }

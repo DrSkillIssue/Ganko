@@ -21,8 +21,9 @@ import type {
 import { CodeActionTriggerKind, CompletionItemKind } from "vscode-languageserver";
 
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { TSESTree as T } from "@typescript-eslint/utils";
-import { parseContent, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
+import { resolve } from "node:path";
+import ts from "typescript";
+import { createSolidInput, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
 import { noopLogger } from "@drskillissue/ganko-shared";
 import type { HandlerContext } from "../../src/server/handlers/handler-context";
 
@@ -40,11 +41,22 @@ export interface PrepareRenameResult {
   placeholder: string
 }
 
-/** Cached parse result for a file */
+/** Analyzed result for a file. */
+interface AnalyzedFile {
+  readonly content: string
+  readonly sourceFile: ts.SourceFile | null
+  readonly diagnostics: readonly Diagnostic[]
+}
+
+/**
+ * Cached file entry. Stores content immediately but defers ts.Program
+ * creation and analysis until first diagnostic/AST access. Tests that
+ * only exercise file lifecycle (add/remove/clear) skip analysis entirely.
+ */
 interface CachedFile {
   readonly content: string
-  readonly ast: T.Program | null
-  readonly diagnostics: readonly Diagnostic[]
+  analyzed: AnalyzedFile | null
+  readonly path: string
 }
 
 const CONTROL_FLOW = ["Show", "For", "Switch", "Match", "Index", "ErrorBoundary", "Suspense", "Portal"];
@@ -76,32 +88,107 @@ export class TestServer {
   private readonly files = new Map<string, CachedFile>();
   private readonly ctx: HandlerContext;
 
+  /**
+   * Shared ts.Program built from all virtual files. Rebuilt lazily when
+   * files change, then reused for every createSolidInput call. This avoids
+   * the 185ms-per-file cost of ts.createProgram and the 75ms cost of
+   * building a fresh TypeChecker — both are paid once instead of per-file.
+   */
+  private program: ts.Program | null = null;
+  private programDirty = true;
+
   constructor() {
     this.ctx = {
       log: noopLogger,
       getLanguageService: () => null,
       getSourceFile: () => null,
       getTSFileInfo: () => null,
-      getAST: (path) => this.files.get(path)?.ast ?? null,
-      getDiagnostics: (path) => this.files.get(path)?.diagnostics ?? [],
+      getAST: (path) => this.ensureAnalyzed(path)?.sourceFile ?? null,
+      getDiagnostics: (path) => this.ensureAnalyzed(path)?.diagnostics ?? [],
       getContent: (path) => this.files.get(path)?.content ?? null,
       getSolidGraph: () => null,
     };
   }
 
+  /**
+   * Rebuild the shared program from all virtual files if any have changed.
+   * Uses oldProgram for incremental reuse of unchanged source files.
+   */
+  private ensureProgram(): ts.Program {
+    if (!this.programDirty && this.program) return this.program;
+
+    const fileMap = new Map<string, string>();
+    for (const [, cached] of this.files) {
+      fileMap.set(resolve(cached.path), cached.content);
+    }
+
+    const host: ts.CompilerHost = {
+      ...defaultHost,
+      getSourceFile(fileName, languageVersion) {
+        const virtual = fileMap.get(fileName);
+        if (virtual !== undefined) {
+          return ts.createSourceFile(fileName, virtual, languageVersion, true);
+        }
+        const cached = libSourceFileCache.get(fileName);
+        if (cached !== undefined) return cached;
+        if (libSourceFileCache.size >= LIB_CACHE_MAX) libSourceFileCache.clear();
+        const sf = defaultHost.getSourceFile(fileName, languageVersion);
+        libSourceFileCache.set(fileName, sf);
+        return sf;
+      },
+      fileExists(fileName) {
+        return fileMap.has(fileName) || defaultHost.fileExists(fileName);
+      },
+      readFile(fileName) {
+        return fileMap.get(fileName) ?? defaultHost.readFile(fileName);
+      },
+    };
+
+    this.program = ts.createProgram({
+      rootNames: [...fileMap.keys()],
+      options: compilerOptions,
+      host,
+      oldProgram: this.program ?? undefined,
+    });
+    this.programDirty = false;
+    return this.program;
+  }
+
+  /** Lazily analyze a file on first diagnostic/AST access. */
+  private ensureAnalyzed(path: string): AnalyzedFile | null {
+    const cached = this.files.get(path);
+    if (!cached) return null;
+    if (cached.analyzed === null) {
+      try {
+        const program = this.ensureProgram();
+        const resolvedPath = resolve(cached.path);
+        const input = createSolidInput(resolvedPath, program);
+        const diagnostics: Diagnostic[] = [];
+        analyzeInput(input, (d) => diagnostics.push(d));
+        cached.analyzed = { content: cached.content, sourceFile: input.sourceFile, diagnostics };
+      } catch {
+        cached.analyzed = { content: cached.content, sourceFile: null, diagnostics: [] };
+      }
+    }
+    return cached.analyzed;
+  }
+
   /** Add a file to the project. */
   addFile(filePath: string, content: string): void {
-    this.files.set(this.normalizePath(filePath), buildCachedFile(filePath, content));
+    this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
+    this.programDirty = true;
   }
 
   /** Update an existing file. */
   updateFile(filePath: string, content: string): void {
-    this.files.set(this.normalizePath(filePath), buildCachedFile(filePath, content));
+    this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
+    this.programDirty = true;
   }
 
   /** Remove a file from the project. */
   removeFile(filePath: string): void {
     this.files.delete(this.normalizePath(filePath));
+    this.programDirty = true;
   }
 
   /** Get file content. */
@@ -184,14 +271,14 @@ export class TestServer {
 
   /** Get diagnostics for a file. */
   getDiagnostics(filePath: string): LSPDiagnostic[] {
-    const cached = this.files.get(this.normalizePath(filePath));
-    if (!cached) return [];
-    return convertDiagnostics(cached.diagnostics);
+    const analyzed = this.ensureAnalyzed(this.normalizePath(filePath));
+    if (!analyzed) return [];
+    return convertDiagnostics(analyzed.diagnostics);
   }
 
   /** Get raw internal diagnostics. */
   getRawDiagnostics(filePath: string): readonly Diagnostic[] {
-    return this.files.get(this.normalizePath(filePath))?.diagnostics ?? [];
+    return this.ensureAnalyzed(this.normalizePath(filePath))?.diagnostics ?? [];
   }
 
   /** Clear all files and reset state. */
@@ -225,19 +312,27 @@ export class TestServer {
   }
 }
 
+/** Shared CompilerHost — lib files are immutable, no need to recreate per call. */
+const defaultHost = ts.createCompilerHost({});
+
+const compilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ESNext,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  jsx: ts.JsxEmit.Preserve,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+};
+
 /**
- * Parse content and run ganko rules. Catches parse errors gracefully.
+ * Cache parsed lib SourceFile objects at module scope. Lib .d.ts files are
+ * immutable so parsing them once and reusing across all ts.createProgram
+ * invocations is safe and eliminates the dominant cost per call.
  */
-function buildCachedFile(path: string, content: string): CachedFile {
-  try {
-    const input = parseContent(path, content);
-    const diagnostics: Diagnostic[] = [];
-    analyzeInput(input, (d) => diagnostics.push(d));
-    return { content, ast: input.sourceCode.ast, diagnostics };
-  } catch {
-    return { content, ast: null, diagnostics: [] };
-  }
-}
+const LIB_CACHE_MAX = 200;
+const libSourceFileCache = new Map<string, ts.SourceFile | undefined>();
+
 
 /** JSX tag completion: after `<` or `<prefix` */
 function matchTagContext(before: string): CompletionItem[] | null {

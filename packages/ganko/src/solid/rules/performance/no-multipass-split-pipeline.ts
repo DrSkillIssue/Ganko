@@ -1,5 +1,5 @@
+import ts from "typescript"
 import type { CallEntity } from "../../entities/call"
-import type { TSESTree as T } from "@typescript-eslint/utils"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName, getMethodChain } from "../../queries"
@@ -57,6 +57,7 @@ export const noMultipassSplitPipeline = defineSolidRule({
           createDiagnostic(
             graph.file,
             call.node,
+            graph.sourceFile,
             "no-multipass-split-pipeline",
             "multipassSplit",
             resolveMessage(messages.multipassSplit, {}),
@@ -78,8 +79,8 @@ function countPassesAfterSplit(methods: readonly string[], splitIndex: number): 
   return count
 }
 
-function isSmallLiteralRoot(root: T.Node | null): boolean {
+function isSmallLiteralRoot(root: ts.Node | null): boolean {
   if (!root) return false
-  if (root.type !== "Literal") return false
-  return typeof root.value === "string" && root.value.length <= 16
+  if (!ts.isStringLiteral(root)) return false
+  return root.text.length <= 16
 }

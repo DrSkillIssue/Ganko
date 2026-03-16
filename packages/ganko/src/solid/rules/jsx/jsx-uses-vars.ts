@@ -112,6 +112,7 @@ export const jsxUsesVars = defineSolidRule({
               createDiagnostic(
                 graph.file,
                 spec.node,
+                graph.sourceFile,
                 "jsx-uses-vars",
                 "unusedComponent",
                 resolveMessage(messages.unusedComponent, { name }),
@@ -131,6 +132,7 @@ export const jsxUsesVars = defineSolidRule({
                 createDiagnostic(
                   graph.file,
                   spec.node,
+                  graph.sourceFile,
                   "jsx-uses-vars",
                   "unusedDirective",
                   resolveMessage(messages.unusedDirective, { name }),

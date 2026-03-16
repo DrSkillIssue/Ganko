@@ -3,11 +3,10 @@
  *
  * Replaces the old ProjectContext from ganko-workspace.
  * Handlers use ts.LanguageService for cross-file features,
- * ganko diagnostics for linting, and ESTree AST for
+ * ganko diagnostics for linting, and ts.SourceFile for
  * structural handlers (folding, selection, linked-editing).
  */
 import type ts from "typescript";
-import type { TSESTree as T } from "@typescript-eslint/utils";
 import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
 import type { Logger } from "@drskillissue/ganko-shared";
 
@@ -31,8 +30,8 @@ export interface HandlerContext {
    * calling getLanguageService and getSourceFile separately.
    */
   getTSFileInfo(path: string): TSFileInfo | null
-  /** Get ESTree AST for a file (for folding/selection/linked-editing) */
-  getAST(path: string): T.Program | null
+  /** Get TypeScript SourceFile for a file (for folding/selection/linked-editing) */
+  getAST(path: string): ts.SourceFile | null
   /** Get ganko diagnostics for a file */
   getDiagnostics(path: string): readonly Diagnostic[]
   /** Get raw file content for offset-to-position conversion */

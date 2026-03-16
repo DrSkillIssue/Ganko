@@ -51,6 +51,7 @@ export const jsxLayoutFillImageParentMustBeSized = defineCrossRule({
           createDiagnostic(
             solid.file,
             element.node,
+            solid.sourceFile,
             jsxLayoutFillImageParentMustBeSized.id,
             "unsizedFillParent",
             resolveMessage(messages.unsizedFillParent, {

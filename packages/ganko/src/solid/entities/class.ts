@@ -4,13 +4,13 @@
  * Represents a class in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 import type { FileEntity } from "./file";
 import type { FunctionEntity } from "./function";
 import type { PropertyEntity } from "./property";
 import type { VariableEntity } from "./variable";
 
-export type ClassNode = T.ClassDeclaration | T.ClassExpression;
+export type ClassNode = ts.ClassDeclaration | ts.ClassExpression;
 
 /**
  * Represents a class in the SolidGraph.
@@ -25,7 +25,7 @@ export interface ClassEntity {
   constructor: FunctionEntity | null;
   abstract: boolean;
   /** The declaration node for JSDoc attachment (export wrapper or self) */
-  declarationNode: T.Node;
+  declarationNode: ts.Node;
   /** @internal Variable entity if this class is assigned to a variable */
   _variable: VariableEntity | null;
 }
@@ -36,7 +36,7 @@ export interface CreateClassArgs {
   file: FileEntity;
   name: string | null;
   abstract: boolean;
-  declarationNode: T.Node;
+  declarationNode: ts.Node;
   classVariable: VariableEntity | null;
 }
 

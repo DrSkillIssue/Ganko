@@ -7,6 +7,7 @@
  * Note: Component undefined checks are delegated to TypeScript.
  */
 
+import ts from "typescript";
 import type { Diagnostic } from "../../../diagnostic"
 import type { SolidGraph } from "../../impl";
 import type { JSXAttributeEntity, JSXElementEntity } from "../../entities/jsx";
@@ -46,12 +47,13 @@ function checkCustomDirective(
 
   // Note: Custom directives must always be defined, regardless of typescriptEnabled
   if (!isNameVisible(graph, directiveName, element.scope)) {
-    if (attr.node.type !== "JSXAttribute") return null;
+    if (!ts.isJsxAttribute(attr.node)) return null;
     const nameNode = attr.node.name;
-    if (nameNode.type === "JSXNamespacedName") {
+    if (ts.isJsxNamespacedName(nameNode)) {
       return createDiagnostic(
         file,
         nameNode.name,
+        graph.sourceFile,
         "jsx-no-undef",
         "customDirectiveUndefined",
         resolveMessage(messages.customDirectiveUndefined, { identifier: directiveName }),

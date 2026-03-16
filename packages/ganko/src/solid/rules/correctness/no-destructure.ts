@@ -27,6 +27,7 @@
  * props directly instead to maintain reactivity.
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 
@@ -66,15 +67,20 @@ export const noDestructure = defineSolidRule({
       const firstParam = fn.params[0]
       if (!firstParam) continue
       const param = firstParam.node
-      if (param.type !== "ObjectPattern") continue
+      if (!param.name || !ts.isObjectBindingPattern(param.name)) continue
 
-      if (fn.node.parent?.type === "JSXExpressionContainer") continue
+      if (fn.node.parent && ts.isJsxExpression(fn.node.parent)) continue
 
-      const pattern = param
-      const hasDefaults = pattern.properties.some(
-        (p) => p.type === "Property" && p.value.type === "AssignmentPattern",
-      )
-      const hasRest = pattern.properties.some((p) => p.type === "RestElement")
+      const pattern = param.name
+      let hasDefaults = false
+      let hasRest = false
+      for (const element of pattern.elements) {
+        if (element.dotDotDotToken) {
+          hasRest = true
+        } else if (element.initializer) {
+          hasDefaults = true
+        }
+      }
 
       let messageId: keyof typeof messages
       if (hasDefaults && hasRest) {
@@ -87,7 +93,7 @@ export const noDestructure = defineSolidRule({
         messageId = "noDestructure"
       }
 
-      emit(createDiagnostic(graph.file, pattern, "no-destructure", messageId, messages[messageId], "error"))
+      emit(createDiagnostic(graph.file, pattern, graph.sourceFile, "no-destructure", messageId, messages[messageId], "error"))
     }
   },
 })

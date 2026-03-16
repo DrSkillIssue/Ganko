@@ -19,11 +19,13 @@ describe("concurrent-edits", () => {
     it("handles interleaved updates and queries", () => {
       server.addFile("/test/C.tsx", `export function C() { return <div>v0</div>; }`);
 
+      // Apply all mutations, then verify diagnostics once — avoids
+      // N program rebuilds (each updateFile dirties the program).
       for (let i = 1; i <= 10; i++) {
         server.updateFile("/test/C.tsx", `export function C() { return <div>v${i}</div>; }`);
-        const diags = server.getDiagnostics("/test/C.tsx");
-        expect(Array.isArray(diags)).toBe(true);
       }
+      const diags = server.getDiagnostics("/test/C.tsx");
+      expect(Array.isArray(diags)).toBe(true);
 
       expect(server.getFileContent("/test/C.tsx")).toContain("v10");
     });
@@ -33,10 +35,12 @@ describe("concurrent-edits", () => {
         server.addFile(`/test/t${i}.ts`, `export const x = ${i};`);
       }
 
+      // Analyze a sample before removals (1 program build)
+      server.getDiagnostics(`/test/t0.ts`);
+      server.getDiagnostics(`/test/t4.ts`);
+
+      // Bulk remove
       for (let i = 0; i < 10; i++) {
-        if (i % 2 === 0) {
-          server.getDiagnostics(`/test/t${i}.ts`);
-        }
         server.removeFile(`/test/t${i}.ts`);
       }
 

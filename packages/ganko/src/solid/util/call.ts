@@ -4,7 +4,7 @@
  * Helper functions for working with call expressions.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import ts from "typescript";
 
 /**
  * Extract the callee name from a call expression.
@@ -15,13 +15,13 @@ import type { TSESTree as T } from "@typescript-eslint/utils";
  * @param node - The call or new expression node
  * @returns The callee name, or null if not extractable
  */
-export function getCallName(node: T.CallExpression | T.NewExpression): string | null {
-  const callee = node.callee;
-  if (callee.type === "Identifier") {
-    return callee.name;
+export function getCallName(node: ts.CallExpression | ts.NewExpression): string | null {
+  const callee = node.expression;
+  if (ts.isIdentifier(callee)) {
+    return callee.text;
   }
-  if (callee.type === "MemberExpression" && callee.property.type === "Identifier") {
-    return callee.property.name;
+  if (ts.isPropertyAccessExpression(callee)) {
+    return callee.name.text;
   }
   return null;
 }
@@ -36,8 +36,8 @@ export function getCallName(node: T.CallExpression | T.NewExpression): string | 
  * isMethodCall(node) // true for: arr.map(), obj.foo()
  * isMethodCall(node) // false for: foo(), new Foo()
  */
-export function isMethodCall(node: T.CallExpression | T.NewExpression): boolean {
-  return node.callee.type === "MemberExpression";
+export function isMethodCall(node: ts.CallExpression | ts.NewExpression): boolean {
+  return ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression);
 }
 
 /**
@@ -53,9 +53,12 @@ export function isMethodCall(node: T.CallExpression | T.NewExpression): boolean 
  * getMethodObject(node) // returns `obj.foo` node for: obj.foo.bar(...)
  * getMethodObject(node) // returns null for: foo(...)
  */
-export function getMethodObject(node: T.CallExpression | T.NewExpression): T.Expression | null {
-  if (node.callee.type === "MemberExpression") {
-    return node.callee.object;
+export function getMethodObject(node: ts.CallExpression | ts.NewExpression): ts.Expression | null {
+  if (ts.isPropertyAccessExpression(node.expression)) {
+    return node.expression.expression;
+  }
+  if (ts.isElementAccessExpression(node.expression)) {
+    return node.expression.expression;
   }
   return null;
 }
@@ -75,17 +78,16 @@ export function getMethodObject(node: T.CallExpression | T.NewExpression): T.Exp
  * getMethodName(node) // returns null for: foo(...)
  * getMethodName(node) // returns null for: arr[variable](...)
  */
-export function getMethodName(node: T.CallExpression | T.NewExpression): string | null {
-  if (node.callee.type !== "MemberExpression") {
-    return null;
+export function getMethodName(node: ts.CallExpression | ts.NewExpression): string | null {
+  const callee = node.expression;
+  if (ts.isPropertyAccessExpression(callee)) {
+    return callee.name.text;
   }
-
-  const property = node.callee.property;
-  if (property.type === "Identifier") {
-    return property.name;
-  }
-  if (property.type === "Literal" && typeof property.value === "string") {
-    return property.value;
+  if (ts.isElementAccessExpression(callee)) {
+    const arg = callee.argumentExpression;
+    if (ts.isStringLiteral(arg)) {
+      return arg.text;
+    }
   }
   return null;
 }
@@ -106,7 +108,7 @@ export function getMethodName(node: T.CallExpression | T.NewExpression): string 
  * isMethodCallWithName(node, "map") // false for: map(...)
  */
 export function isMethodCallWithName(
-  node: T.CallExpression | T.NewExpression,
+  node: ts.CallExpression | ts.NewExpression,
   methodName: string,
 ): boolean {
   return getMethodName(node) === methodName;

@@ -15,6 +15,7 @@
  *   }
  */
 
+import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 
@@ -43,18 +44,20 @@ export const preferPrecompiledRegex = defineSolidRule({
       if (!call) continue;
 
       // Case 1: /pattern/.test(x) — regex is the receiver
-      if (call.callee.type === "MemberExpression") {
-        const receiver = call.callee.object
-        if (receiver.type === "Literal" && "regex" in receiver && receiver.regex) {
+      if (ts.isPropertyAccessExpression(call.callee)) {
+        const receiver = call.callee.expression
+        if (ts.isRegularExpressionLiteral(receiver)) {
           if (!call.scope.isModuleScope) {
+            const regexText = receiver.text
             emit(
               createDiagnostic(
                 graph.file,
                 receiver,
+                graph.sourceFile,
                 "prefer-precompiled-regex",
                 "inlineRegex",
                 resolveMessage(messages.inlineRegex, {
-                  pattern: `/${receiver.regex.pattern}/${receiver.regex.flags}`,
+                  pattern: regexText,
                 }),
                 "warn",
               ),
@@ -70,16 +73,18 @@ export const preferPrecompiledRegex = defineSolidRule({
         const argEntity = args[j];
         if (!argEntity) continue;
         const arg = argEntity.node
-        if (arg.type === "Literal" && "regex" in arg && arg.regex) {
+        if (ts.isRegularExpressionLiteral(arg)) {
           if (!call.scope.isModuleScope) {
+            const regexText = arg.text
             emit(
               createDiagnostic(
                 graph.file,
                 arg,
+                graph.sourceFile,
                 "prefer-precompiled-regex",
                 "inlineRegex",
                 resolveMessage(messages.inlineRegex, {
-                  pattern: `/${arg.regex.pattern}/${arg.regex.flags}`,
+                  pattern: regexText,
                 }),
                 "warn",
               ),

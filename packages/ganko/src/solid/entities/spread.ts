@@ -4,7 +4,7 @@
  * Represents spread patterns in the program graph.
  */
 
-import type { TSESTree as T } from "@typescript-eslint/utils";
+import type ts from "typescript";
 
 /**
  * JSX attribute context for specialized handling.
@@ -94,13 +94,13 @@ export interface FixableSpreadPattern {
  */
 export interface ConditionalSpreadEntity {
   readonly id: number;
-  /** The spread node - SpreadElement for object spreads, JSXSpreadAttribute for JSX */
-  readonly node: T.SpreadElement | T.JSXSpreadAttribute;
+  /** The spread node - SpreadElement/SpreadAssignment for object spreads, JSXSpreadAttribute for JSX */
+  readonly node: ts.SpreadElement | ts.SpreadAssignment | ts.JsxSpreadAttribute;
   readonly spreadType: "ternary" | "logical-and";
   /** The parent object expression (null for JSX spreads) */
-  readonly parentObject: T.ObjectExpression | null;
+  readonly parentObject: ts.ObjectLiteralExpression | null;
   /** For JSX spreads, the opening element containing the spread attribute */
-  readonly parentJSXElement: T.JSXOpeningElement | null;
+  readonly parentJSXElement: ts.JsxOpeningElement | ts.JsxSelfClosingElement | null;
   readonly isInJSX: boolean;
 
   /**
@@ -138,16 +138,16 @@ export type ObjectSpreadKind =
  */
 export interface ObjectSpreadEntity {
   readonly id: number;
-  /** The spread node - SpreadElement, JSXSpreadAttribute, or RestElement */
-  readonly node: T.SpreadElement | T.JSXSpreadAttribute | T.RestElement;
+  /** The spread node - SpreadElement, SpreadAssignment, JSXSpreadAttribute, or BindingElement */
+  readonly node: ts.SpreadElement | ts.SpreadAssignment | ts.JsxSpreadAttribute | ts.BindingElement;
   /** The kind of spread pattern */
   readonly kind: ObjectSpreadKind;
   /** The parent object expression (null for JSX spreads and rest patterns) */
-  readonly parentObject: T.ObjectExpression | null;
+  readonly parentObject: ts.ObjectLiteralExpression | null;
   /** For JSX spreads, the opening element containing the spread attribute */
-  readonly parentJSXElement: T.JSXOpeningElement | null;
+  readonly parentJSXElement: ts.JsxOpeningElement | ts.JsxSelfClosingElement | null;
   /** The parent pattern for rest destructuring (null otherwise) */
-  readonly parentPattern: T.ObjectPattern | null;
+  readonly parentPattern: ts.ObjectBindingPattern | null;
   /** True if inside a JSX element */
   readonly isInJSX: boolean;
   /** Number of spreads in the same object (for merge detection) */
