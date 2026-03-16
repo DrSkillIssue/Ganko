@@ -20,7 +20,6 @@
  * - spreadElements
  * - newExpressionsByCallee
  * - identifiersByName (via addIdentifierReference)
- * - positionIndex (via addToPositionIndex)
  *
  * Also identifies component functions (PascalCase naming).
  *

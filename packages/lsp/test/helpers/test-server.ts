@@ -88,6 +88,15 @@ export class TestServer {
   private readonly files = new Map<string, CachedFile>();
   private readonly ctx: HandlerContext;
 
+  /**
+   * Shared ts.Program built from all virtual files. Rebuilt lazily when
+   * files change, then reused for every createSolidInput call. This avoids
+   * the 185ms-per-file cost of ts.createProgram and the 75ms cost of
+   * building a fresh TypeChecker — both are paid once instead of per-file.
+   */
+  private program: ts.Program | null = null;
+  private programDirty = true;
+
   constructor() {
     this.ctx = {
       log: noopLogger,
@@ -101,12 +110,65 @@ export class TestServer {
     };
   }
 
+  /**
+   * Rebuild the shared program from all virtual files if any have changed.
+   * Uses oldProgram for incremental reuse of unchanged source files.
+   */
+  private ensureProgram(): ts.Program {
+    if (!this.programDirty && this.program) return this.program;
+
+    const fileMap = new Map<string, string>();
+    for (const [, cached] of this.files) {
+      fileMap.set(resolve(cached.path), cached.content);
+    }
+
+    const host: ts.CompilerHost = {
+      ...defaultHost,
+      getSourceFile(fileName, languageVersion) {
+        const virtual = fileMap.get(fileName);
+        if (virtual !== undefined) {
+          return ts.createSourceFile(fileName, virtual, languageVersion, true);
+        }
+        const cached = libSourceFileCache.get(fileName);
+        if (cached !== undefined) return cached;
+        if (libSourceFileCache.size >= LIB_CACHE_MAX) libSourceFileCache.clear();
+        const sf = defaultHost.getSourceFile(fileName, languageVersion);
+        libSourceFileCache.set(fileName, sf);
+        return sf;
+      },
+      fileExists(fileName) {
+        return fileMap.has(fileName) || defaultHost.fileExists(fileName);
+      },
+      readFile(fileName) {
+        return fileMap.get(fileName) ?? defaultHost.readFile(fileName);
+      },
+    };
+
+    this.program = ts.createProgram({
+      rootNames: [...fileMap.keys()],
+      options: compilerOptions,
+      host,
+      oldProgram: this.program ?? undefined,
+    });
+    this.programDirty = false;
+    return this.program;
+  }
+
   /** Lazily analyze a file on first diagnostic/AST access. */
   private ensureAnalyzed(path: string): AnalyzedFile | null {
     const cached = this.files.get(path);
     if (!cached) return null;
     if (cached.analyzed === null) {
-      cached.analyzed = analyzeCachedFile(cached.path, cached.content);
+      try {
+        const program = this.ensureProgram();
+        const resolvedPath = resolve(cached.path);
+        const input = createSolidInput(resolvedPath, program);
+        const diagnostics: Diagnostic[] = [];
+        analyzeInput(input, (d) => diagnostics.push(d));
+        cached.analyzed = { content: cached.content, sourceFile: input.sourceFile, diagnostics };
+      } catch {
+        cached.analyzed = { content: cached.content, sourceFile: null, diagnostics: [] };
+      }
     }
     return cached.analyzed;
   }
@@ -114,16 +176,19 @@ export class TestServer {
   /** Add a file to the project. */
   addFile(filePath: string, content: string): void {
     this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
+    this.programDirty = true;
   }
 
   /** Update an existing file. */
   updateFile(filePath: string, content: string): void {
     this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
+    this.programDirty = true;
   }
 
   /** Remove a file from the project. */
   removeFile(filePath: string): void {
     this.files.delete(this.normalizePath(filePath));
+    this.programDirty = true;
   }
 
   /** Get file content. */
@@ -265,52 +330,9 @@ const compilerOptions: ts.CompilerOptions = {
  * immutable so parsing them once and reusing across all ts.createProgram
  * invocations is safe and eliminates the dominant cost per call.
  */
+const LIB_CACHE_MAX = 200;
 const libSourceFileCache = new Map<string, ts.SourceFile | undefined>();
 
-/**
- * Build a ts.Program from virtual file content, run ganko analysis,
- * and return the analyzed result. Called lazily on first diagnostic/AST access.
- */
-function analyzeCachedFile(path: string, content: string): AnalyzedFile {
-  try {
-    const resolvedPath = resolve(path);
-    const fileMap = new Map<string, string>([[resolvedPath, content]]);
-
-    const host: ts.CompilerHost = {
-      ...defaultHost,
-      getSourceFile(fileName, languageVersion) {
-        const virtual = fileMap.get(fileName);
-        if (virtual !== undefined) {
-          return ts.createSourceFile(fileName, virtual, languageVersion, true);
-        }
-        const cached = libSourceFileCache.get(fileName);
-        if (cached !== undefined) return cached;
-        const sf = defaultHost.getSourceFile(fileName, languageVersion);
-        libSourceFileCache.set(fileName, sf);
-        return sf;
-      },
-      fileExists(fileName) {
-        return fileMap.has(fileName) || defaultHost.fileExists(fileName);
-      },
-      readFile(fileName) {
-        return fileMap.get(fileName) ?? defaultHost.readFile(fileName);
-      },
-    };
-
-    const program = ts.createProgram({
-      rootNames: [resolvedPath],
-      options: compilerOptions,
-      host,
-    });
-
-    const input = createSolidInput(resolvedPath, program);
-    const diagnostics: Diagnostic[] = [];
-    analyzeInput(input, (d) => diagnostics.push(d));
-    return { content, sourceFile: input.sourceFile, diagnostics };
-  } catch {
-    return { content, sourceFile: null, diagnostics: [] };
-  }
-}
 
 /** JSX tag completion: after `<` or `<prefix` */
 function matchTagContext(before: string): CompletionItem[] | null {

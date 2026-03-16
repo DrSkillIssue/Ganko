@@ -11,7 +11,7 @@ import {
   buildCSSGraph,
   buildLayoutGraph,
   runCrossFileRules,
-  GraphCache,
+  type GraphCache,
   createOverrideEmit,
 } from "@drskillissue/ganko";
 import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";

@@ -211,7 +211,7 @@ export function extractFixablePattern(ctx: VisitorContext, cond: ts.ConditionalE
   const isComputed = key !== undefined && ts.isComputedPropertyName(key);
   const keyText = key ? getKeyText(ctx, key, isComputed) : null;
   const valueText = getNodeText(ctx, value);
-  if (!keyText || !valueText) return null;
+  if (!key || !keyText || !valueText) return null;
 
   const conditionText = getNodeText(ctx, cond.condition);
   const conditionMatchesKey = isComputed && conditionText === keyText;
@@ -220,7 +220,7 @@ export function extractFixablePattern(ctx: VisitorContext, cond: ts.ConditionalE
     truthyBranch: !conseqIsEmpty,
     property: {
       key: keyText,
-      keyRange: [key!.pos, key!.end],
+      keyRange: [key.pos, key.end],
       computed: isComputed,
       value: valueText,
       valueRange: [value.pos, value.end],
@@ -244,7 +244,7 @@ export function extractLogicalAndFixablePattern(ctx: VisitorContext, expr: ts.Bi
   const isComputed = key !== undefined && ts.isComputedPropertyName(key);
   const keyText = key ? getKeyText(ctx, key, isComputed) : null;
   const valueText = getNodeText(ctx, value);
-  if (!keyText || !valueText) return null;
+  if (!key || !keyText || !valueText) return null;
 
   const conditionText = getNodeText(ctx, expr.left);
   const conditionMatchesKey = isComputed && conditionText === keyText;
@@ -253,7 +253,7 @@ export function extractLogicalAndFixablePattern(ctx: VisitorContext, expr: ts.Bi
     truthyBranch: true,
     property: {
       key: keyText,
-      keyRange: [key!.pos, key!.end],
+      keyRange: [key.pos, key.end],
       computed: isComputed,
       value: valueText,
       valueRange: [value.pos, value.end],

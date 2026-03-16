@@ -274,13 +274,12 @@ export function getIdentifierReferences(graph: SolidGraph, name: string): readon
 }
 
 export function getNodeAtPosition(graph: SolidGraph, line: number, column: number): NodeAtPositionInfo | null {
-  const { nodeAtOffset, lineStartOffsets } = graph.positionIndex;
-  if (line < 1 || line > lineStartOffsets.length) return null;
-  const lineStart = lineStartOffsets[line - 1];
+  const lineStarts = graph.lineStartOffsets;
+  if (line < 1 || line > lineStarts.length) return null;
+  const lineStart = lineStarts[line - 1];
   if (lineStart === undefined) return null;
   const offset = lineStart + column;
-  if (offset < 0 || offset >= nodeAtOffset.length) return null;
-  const node = nodeAtOffset[offset];
+  const node = graph.findExpressionAtOffset(offset);
   if (!node) return null;
   return {
     kind: node.kind,

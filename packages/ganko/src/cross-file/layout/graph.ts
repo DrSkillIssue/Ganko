@@ -4,12 +4,12 @@ import type { SolidGraph } from "../../solid/impl"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { AlignmentContext } from "./context-model"
 import type { LayoutRuleGuard } from "./guard-model"
-import {
-  type LayoutCohortStats,
-  type LayoutSignalName,
+import type {
+  LayoutCohortStats,
+  LayoutSignalName,
   LayoutSignalSource,
-  type LayoutSnapshotHotSignals,
-  type LayoutSignalSnapshot,
+  LayoutSnapshotHotSignals,
+  LayoutSignalSnapshot,
   LayoutTextualContentState,
 } from "./signal-model"
 

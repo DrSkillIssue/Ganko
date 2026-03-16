@@ -24,11 +24,22 @@ const defaultHost = ts.createCompilerHost(compilerOptions)
  * immutable so parsing them once and reusing across all ts.createProgram
  * invocations is safe and eliminates the dominant cost per call (~100 lib files).
  */
+const LIB_CACHE_MAX = 200
 const libSourceFileCache = new Map<string, ts.SourceFile | undefined>()
+
+/**
+ * Last program for incremental reuse. TypeScript's createProgram with
+ * oldProgram reuses unchanged SourceFiles AND internal type checker
+ * structures (symbol tables, flow graph caches). Since every test shares
+ * the same ~100 lib files, this avoids rebuilding checker internals
+ * from scratch for each of the 1500+ test invocations.
+ */
+let lastProgram: ts.Program | null = null
 
 /**
  * Create an in-memory ts.Program from a map of virtual file contents.
  * Falls back to the real filesystem for lib files (e.g. lib.d.ts).
+ * Uses oldProgram for incremental reuse of lib SourceFiles and checker state.
  */
 export function createTestProgram(files: Record<string, string>): ts.Program {
   const fileMap = new Map<string, string>()
@@ -45,6 +56,7 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
       }
       const cached = libSourceFileCache.get(fileName)
       if (cached !== undefined) return cached
+      if (libSourceFileCache.size >= LIB_CACHE_MAX) libSourceFileCache.clear()
       const sf = defaultHost.getSourceFile(fileName, languageVersion)
       libSourceFileCache.set(fileName, sf)
       return sf
@@ -57,11 +69,14 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
     },
   }
 
-  return ts.createProgram({
+  const program = ts.createProgram({
     rootNames: [...fileMap.keys()],
     options: compilerOptions,
     host,
+    oldProgram: lastProgram ?? undefined,
   })
+  lastProgram = program
+  return program
 }
 
 /**

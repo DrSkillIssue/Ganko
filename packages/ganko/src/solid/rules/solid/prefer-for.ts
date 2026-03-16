@@ -153,7 +153,7 @@ function analyzeMapCall(call: CallEntity, graph: SolidGraph): MapCallIssue | nul
 
   // Check for optional chaining: the call might be wrapped in a ChainExpression
   let isOptionalChain = false;
-  let jsxContainer: ts.JsxExpression | null = jsxContext.containerNode;
+  const jsxContainer: ts.JsxExpression | null = jsxContext.containerNode;
 
   // Handle optional chaining: items?.map(...) wraps call in ChainExpression
   // In TS AST, optional chaining is represented differently

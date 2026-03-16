@@ -29,7 +29,7 @@ export function buildSolidGraph(input: SolidInput): SolidGraph {
  */
 export function analyzeInput(input: SolidInput, emit: Emit): void {
   const graph = buildSolidGraph(input)
-  runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit))
+  runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit, graph.comments))
 }
 
 /**
@@ -40,7 +40,7 @@ export function analyzeInput(input: SolidInput, emit: Emit): void {
  * and reuse the same graph for cross-file analysis.
  */
 export function runSolidRules(graph: SolidGraph, sourceFile: ts.SourceFile, emit: Emit): void {
-  runRules(rules, graph, createSuppressionEmit(sourceFile, emit))
+  runRules(rules, graph, createSuppressionEmit(sourceFile, emit, graph.comments))
 }
 
 /**
@@ -62,7 +62,7 @@ export const SolidPlugin: Plugin<"solid"> = {
       if (!matchesExtension(file, SOLID_EXTENSIONS)) continue
       const input = createSolidInput(file, program)
       const graph = buildSolidGraph(input)
-      runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit))
+      runRules(rules, graph, createSuppressionEmit(input.sourceFile, emit, graph.comments))
     }
   },
 }

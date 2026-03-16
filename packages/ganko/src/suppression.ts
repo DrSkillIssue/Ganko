@@ -74,7 +74,16 @@ export function extractAllComments(sourceFile: ts.SourceFile): readonly CommentE
   const scanner = ts.createScanner(
     ts.ScriptTarget.Latest, false, sourceFile.languageVariant, text,
   )
+
+  // Track template literal nesting depth so that `}` tokens that close
+  // template expressions are re-scanned as TemplateMiddle/TemplateTail
+  // instead of being left as CloseBraceToken. Without this, the scanner
+  // treats the next backtick as a *new* template literal start, which
+  // swallows all subsequent source text (including comments) into a
+  // single bogus template token.
+  let templateDepth = 0
   let token = scanner.scan()
+
   while (token !== ts.SyntaxKind.EndOfFileToken) {
     if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
       const pos = scanner.getTokenStart()
@@ -87,17 +96,28 @@ export function extractAllComments(sourceFile: ts.SourceFile): readonly CommentE
         endLine: sourceFile.getLineAndCharacterOfPosition(end).line + 1,
         kind: token,
       })
+    } else if (token === ts.SyntaxKind.TemplateHead) {
+      templateDepth++
+    } else if (templateDepth > 0 && token === ts.SyntaxKind.CloseBraceToken) {
+      token = scanner.reScanTemplateToken(/* isTaggedTemplate */ false)
+      if (token === ts.SyntaxKind.TemplateTail) {
+        templateDepth--
+      }
+      // TemplateMiddle → another ${...} follows, depth unchanged
+      continue
     }
+
     token = scanner.scan()
   }
+
   return comments
 }
 
 /**
- * Build the suppression map from all comments in the source file.
+ * Build the suppression map from pre-extracted comments.
+ * Avoids redundant scanner passes when the caller already has comments.
  */
-export function parseSuppression(sourceFile: ts.SourceFile): Suppressions {
-  const comments = extractAllComments(sourceFile)
+export function parseSuppressionFromComments(comments: readonly CommentEntry[]): Suppressions {
   if (comments.length === 0) return EMPTY
 
   let lines: Map<number, LineSuppression> | undefined
@@ -176,11 +196,13 @@ function isSuppressed(suppressions: Suppressions, d: Diagnostic): boolean {
 /**
  * Create an emit wrapper that filters suppressed diagnostics.
  *
- * Call this once per file analysis, passing the file's sourceFile.
- * The returned emit skips diagnostics matching suppression directives.
+ * When `comments` is provided, skips the scanner pass entirely and
+ * reuses the caller's pre-extracted comment array (e.g. from SolidGraph).
  */
-export function createSuppressionEmit(sourceFile: ts.SourceFile, target: Emit): Emit {
-  const suppressions = parseSuppression(sourceFile)
+export function createSuppressionEmit(sourceFile: ts.SourceFile, target: Emit, comments?: readonly CommentEntry[]): Emit {
+  const suppressions = comments !== undefined
+    ? parseSuppressionFromComments(comments)
+    : parseSuppressionFromComments(extractAllComments(sourceFile))
   if (suppressions === EMPTY) return target
   return (d) => {
     if (!isSuppressed(suppressions, d)) target(d)

@@ -30,8 +30,8 @@ describe("getNodeAtPosition", () => {
     // Position on '.' should return PropertyAccessExpression (dot is part of PropertyAccessExpression)
     expect(getNodeAtPosition(graph, 1, 4)?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
 
-    // Position on 'b' returns PropertyAccessExpression (non-computed property is NOT visited separately)
-    expect(getNodeAtPosition(graph, 1, 5)?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
+    // Position on 'b' returns Identifier (deepest expression at member name offset)
+    expect(getNodeAtPosition(graph, 1, 5)?.kind).toBe(ts.SyntaxKind.Identifier);
   });
 
   it("returns null for position outside file bounds", () => {
@@ -191,9 +191,10 @@ describe("getNodeAtPosition", () => {
       expect(stylesNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(stylesNode?.name).toBe("styles");
 
-      // Line 3: Arrow function param 'e' at col 12 - params are part of ArrowFunction
+      // Line 3: Arrow function param 'e' at col 12 — deepest expression is the Identifier
       const paramE = getNodeAtPosition(graph, 3, 12);
-      expect(paramE?.kind).toBe(ts.SyntaxKind.ArrowFunction);
+      expect(paramE?.kind).toBe(ts.SyntaxKind.Identifier);
+      expect(paramE?.name).toBe("e");
 
       // Line 3: handleClick identifier at col 18
       const handleClickNode = getNodeAtPosition(graph, 3, 18);
@@ -249,13 +250,15 @@ describe("getNodeAtPosition", () => {
       expect(itemsNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(itemsNode?.name).toBe("items");
 
-      // Line 3: filter is part of PropertyAccessExpression at col 5
+      // Line 3: 'filter' at col 5 — deepest expression is the Identifier
       const filterMember = getNodeAtPosition(graph, 3, 5);
-      expect(filterMember?.kind).toBe(ts.SyntaxKind.PropertyAccessExpression);
+      expect(filterMember?.kind).toBe(ts.SyntaxKind.Identifier);
+      expect(filterMember?.name).toBe("filter");
 
-      // Line 3: item param at col 13 - params are part of ArrowFunction
+      // Line 3: item param at col 13 — deepest expression is the Identifier
       const itemParam = getNodeAtPosition(graph, 3, 13);
-      expect(itemParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
+      expect(itemParam?.kind).toBe(ts.SyntaxKind.Identifier);
+      expect(itemParam?.name).toBe("item");
 
       // Line 5: item.id - 'item' at col 10
       const itemIdObj = getNodeAtPosition(graph, 5, 10);
@@ -308,9 +311,10 @@ describe("getNodeAtPosition", () => {
       expect(getAuthNode?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(getAuthNode?.name).toBe("getAuthHeader");
 
-      // Line 8: data param at col 14 - params are part of ArrowFunction
+      // Line 8: data param at col 14 — deepest expression is the Identifier
       const dataParam = getNodeAtPosition(graph, 8, 14);
-      expect(dataParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
+      expect(dataParam?.kind).toBe(ts.SyntaxKind.Identifier);
+      expect(dataParam?.name).toBe("data");
 
       // Line 8: data.result PropertyAccessExpression - 'data' at col 23
       const dataObj = getNodeAtPosition(graph, 8, 23);
@@ -423,9 +427,10 @@ Status: \${
       expect(todosAttr?.kind).toBe(ts.SyntaxKind.Identifier);
       expect(todosAttr?.name).toBe("todos");
 
-      // Line 10: arrow function param 'todo' at col 8 - params are part of ArrowFunction
+      // Line 10: arrow function param 'todo' at col 8 — deepest expression is the Identifier
       const todoParam = getNodeAtPosition(graph, 10, 8);
-      expect(todoParam?.kind).toBe(ts.SyntaxKind.ArrowFunction);
+      expect(todoParam?.kind).toBe(ts.SyntaxKind.Identifier);
+      expect(todoParam?.name).toBe("todo");
 
       // Line 11: conditional expression - todo.done at col 19
       const todoDoneObj = getNodeAtPosition(graph, 11, 19);

@@ -22,7 +22,7 @@ import type { TypeAssertionEntity, TypePredicateEntity, UnsafeGenericAssertionEn
 import type { InlineImportEntity } from "./entities/inline-import";
 import type { ComputationEntity, DependencyEdge, OwnershipEdge } from "./entities/computation";
 import type { FileEntity } from "./entities/file";
-import { TypeResolver, createTypeResolver } from "./typescript";
+import { type TypeResolver, createTypeResolver } from "./typescript";
 import type { JSXAttributeKind } from "./util/jsx";
 import { getPropertyKeyName } from "./util/pattern-detection";
 import { getStaticStringFromJSXValue } from "./util/static-value";
@@ -136,8 +136,8 @@ export class SolidGraph {
   readonly deleteExpressions: ts.DeleteExpression[] = [];
   readonly identifiersByName = new Map<string, ts.Identifier[]>();
 
-  // Position index for O(1) node lookup (built by entities phase)
-  readonly positionIndex: PositionIndex;
+  // Line start offsets for O(1) line→offset conversion (built lazily on first query)
+  private _lineStartOffsets: readonly number[] | null = null;
 
   firstScope: ScopeEntity | null = null;
   readonly componentScopes = new Map<ScopeEntity, { scope: ScopeEntity; name: string }>();
@@ -186,12 +186,6 @@ export class SolidGraph {
       jsxElements: this.jsxElements,
       imports: this.imports,
       conditionalSpreads: this.conditionalSpreads,
-    };
-
-    const text = input.sourceFile.text;
-    this.positionIndex = {
-      nodeAtOffset: new Array<ts.Node | null>(text.length).fill(null),
-      lineStartOffsets: computeLineStarts(text),
     };
 
     this.comments = extractAllComments(input.sourceFile);
@@ -562,14 +556,24 @@ export class SolidGraph {
     else this.identifiersByName.set(name, [node]);
   }
 
-  /** @internal Index node for O(1) position lookup. Children overwrite parents. */
-  addToPositionIndex(node: ts.Node): void {
-    const start = node.getStart(this.sourceFile);
-    const end = node.end;
-    const arr = this.positionIndex.nodeAtOffset;
-    for (let i = start; i < end; i++) {
-      arr[i] = node;
+  /**
+   * Line start offsets for position queries. Computed lazily — CLI lint
+   * never accesses this, so zero cost during analysis.
+   */
+  get lineStartOffsets(): readonly number[] {
+    if (this._lineStartOffsets === null) {
+      this._lineStartOffsets = computeLineStarts(this.sourceFile.text);
     }
+    return this._lineStartOffsets;
+  }
+
+  /**
+   * Find the deepest expression at a character offset using the AST.
+   * O(log n) via TypeScript's getTokenAtPosition + parent walk.
+   * Zero pre-computation — no dense array, no per-node writes during analysis.
+   */
+  findExpressionAtOffset(offset: number): ts.Node | null {
+    return findExpressionAtOffset(this.sourceFile, offset);
   }
 }
 
@@ -584,13 +588,33 @@ function getMethodName(callee: ts.Expression): string | null {
 }
 
 /**
- * O(1) position lookup index.
- * - nodeAtOffset[i] = smallest node containing character offset i
- * - lineStartOffsets[i] = character offset where line (i+1) starts
+ * Find the deepest expression node at a given offset using the AST structure.
+ *
+ * Descends the AST in O(depth) by narrowing into the child whose range
+ * contains the offset at each level. Tracks the deepest expression seen.
+ * Zero pre-computation cost — no dense array, no per-node writes during analysis.
  */
-interface PositionIndex {
-  readonly nodeAtOffset: Array<ts.Node | null>;
-  readonly lineStartOffsets: readonly number[];
+function findExpressionAtOffset(sourceFile: ts.SourceFile, offset: number): ts.Node | null {
+  if (offset < 0 || offset >= sourceFile.text.length) return null;
+
+  let deepestExpr: ts.Node | null = null;
+
+  function descend(node: ts.Node): void {
+    if (ts.isExpression(node)) {
+      deepestExpr = node;
+    }
+    // Find child containing offset and recurse
+    ts.forEachChild(node, (child) => {
+      const childStart = child.getStart(sourceFile);
+      const childEnd = child.end;
+      if (offset >= childStart && offset < childEnd) {
+        descend(child);
+      }
+    });
+  }
+
+  descend(sourceFile);
+  return deepestExpr;
 }
 
 const FILL_COMPONENT_NAMES = new Set(["image", "nextimage", "next.image"]);

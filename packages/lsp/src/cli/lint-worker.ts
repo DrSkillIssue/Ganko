@@ -60,6 +60,9 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
   const hasOverrides = Object.keys(task.overrides).length > 0;
 
   const results: WorkerResult[] = [];
+  const fileDiags: Diagnostic[] = [];
+  const rawEmit = (d: Diagnostic) => fileDiags.push(d);
+  const emit = hasOverrides ? createOverrideEmit(rawEmit, task.overrides) : rawEmit;
 
   for (let i = 0, len = task.files.length; i < len; i++) {
     const path = task.files[i];
@@ -73,12 +76,10 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
     const input = createSolidInput(key, program);
     const graph = buildSolidGraph(input);
 
-    const diagnostics: Diagnostic[] = [];
-    const rawEmit = (d: Diagnostic) => diagnostics.push(d);
-    const emit = hasOverrides ? createOverrideEmit(rawEmit, task.overrides) : rawEmit;
+    fileDiags.length = 0;
     runSolidRules(graph, input.sourceFile, emit);
 
-    results.push({ file: key, diagnostics });
+    results.push({ file: key, diagnostics: fileDiags.slice() });
   }
 
   return results;

@@ -470,6 +470,15 @@ function classifyIdentifier(
     }
   }
 
+  // For shorthand property assignments `{ foo }`, getSymbolAtLocation
+  // returns the *property* symbol, not the variable symbol. Resolve the
+  // value symbol so the variable reference is correctly tracked.
+  const idParent = id.parent
+  if (idParent && ts.isShorthandPropertyAssignment(idParent) && idParent.name === id) {
+    const valueSym = checker.getShorthandAssignmentValueSymbol(idParent)
+    if (valueSym) resolvedSym = valueSym
+  }
+
   // Check both original and resolved symbols
   const variable = symbolVarMap.get(sym) ?? symbolVarMap.get(resolvedSym)
   if (!variable) return
@@ -679,6 +688,8 @@ function isProperAccess(id: ts.Identifier): boolean {
 
 /**
  * Finds the enclosing scope for a node by walking up the parent chain.
+ * Uses the scopeForCache WeakMap populated during Pass 1 for O(depth)
+ * lookup instead of O(depth × scopes) linear scan.
  */
 function findScopeForNode(
   node: ts.Node,
@@ -687,11 +698,8 @@ function findScopeForNode(
 ): ScopeEntity {
   let current: ts.Node | undefined = node.parent
   while (current) {
-    // Check if this node is a scope boundary
-    for (let i = 0, len = graph.scopes.length; i < len; i++) {
-      const scope = graph.scopes[i]
-      if (scope && scope.node === current) return scope
-    }
+    const cached = graph.scopeForCache.get(current)
+    if (cached) return cached
     current = current.parent
   }
   return fallback

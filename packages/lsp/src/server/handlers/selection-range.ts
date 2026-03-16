@@ -44,8 +44,19 @@ let ancestorCount = 0;
 let rangeCount = 0;
 let seenCount = 0;
 
-/** Cached source file for the current request. */
-let currentSf: ts.SourceFile = undefined!;
+/** Cached source file for the current request. Set before use, cleared after. */
+let currentSf: ts.SourceFile | undefined;
+
+/**
+ * Narrow currentSf to a definite SourceFile. Called at the entry of every
+ * internal function that needs the source file so TypeScript can prove
+ * non-nullability without casts or non-null assertions.
+ */
+function requireSf(): ts.SourceFile {
+  const sf = currentSf;
+  if (sf === undefined) throw new Error("selection-range: currentSf must be set before traversal");
+  return sf;
+}
 
 // Populate arrays with null values
 for (let i = 0; i < INITIAL_STACK_SIZE; i++) {
@@ -158,7 +169,7 @@ function addRangeIfUnique(sl: number, sc: number, el: number, ec: number): boole
  * @param node - TypeScript AST node
  */
 function addNodeRange(node: ts.Node): void {
-  const sf = currentSf;
+  const sf = requireSf();
   const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));
   const end = sf.getLineAndCharacterOfPosition(node.end);
   addRangeIfUnique(start.line, start.character, end.line, end.character);
@@ -211,7 +222,7 @@ export function handleSelectionRange(
     results[p] = buildLinkedRanges(position);
   }
 
-  currentSf = undefined!;
+  currentSf = undefined;
   releaseNodeReferences();
   return results;
 }
@@ -224,7 +235,7 @@ export function handleSelectionRange(
  * @returns True if child was pushed to stack
  */
 function tryPushChild(child: ts.Node, targetPos: number): boolean {
-  const sf = currentSf;
+  const sf = requireSf();
   const childStartPos = sf.getLineAndCharacterOfPosition(child.getStart(sf));
   const childEndPos = sf.getLineAndCharacterOfPosition(child.end);
 
@@ -289,8 +300,8 @@ function iterateNodeChildren(
  * @param targetPos - Packed target position to find
  */
 function findAncestorChain(sf: ts.SourceFile, targetPos: number): void {
-  const startPos = currentSf.getLineAndCharacterOfPosition(sf.getStart(currentSf));
-  const endPos = currentSf.getLineAndCharacterOfPosition(sf.end);
+  const startPos = sf.getLineAndCharacterOfPosition(sf.getStart(sf));
+  const endPos = sf.getLineAndCharacterOfPosition(sf.end);
 
   const rootStart = packPos(startPos.line + 1, startPos.character);
   const rootEnd = packPos(endPos.line + 1, endPos.character);
@@ -336,7 +347,7 @@ function buildRanges(): void {
  * @param node - AST node to extract sub-ranges from
  */
 function addSubNodeRanges(node: ts.Node): void {
-  const sf = currentSf;
+  const sf = requireSf();
 
   if (ts.isStringLiteral(node)) {
     const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));

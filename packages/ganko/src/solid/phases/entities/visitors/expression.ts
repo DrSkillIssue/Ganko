@@ -11,8 +11,6 @@ import { handleObjectSpread, handleConditionalSpread } from "../handlers/spread"
 import { handleTypeAssertion, handleNonNullAssertion } from "../handlers/assertion";
 import { visitJSXAttributeValues, visitJSXChildren } from "./jsx";
 export function visitExpression(ctx: VisitorContext, node: ts.Expression): void {
-  ctx.graph.addToPositionIndex(node);
-
   if (ts.isCallExpression(node)) {
     handleCall(ctx, node);
     visitExpression(ctx, node.expression);

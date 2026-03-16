@@ -15,7 +15,7 @@ import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
 import ts from "typescript";
 import { buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit } from "@drskillissue/ganko";
-import type { Diagnostic, SolidGraph, CSSInput } from "@drskillissue/ganko";
+import type { Diagnostic, SolidGraph, CSSInput, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex } from "../core/file-index";
@@ -746,6 +746,9 @@ function runSerialAnalysis(
   log: Logger,
 ): void {
   const hasOverrides = Object.keys(overrides).length > 0;
+  const fileDiags: Diagnostic[] = [];
+  const rawEmit = (d: Diagnostic) => fileDiags.push(d);
+  const emit = hasOverrides ? createOverrideEmit(rawEmit, overrides) : rawEmit;
 
   for (let i = 0, len = files.length; i < len; i++) {
     const path = files[i];
@@ -763,9 +766,7 @@ function runSerialAnalysis(
     const graph = buildSolidGraph(input);
     solidGraphsOut.push(graph);
 
-    const fileDiags: Diagnostic[] = [];
-    const rawEmit = (d: Diagnostic) => fileDiags.push(d);
-    const emit = hasOverrides ? createOverrideEmit(rawEmit, overrides) : rawEmit;
+    fileDiags.length = 0;
     runSolidRules(graph, input.sourceFile, emit);
     if (log.enabled) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
     for (let j = 0, dLen = fileDiags.length; j < dLen; j++) {
@@ -783,7 +784,7 @@ function runSerialAnalysis(
 function buildCSSInputForLint(
   cssFiles: readonly { path: string; content: string }[],
   log: Logger,
-  tailwind: import("@drskillissue/ganko").TailwindValidator | null,
+  tailwind: TailwindValidator | null,
   externalCustomProperties: ReadonlySet<string>,
 ): CSSInput {
   const input: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
