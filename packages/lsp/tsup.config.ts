@@ -35,4 +35,15 @@ export default defineConfig([
     external: ["jiti"],
     banner: { js: "#!/usr/bin/env node" },
   },
+  {
+    entry: ["src/cli/lint-worker.ts"],
+    format: ["cjs"],
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    target: "node22",
+    outDir: "dist",
+    noExternal: [...BUNDLED_DEPS],
+    external: ["jiti"],
+  },
 ]);
