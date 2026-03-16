@@ -1101,7 +1101,9 @@ export function publishFileDiagnostics(
 ): void {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  const resolved = content ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined);
+  const resolved = content
+    ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined)
+    ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
   if (context.log.enabled) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
   const t0 = performance.now();
   const singleFile = runDiagnostics(project, context.diagCache, key, resolved, context.serverState.ruleOverrides, context.log);

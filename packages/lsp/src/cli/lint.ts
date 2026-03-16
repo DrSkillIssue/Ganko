@@ -599,10 +599,12 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
       /* 1. Collect SolidGraphs — reuse from serial path or rebuild after parallel path. */
       let solidGraphs: SolidGraph[];
+      let solidGraphRebuilt = 0;
       if (solidGraphsForCrossFile.length > 0) {
         solidGraphs = solidGraphsForCrossFile;
       } else {
         solidGraphs = [];
+        solidGraphRebuilt = allSolidFiles.length;
         if (log.enabled) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
         for (let i = 0, len = allSolidFiles.length; i < len; i++) {
           const path = allSolidFiles[i];
@@ -613,6 +615,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
           solidGraphs.push(buildSolidGraph(input));
         }
       }
+      if (log.enabled) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidGraphs`);
 
       /* 2. Build CSSGraph from pre-read CSS content map. */
       const cssFiles: { path: string; content: string }[] = [];

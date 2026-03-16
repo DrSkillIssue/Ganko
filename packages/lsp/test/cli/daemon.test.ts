@@ -1842,30 +1842,27 @@ describe("daemon integration", () => {
      * runs, the version stays "0" → cache hit → stale graph.
      */
     describe("version fallback for files outside tsconfig", () => {
-      /** A .jsx file not covered by tsconfig (which only includes *.tsx, *.ts). */
+      /** V1: signal not called in JSX — triggers signal-call rule. */
       const JSX_V1 = [
-        "/**",
-        " * Component v1.",
-        " * @returns Element",
-        " */",
+        'import { createSignal } from "solid-js";',
         "export function Loose() {",
-        '  return <div class="card">v1</div>;',
+        "  const [count] = createSignal(0);",
+        "  return <div>{count}</div>;",
         "}",
       ].join("\n");
 
+      /** V2: signal called correctly — no signal-call diagnostic. */
       const JSX_V2 = [
-        "/**",
-        " * Component v2 — now destructures props.",
-        " * @param props - Props",
-        " * @returns Element",
-        " */",
-        "export function Loose({ label }) {",
-        "  return <div>{label}</div>;",
+        'import { createSignal } from "solid-js";',
+        "export function Loose() {",
+        "  const [count] = createSignal(0);",
+        "  return <div>{count()}</div>;",
         "}",
       ].join("\n");
 
-      /** tsconfig that only covers .tsx and .ts — excludes .jsx. */
-      const TSCONFIG_NO_JSX = JSON.stringify({
+      /** tsconfig with allowJs so TS type-checks .jsx files. The daemon must
+       *  detect content changes on disk between runs and produce fresh results. */
+      const TSCONFIG_WITH_JSX = JSON.stringify({
         compilerOptions: {
           target: "ESNext",
           module: "ESNext",
@@ -1875,13 +1872,14 @@ describe("daemon integration", () => {
           jsxImportSource: "solid-js",
           skipLibCheck: true,
           noEmit: true,
+          allowJs: true,
         },
-        include: ["**/*.tsx", "**/*.ts"],
+        include: ["**/*.tsx", "**/*.ts", "**/*.jsx"],
       });
 
       it("detects changes in files outside tsconfig between daemon runs", async () => {
         const root = createTempProject({
-          "tsconfig.json": TSCONFIG_NO_JSX,
+          "tsconfig.json": TSCONFIG_WITH_JSX,
           "src/Loose.jsx": JSX_V1,
         });
 

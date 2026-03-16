@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
+import type { SolidInput } from "../../src/solid/input";
 import { analyzeCrossFileInput } from "../../src/cross-file";
 import { parseCode } from "../solid/test-utils";
 
@@ -9,7 +10,10 @@ interface CssFixture {
 }
 
 function runRule(tsx: string, files: readonly CssFixture[]): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  return runRuleWithInput(parseCode(tsx, "/project/App.tsx"), files);
+}
+
+function runRuleWithInput(solid: SolidInput, files: readonly CssFixture[]): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
 
   analyzeCrossFileInput(
@@ -219,6 +223,7 @@ describe("layout alignment determinism", () => {
       }
     `;
 
+    const solid = parseCode(tsx, "/project/App.tsx");
     let baseline: readonly string[] | null = null;
 
     for (let i = 0; i < 100; i++) {
@@ -238,7 +243,7 @@ describe("layout alignment determinism", () => {
         },
       ], rng);
 
-      const next = canonicalize(runRule(tsx, files));
+      const next = canonicalize(runRuleWithInput(solid, files));
       if (baseline === null) {
         baseline = next;
         expect(baseline.length).toBeGreaterThan(0);
@@ -266,6 +271,7 @@ describe("layout alignment determinism", () => {
       }
     `;
 
+    const solid = parseCode(tsx, "/project/App.tsx");
     const baselineRules = [
       ".row { display: flex; align-items: flex-start; }",
       "@media (min-width: 900px) { .row { writing-mode: vertical-rl; } }",
@@ -287,7 +293,7 @@ describe("layout alignment determinism", () => {
         { path: "/project/clusters.css", content: clusterContent },
       ], rng);
 
-      const next = canonicalize(runRule(tsx, files));
+      const next = canonicalize(runRuleWithInput(solid, files));
       if (baseline === null) {
         baseline = next;
         continue;

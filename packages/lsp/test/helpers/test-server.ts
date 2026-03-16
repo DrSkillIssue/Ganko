@@ -21,8 +21,9 @@ import type {
 import { CodeActionTriggerKind, CompletionItemKind } from "vscode-languageserver";
 
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { TSESTree as T } from "@typescript-eslint/utils";
-import { parseContent, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
+import { resolve } from "node:path";
+import ts from "typescript";
+import { createSolidInput, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
 import { noopLogger } from "@drskillissue/ganko-shared";
 import type { HandlerContext } from "../../src/server/handlers/handler-context";
 
@@ -43,7 +44,7 @@ export interface PrepareRenameResult {
 /** Cached parse result for a file */
 interface CachedFile {
   readonly content: string
-  readonly ast: T.Program | null
+  readonly sourceFile: ts.SourceFile | null
   readonly diagnostics: readonly Diagnostic[]
 }
 
@@ -82,7 +83,7 @@ export class TestServer {
       getLanguageService: () => null,
       getSourceFile: () => null,
       getTSFileInfo: () => null,
-      getAST: (path) => this.files.get(path)?.ast ?? null,
+      getAST: (path) => this.files.get(path)?.sourceFile ?? null,
       getDiagnostics: (path) => this.files.get(path)?.diagnostics ?? [],
       getContent: (path) => this.files.get(path)?.content ?? null,
       getSolidGraph: () => null,
@@ -225,17 +226,57 @@ export class TestServer {
   }
 }
 
+/** Shared CompilerHost — lib files are immutable, no need to recreate per call. */
+const defaultHost = ts.createCompilerHost({});
+
+const compilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ESNext,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  jsx: ts.JsxEmit.Preserve,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+};
+
 /**
- * Parse content and run ganko rules. Catches parse errors gracefully.
+ * Build a ts.Program from virtual file content, run ganko analysis,
+ * and return the cached result.
  */
 function buildCachedFile(path: string, content: string): CachedFile {
   try {
-    const input = parseContent(path, content);
+    const resolvedPath = resolve(path);
+    const fileMap = new Map<string, string>([[resolvedPath, content]]);
+
+    const host: ts.CompilerHost = {
+      ...defaultHost,
+      getSourceFile(fileName, languageVersion) {
+        const virtual = fileMap.get(fileName);
+        if (virtual !== undefined) {
+          return ts.createSourceFile(fileName, virtual, languageVersion, true);
+        }
+        return defaultHost.getSourceFile(fileName, languageVersion);
+      },
+      fileExists(fileName) {
+        return fileMap.has(fileName) || defaultHost.fileExists(fileName);
+      },
+      readFile(fileName) {
+        return fileMap.get(fileName) ?? defaultHost.readFile(fileName);
+      },
+    };
+
+    const program = ts.createProgram({
+      rootNames: [resolvedPath],
+      options: compilerOptions,
+      host,
+    });
+
+    const input = createSolidInput(resolvedPath, program);
     const diagnostics: Diagnostic[] = [];
     analyzeInput(input, (d) => diagnostics.push(d));
-    return { content, ast: input.sourceCode.ast, diagnostics };
+    return { content, sourceFile: input.sourceFile, diagnostics };
   } catch {
-    return { content, ast: null, diagnostics: [] };
+    return { content, sourceFile: null, diagnostics: [] };
   }
 }
 
