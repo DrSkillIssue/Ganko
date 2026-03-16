@@ -420,11 +420,23 @@ export function extractAllComments(sourceFile: ts.SourceFile): readonly CommentE
 
 ### `SolidPlugin.analyze` (line 70-77)
 
-`parseFile(file)` is deleted. Two options:
-1. Change `Plugin.analyze` signature to accept `program: ts.Program` — breaks `CSSPlugin` and `CrossFilePlugin`.
-2. Delete `SolidPlugin.analyze` and have callers use `buildSolidGraph` + `runSolidRules` directly.
+`parseFile(file)` is deleted. The `Plugin.analyze` signature gains an optional context parameter:
 
-**Decision required.** If (1): `Plugin.analyze(files, emit, context?: { program: ts.Program })`. `Runner` passes context. CSSPlugin/CrossFilePlugin ignore it. If (2): remove `SolidPlugin` from public API, update `runner.ts` and all callers.
+```typescript
+Plugin.analyze(files: readonly string[], emit: Emit, context?: { program: ts.Program })
+```
+
+`Runner` passes `context` through to each plugin. `CSSPlugin.analyze` ignores the `context` parameter — it has no TypeScript dependency. `CrossFilePlugin.analyze` uses `context.program` to replace its internal `parseFile` calls (see CrossFilePlugin migration section below). `SolidPlugin.analyze` uses `context.program` to call `createSolidInput(file, context.program)` for each file, then `buildSolidGraph(input)` and `runSolidRules(graph, input.sourceFile, emit)`.
+
+### `analyzeInput` signature change cascade
+
+After migration, `analyzeInput` takes `SolidInput` with `sourceFile` (not `sourceCode`). The `createSuppressionEmit(input.sourceCode, emit)` call becomes `createSuppressionEmit(input.sourceFile, emit)`. In `runSingleFileDiagnostics` (analyze.ts:128), the call becomes:
+
+```typescript
+analyzeInput(createSolidInput(key, program), emit)
+```
+
+This requires `program` to be non-null. When `program` is `null` and the file kind is `'solid'`, throw an error — the program should always be available post-migration. Do NOT fall back to creating a single-file program; this would produce degraded type information and mask configuration errors.
 
 ---
 
@@ -461,13 +473,13 @@ export function createSolidInput(
 
 ## `packages/ganko/src/graph.ts`
 
-Line 72: `analyze(files: readonly string[], emit: Emit)` — see decision in plugin.ts section above. If adding program context: `analyze(files: readonly string[], emit: Emit, context?: { program: ts.Program })`.
+Line 72: `analyze(files: readonly string[], emit: Emit)` → `analyze(files: readonly string[], emit: Emit, context?: { program: ts.Program })`. The `context` parameter is optional to preserve backward compatibility with `CSSPlugin`. `Runner.run()` passes `{ program }` when available.
 
 ---
 
 ## `packages/ganko/src/runner.ts`
 
-If `Plugin.analyze` signature changes, `Runner` must pass `context` through. If `SolidPlugin.analyze` is removed, `Runner` no longer calls it. Verify what remains in public API.
+`Runner.run()` passes `{ program }` as the third argument to each `plugin.analyze(files, emit, { program })`. The `Runner` obtains the program from its `Project` instance via `project.getProgram()`. If no program is available (CSS-only run), `context` is omitted.
 
 ---
 
@@ -483,9 +495,54 @@ Line 272-292: `getNodeAtPosition` — `node.type` → `ts.SyntaxKind[node.kind]`
 
 ## `packages/ganko/src/solid/phases/scopes.ts`
 
-Complete rewrite per REVIEW.md §6. Single-pass `ts.forEachChild` walk with `checker.getSymbolAtLocation`. Symbol→Variable map. Scope stack. `isDeclarationName`, `isWriteReference`, `isReadReference` helpers.
+Complete rewrite. The current implementation wraps ESLint's `ScopeManager` — after migration, scope analysis is built directly from TypeScript's AST and symbol API.
 
-`addScope(scope, eslintScope)` → `addScope(scope)` (single parameter after `eslintScopeMap` deletion).
+### Architecture
+
+Single-pass `ts.forEachChild` walk maintaining a scope stack. Each scope boundary creates a `ScopeEntity`. Variable declarations create `VariableEntity` instances. Identifier references are classified as reads or writes via `ts.Symbol` from `checker.getSymbolAtLocation`.
+
+### Scope boundary detection
+
+Create a new `ScopeEntity` when entering:
+
+- **Module scope**: `ts.SourceFile` — the top-level scope.
+- **Function scope**: `ts.FunctionDeclaration`, `ts.FunctionExpression`, `ts.ArrowFunction`, `ts.MethodDeclaration`, `ts.Constructor`, `ts.GetAccessor`, `ts.SetAccessor`.
+- **Block scope**: `ts.Block` (when parent is NOT a function body — function bodies share the function scope), `ts.ForStatement`, `ts.ForInStatement`, `ts.ForOfStatement`, `ts.CaseBlock`, `ts.CatchClause`.
+- **Class scope**: `ts.ClassDeclaration`, `ts.ClassExpression`.
+
+### Variable declaration extraction
+
+Extract `VariableEntity` from all declaration forms:
+
+- **`var`/`let`/`const`**: `ts.VariableDeclaration` — check `parent.parent` for `ts.VariableStatement` flags. `var` declarations are hoisted to the nearest function scope. `let`/`const` are block-scoped.
+- **Function declarations**: `ts.FunctionDeclaration` — hoisted to the nearest function scope.
+- **Class declarations**: `ts.ClassDeclaration` — block-scoped.
+- **Import declarations**: `ts.ImportSpecifier`, `ts.ImportClause` (default import), `ts.NamespaceImport` — module-scoped.
+- **Parameters**: `ts.ParameterDeclaration` — function-scoped. Traverse binding patterns recursively.
+- **Catch clause variables**: `ts.CatchClause.variableDeclaration` — scoped to the catch block.
+
+### Destructuring pattern traversal
+
+For `ts.ObjectBindingPattern` and `ts.ArrayBindingPattern`, recursively traverse `ts.BindingElement` to extract all bound names. Each `BindingElement.name` that is a `ts.Identifier` creates a `VariableEntity`. Nested patterns (destructuring within destructuring) are handled by recursion.
+
+### Read/write reference classification
+
+For each `ts.Identifier` encountered during the walk:
+
+1. Call `checker.getSymbolAtLocation(identifier)` to get the `ts.Symbol`.
+2. If the symbol matches a known `VariableEntity`, classify the reference:
+   - **Write**: The identifier is the LHS of an assignment (`ts.BinaryExpression` with assignment operator), the operand of `++`/`--` (`ts.PostfixUnaryExpression`/`ts.PrefixUnaryExpression`), or a `ts.ShorthandPropertyAssignment` in destructuring assignment target.
+   - **Read**: All other usages — RHS of assignments, function call arguments, property access base, template literal expressions, etc.
+3. Create `ReadEntity` or `WriteEntity` (via `AssignmentEntity`) accordingly.
+
+### Hoisting rules
+
+- `var` declarations and `function` declarations are hoisted to the nearest function (or module) scope boundary. During the walk, when a `var` or `FunctionDeclaration` is encountered inside a block scope, the variable is registered in the enclosing function scope, not the block scope.
+- `let`, `const`, `class` declarations are NOT hoisted — they are registered in the current block scope.
+
+### `eslintScopeMap` deletion and `addScope` signature
+
+Delete the `eslintScopeMap: WeakMap` from `impl.ts`. The `addScope` call becomes single-parameter: `addScope(scope: ScopeEntity)`. All call sites in the scopes phase that previously passed `(scope, eslintScope)` now pass `(scope)` only.
 
 ---
 
@@ -573,6 +630,14 @@ All `node.type === "..."` → `ts.is*()`.
 
 `node.range[0]` → `node.getStart(graph.sourceFile)`. `node.range[1]` → `node.end`. 48 call sites.
 
+### `no-innerhtml.ts` runtime `ASTUtils` import
+
+`no-innerhtml.ts:23` has a RUNTIME import `import { ASTUtils } from "@typescript-eslint/utils"`. Replace `ASTUtils.isIdentifier()` with `ts.isIdentifier()`. This is NOT a type-only import — it will cause a runtime crash if not migrated before Phase 6 removes the `@typescript-eslint/utils` dependency. The general rule migration pattern (changing `import type { TSESTree as T }` to `import type ts`) does not catch this because it is a value import, not a type import.
+
+### `missing-jsdoc-comments` — `getSourceCode().getNodeByRangeIndex()`
+
+`missing-jsdoc-comments` at line 259 uses `sourceCode.getNodeByRangeIndex()`. This method does not exist on `ts.SourceFile`. Replace with `ts.getTokenAtPosition(graph.sourceFile, pos)` to find the token at a given character offset. This is a rule-specific migration not covered by the general patterns.
+
 ---
 
 ## `packages/ganko/src/solid/rules/util.ts`
@@ -592,6 +657,24 @@ These files import `TSESTree as T` and will fail `tsc` after `@typescript-eslint
 - `cross-file/rules/jsx-layout-classlist-geometry-toggle.ts`
 
 All: remove ESTree imports, add `import type ts from "typescript"`. All node type migrations per REVIEW.md §4.
+
+### `CrossFilePlugin.analyze` migration (`cross-file/plugin.ts`)
+
+`CrossFilePlugin.analyze` internally calls `buildSolidGraph(parseFile(file))` to build per-file graphs for cross-file analysis. The `parseFile` call must be replaced:
+
+```typescript
+// Before:
+const graph = buildSolidGraph(parseFile(file));
+
+// After:
+if (!context?.program) {
+  throw new Error("CrossFilePlugin requires a TypeScript program");
+}
+const input = createSolidInput(file, context.program);
+const graph = buildSolidGraph(input);
+```
+
+This means `CrossFilePlugin.analyze` MUST accept and use the `context?: { program: ts.Program }` parameter from `Plugin.analyze`. Unlike `CSSPlugin` which truly ignores context, `CrossFilePlugin` depends on it for `parseFile` replacement. The `context.program` provides the `ts.SourceFile` and `ts.TypeChecker` that `createSolidInput` needs.
 
 ---
 
@@ -628,6 +711,17 @@ Verify it does not import from `@typescript-eslint/utils`. `context.sourceCode.g
 Line 26: remove `parseFile`, `parseContent`, `parseContentWithProgram` exports.
 
 Add `export { createSolidInput } from "./solid"`.
+
+### `createSolidInput` export chain verification
+
+The full export chain must be wired:
+
+1. **`solid/create-input.ts`**: Defines and exports `createSolidInput`.
+2. **`solid/index.ts`**: Add `export { createSolidInput } from "./create-input"` to the barrel file.
+3. **`index.ts`**: `export { createSolidInput } from "./solid"` (added above).
+4. **`@drskillissue/ganko`**: Resolved via `package.json` `"exports"` field pointing at `index.ts`.
+
+Without step 2, the `solid/index.ts` barrel file does not re-export the new function, and `import { createSolidInput } from "@drskillissue/ganko"` in `packages/lsp` will fail at compile time.
 
 ---
 
@@ -707,6 +801,66 @@ Remove imports of `parseContent`, `parseContentWithProgram`, `parseFile`.
 
 ---
 
+## `packages/lsp/src/core/analyze.ts` — `runSingleFileDiagnostics` migration
+
+`runSingleFileDiagnostics` (analyze.ts:107-141) has THREE code paths that all depend on deleted parsing functions. All must be rewritten:
+
+### Path (a): `project.run([key])` for disk-based files (line 119)
+
+`Runner.run()` calls `SolidPlugin.analyze()` which calls `parseFile()` (deleted). After migration, `Runner.run()` passes `{ program }` to `SolidPlugin.analyze()`, which uses `createSolidInput(file, context.program)`. No changes needed in `runSingleFileDiagnostics` itself for this path — the fix is in the `Runner`/`Plugin` layer.
+
+### Path (b): `analyzeInput(parseWithOptionalProgram(...))` for in-memory solid files (line 128)
+
+Replace:
+
+```typescript
+// Before:
+analyzeInput(parseWithOptionalProgram(key, content, program, log), emit)
+
+// After:
+if (!program) {
+  throw new Error(`TypeScript program unavailable for ${key} — program must be available post-migration`);
+}
+analyzeInput(createSolidInput(key, program, log), emit)
+```
+
+`createSolidInput` requires a non-null `program`. When `program` is `null` (should not happen post-migration), throw an error rather than silently degrading.
+
+### Path (c): `project.run([key])` fallback (line 138)
+
+Same as path (a) — migrated through the `Runner`/`Plugin` layer.
+
+### Import changes
+
+Remove: `parseContent`, `parseContentWithProgram`, `parseFile`, `parseWithOptionalProgram`.
+
+Add: `import { createSolidInput } from "@drskillissue/ganko"`.
+
+---
+
+## `packages/lsp/src/core/analyze.ts` — `buildSolidGraphForPath` migration
+
+`buildSolidGraphForPath` (analyze.ts:84-93) calls `parseFile(path, logger)` as a fallback when no sourceFile is available. Replace the entire function body:
+
+```typescript
+export function buildSolidGraphForPath(
+  path: string,
+  project: Project,
+  logger: Logger,
+): SolidGraph {
+  const program = project.getProgram();
+  if (!program) {
+    throw new Error(`TypeScript program unavailable — cannot build graph for ${path}`);
+  }
+  const input = createSolidInput(path, program, logger);
+  return buildSolidGraph(input);
+}
+```
+
+The `program` is obtained from the project. The fallback case (no program) throws an error — post-migration, the program is always available. The `parseFile` import is removed.
+
+---
+
 ## `packages/lsp/src/cli/lint.ts`
 
 Instantiate `BatchTypeScriptService`. Per-file loop: `program.getSourceFile(path)` → `createSolidInput` → `buildSolidGraph` → `runSolidRules`. No `warmProgram`, no `openClientFile`.
@@ -717,7 +871,38 @@ Instantiate `BatchTypeScriptService`. Per-file loop: `program.getSourceFile(path
 
 ## `packages/lsp/src/cli/daemon.ts`
 
-Same as lint.ts. Bug at lines 383-401 (re-parse on cache hit) is eliminated — no `parseWithOptionalProgram` call on cache hit path.
+This is a significant rewrite — NOT "same as lint.ts". The daemon has extensive lifecycle management that must be dismantled.
+
+### Remove `warmProgram` calls (lines 228, 643)
+
+`project.warmProgram(sentinel, readFileSync(sentinel, "utf-8"))` is deleted. The program is already built when `createBatchProgram` or `createIncrementalProgram` is called. The `prewarmDaemon` function at line 639-643 no longer needs to warm the program — it creates the TypeScript service directly.
+
+### Remove `openFiles`/`closeFile` lifecycle (lines 263, 452, 265, 456)
+
+`project.openFiles(keys)` and `project.closeFile(key)` are no longer needed without `ProjectService`. The daemon's file tracking at lines 448-462 (closing stale files that are no longer in the lint set) is eliminated entirely. The `openFiles` set maintained by the daemon is deleted.
+
+### Remove `getScriptVersion` (lines 367-368)
+
+`project.getScriptVersion(key)` is replaced by `contentHash(content)` from `@drskillissue/ganko-shared`. The daemon's cache invalidation compares content hashes instead of script versions.
+
+### Rewrite `prewarmDaemon`
+
+```typescript
+function prewarmDaemon(rootPath: string): Project {
+  const service = createBatchProgram(rootPath);
+  return createProject(service);
+}
+```
+
+No `warmProgram` call. No sentinel file. The TypeScript service is created directly.
+
+### Remove file open/close tracking (lines 448-462)
+
+The block that tracks which files are "open" in the ProjectService and closes stale ones is deleted. Without ProjectService, there is no concept of open/closed files — the program includes all files from `tsconfig.json`.
+
+### Bug fix: re-parse on cache hit (lines 383-401)
+
+The current code re-parses via `parseWithOptionalProgram` even on cache hits. After migration, cache hits skip parsing entirely — the graph is reused and `runSolidRules` is called with the current `sourceFile` from `program.getSourceFile(key)`.
 
 ---
 
@@ -736,6 +921,18 @@ Lines 139-156: `getAST` implementation — `parseContent(path, sf.text, ...)` re
 Lines 488, 515: AST cache invalidation removed.
 
 `runSolidRules` calls: second argument from `sourceCode` → `sourceFile`.
+
+### `astCache` elimination — explicit wiring removal
+
+Remove all `astCache` references from `createServer` and its dependents:
+
+1. **`createServer` (connection.ts:441)**: Delete `const astCache = new Map<string, CachedAST>()`.
+2. **`createHandlerContext` (connection.ts:110)**: Remove the `astCache: Map<string, CachedAST>` parameter and all internal references.
+3. **`evictFileCache` (connection.ts:488)**: Remove `astCache.delete(key)`.
+4. **`rediagnoseAll` (connection.ts:515)**: Remove `astCache.clear()`.
+5. **`CachedAST` interface (connection.ts:93-96)**: Delete entirely — `ts.SourceFile` is cached by the program.
+
+The `getAST` implementation in `createHandlerContext` becomes `return project.getSourceFile(path)` — no intermediate cache needed.
 
 ---
 
@@ -809,11 +1006,44 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
 }
 ```
 
-`skipLibCheck: true` avoids resolving full lib chain. For type-aware tests needing `solid-js` types, point `paths` at `node_modules` or bundle the declarations.
+`skipLibCheck: true` skips semantic diagnostics on `.d.ts` files but does NOT skip loading/parsing them — the performance benefit is in type-checking time, not program creation time. Program creation cost is dominated by parsing `lib.d.ts` and resolving `node_modules` types.
+
+### Module resolution for `solid-js`
+
+Tests that exercise type-aware rules (e.g., wiring phase, reactivity checks) require `solid-js` declarations to be resolvable. Add resolution configuration to `createTestProgram`:
+
+```typescript
+options: {
+  // ... existing options ...
+  baseUrl: resolve(__dirname, "../../../.."), // workspace root
+  paths: {
+    "solid-js": ["node_modules/solid-js"],
+    "solid-js/*": ["node_modules/solid-js/*"],
+  },
+  typeRoots: [resolve(__dirname, "../../../../node_modules/@types")],
+}
+```
+
+Alternatively, if the test runner CWD is the workspace root, `ModuleResolutionKind.Bundler` resolves `solid-js` from `node_modules` automatically. Verify by running the full test suite from a clean checkout.
 
 ### Test performance mitigation
 
-Share a single `CompilerHost` (with `defaultHost` cached) across test files. `ts.createProgram` for a single virtual file with `skipLibCheck: true` costs ~10-50ms (not 200-500ms). Verify test suite doesn't become >5x slower.
+Share a single `CompilerHost` (with `defaultHost` cached) across tests within a file to avoid re-parsing `lib.d.ts` on every `createTestProgram` call:
+
+```typescript
+let sharedHost: ts.CompilerHost | undefined;
+
+function getSharedHost(options: ts.CompilerOptions): ts.CompilerHost {
+  if (!sharedHost) {
+    sharedHost = ts.createCompilerHost(options);
+  }
+  return sharedHost;
+}
+```
+
+Each `createTestProgram` call layers virtual file overrides on top of the shared host. This ensures `lib.d.ts` is parsed once per test file, not once per test case.
+
+`ts.createProgram` for a single virtual file with a shared host costs ~10-50ms. Without host sharing, each call pays ~50-100ms for `lib.d.ts` parsing. Verify test suite doesn't become >5x slower. If it does, consider a test-level program cache keyed by source content hash.
 
 ### `test-utils.ts` migration
 

@@ -25,6 +25,8 @@ interface Diagnostic {
 
 No `ts.Node` references. No `ts.SourceFile` references. Fully `structuredClone`-able. Workers return `Diagnostic[]` via `postMessage`.
 
+**Fix range validation**: If `--fix` mode is ever added, fixes must validate that the file content hash matches before applying. Diagnostic fix ranges contain absolute positions computed from the worker's `ts.SourceFile` — if the file changed between worker read and fix application, positions are invalid.
+
 ---
 
 ## `packages/lsp/src/cli/worker-pool.ts` (NEW)
@@ -33,6 +35,7 @@ No `ts.Node` references. No `ts.SourceFile` references. Fully `structuredClone`-
 import { Worker } from "node:worker_threads";
 import { availableParallelism } from "node:os";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import type { Diagnostic } from "@drskillissue/ganko";
 
 export interface WorkerResult {
@@ -53,6 +56,9 @@ interface PendingJob {
 }
 
 const WORKER_SCRIPT = resolve(__dirname, "lint-worker.js");
+if (!existsSync(WORKER_SCRIPT)) {
+  throw new Error(`Worker script not found at ${WORKER_SCRIPT}. Ensure the project is built.`);
+}
 
 export function defaultWorkerCount(): number {
   return Math.min(4, Math.max(1, availableParallelism() - 1));
@@ -76,8 +82,12 @@ export function createWorkerPool(count: number): WorkerPool {
 
   function tryDispatch(): void {
     while (idle.length > 0 && queue.length > 0) {
-      const worker = idle.pop()!;
-      const job = queue.shift()!;
+      const worker = idle[idle.length - 1];
+      if (!worker) continue;
+      idle.pop();
+      const job = queue[0];
+      if (!job) continue;
+      queue.shift();
       runJob(worker, job);
     }
   }
@@ -92,7 +102,10 @@ export function createWorkerPool(count: number): WorkerPool {
 
     const onError = (err: Error) => {
       worker.removeListener("message", onMessage);
-      idle.push(worker);
+      worker.terminate().catch(() => {});
+      const replacement = new Worker(WORKER_SCRIPT);
+      workers[workers.indexOf(worker)] = replacement;
+      idle.push(replacement);
       job.reject(err);
       tryDispatch();
     };
@@ -140,13 +153,14 @@ import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
 
-if (parentPort === null) {
+const port = parentPort;
+if (!port) {
   throw new Error("lint-worker must be run as a worker_threads Worker");
 }
 
-parentPort.on("message", (task: WorkerTask) => {
+port.on("message", (task: WorkerTask) => {
   const results = runLintTask(task);
-  parentPort!.postMessage(results);
+  port.postMessage(results);
 });
 
 function runLintTask(task: WorkerTask): readonly WorkerResult[] {
@@ -257,13 +271,17 @@ function partitionFiles(files: readonly string[], count: number): string[][] {
   for (let i = 0; i < solidFiles.length; i++) {
     const f = solidFiles[i];
     if (!f) continue;
-    chunks[i % count]!.push(f);
+    const chunk = chunks[i % count];
+    if (!chunk) continue;
+    chunk.push(f);
   }
   return chunks.filter((c) => c.length > 0);
 }
 ```
 
 Round-robin partitioning. No attempt at load-balancing by file size — file analysis cost is dominated by graph building (~5-13ms), which is roughly constant per file. Round-robin gives even distribution.
+
+**Note on ESLint ignores**: The `filesToLint` array that feeds into `partitionFiles` is computed after ESLint config resolution and global ignore application on the main thread. Workers receive only pre-filtered file paths and do not need to load or evaluate ESLint ignore patterns.
 
 ### Main analysis block replacement
 
@@ -280,17 +298,22 @@ Post-Phase 2:
 ```typescript
 const t0 = performance.now();
 const allDiagnostics: Diagnostic[] = [];
+let serialBatch: BatchTypeScriptService | undefined;
 
 const solidFilesToLint = filesToLint.filter(
   (f) => classifyFile(canonicalPath(f)) !== "css"
 );
 
-if (solidFilesToLint.length > WORKER_THRESHOLD && !options.noDaemon) {
-  // Parallel path
+if (solidFilesToLint.length > WORKER_THRESHOLD) {
+  // Parallel path — workers are in-process thread parallelism, unrelated to the daemon.
+  // The daemon path (see daemon.ts) handles !noDaemon separately by delegating to the daemon process.
   const workerCount = defaultWorkerCount();
   const chunks = partitionFiles(solidFilesToLint, workerCount);
   const pool = createWorkerPool(workerCount);
 
+  // Note: filesToLint (which feeds solidFilesToLint and partitionFiles) is computed AFTER
+  // ESLint config is loaded and global ignores are applied. Workers do not need separate
+  // ignore handling because the file list is pre-filtered by the main thread.
   if (log.enabled) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
 
   try {
@@ -316,8 +339,9 @@ if (solidFilesToLint.length > WORKER_THRESHOLD && !options.noDaemon) {
     await pool.terminate();
   }
 } else {
-  // Serial path (few files or --no-daemon which implies debugging/profiling)
-  const batch = createBatchProgram(projectRoot);
+  // Serial path (few files)
+  serialBatch = createBatchProgram(projectRoot);
+  const batch = serialBatch;
   const { program } = batch;
 
   try {
@@ -362,6 +386,7 @@ For cross-file analysis, the main thread must rebuild graphs. With Phase 1's zer
 ```typescript
 if (options.crossFile) {
   const batch = serialBatch ?? createBatchProgram(projectRoot);
+  const ownsBatch = serialBatch === undefined;
   const cache = new GraphCache(log);
 
   for (const solidPath of fileIndex.solidFiles) {
@@ -378,7 +403,7 @@ if (options.crossFile) {
   // ... rest of cross-file analysis identical to current code
   // but using batch.program instead of project.getProgram()
 
-  if (serialBatch === undefined) batch.dispose();
+  if (ownsBatch) batch.dispose();
 }
 ```
 

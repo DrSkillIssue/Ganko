@@ -89,7 +89,7 @@ After Phase 1:
 
 | Package | Action | Reason |
 |---------|--------|--------|
-| `@typescript-eslint/parser` | **Remove** | Used by `eslint-config.ts` to load ESLint config — verify. If `loadESLintConfig` uses ESLint's `calculateConfigArray` which needs the parser registered, keep it. Otherwise remove. |
+| `@typescript-eslint/parser` | **Remove** | `eslint-config.ts` uses custom Zod parsing of the flat config export via direct `import()` of the config file. It does NOT use ESLint's `calculateConfigArray` and does NOT import from `@typescript-eslint/parser` at runtime. |
 | `@typescript-eslint/project-service` | **Remove** | `project-service.ts` is deleted. |
 | `@typescript-eslint/utils` | **Remove** | Only used for `TSESTree` type imports in `connection.ts` (`import type { TSESTree as T }`). After migration, no imports remain. |
 | `ignore` | Keep | Glob ignore pattern matching |
@@ -98,7 +98,7 @@ After Phase 1:
 | `vscode-languageserver-textdocument` | Keep | Document manager |
 | `zod` | Keep | Schema validation |
 
-**Verify `@typescript-eslint/parser` in ESLint config loading**: Check `packages/lsp/src/core/eslint-config.ts` for runtime references to the parser.
+**Confirmed**: `eslint-config.ts` does NOT reference `@typescript-eslint/parser` at runtime. It uses direct `import()` of the config file and Zod schema validation — no ESLint API involvement.
 
 Post-Phase 1 `package.json`:
 
@@ -115,21 +115,6 @@ Post-Phase 1 `package.json`:
 }
 ```
 
-If `eslint-config.ts` needs `@typescript-eslint/parser`:
-
-```json
-{
-  "devDependencies": {
-    "@drskillissue/ganko-shared": "workspace:^",
-    "@typescript-eslint/parser": "^8.57.0",
-    "ignore": "^7.0.5",
-    "typescript": "^5.9.3",
-    "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12",
-    "zod": "^4.3.6"
-  }
-}
-```
 
 ---
 
@@ -176,12 +161,12 @@ Removed:
 - `@typescript-eslint/project-service` — no longer imported
 - `@typescript-eslint/utils` — no longer imported
 - `@typescript-eslint/typescript-estree` — no longer imported
-- `@typescript-eslint/scope-manager` — no longer imported
+- `@typescript-eslint/scope-manager` — `@typescript-eslint/scope-manager` is NOT listed in `packages/ganko/package.json` — it's a transitive dependency of `@typescript-eslint/parser`. Only the `packages/lsp/tsup.config.ts` BUNDLED_DEPS entry needs removal (already listed above).
 - `@typescript-eslint/types` — no longer imported
 - `@typescript-eslint/visitor-keys` — no longer imported
-- `eslint` — only needed if `eslint-config.ts` uses the ESLint API. If it does, keep it.
+- `eslint` — `eslint-config.ts` does NOT import from `eslint` at runtime. Remove from BUNDLED_DEPS.
 
-**Verify `eslint` in BUNDLED_DEPS**: Check if `eslint-config.ts` imports from `eslint`. If yes, keep `eslint` in BUNDLED_DEPS. The LSP's ESLint config loading reads ESLint config files, which may require the `eslint` package to be resolvable.
+**Confirmed**: `eslint-config.ts` does NOT import from `eslint`. It uses direct `import()` of the user's config file and Zod schema validation. The `eslint` package is not needed in BUNDLED_DEPS.
 
 ---
 

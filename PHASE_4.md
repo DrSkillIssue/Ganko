@@ -31,7 +31,8 @@ Phase 1 creates `BatchTypeScriptService` with `ts.createProgram`. Replace with `
 ```typescript
 import ts from "typescript";
 import { resolve, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
 export interface BatchTypeScriptService {
   readonly program: ts.Program
@@ -58,7 +59,11 @@ export function createBatchProgram(rootPath: string): BatchTypeScriptService {
     ...parsedConfig.options,
     incremental: true,
     tsBuildInfoFile,
-    noEmit: true,
+    // Do NOT set noEmit — it prevents .tsbuildinfo from being written
+    declaration: false,
+    declarationMap: false,
+    sourceMap: false,
+    emitDeclarationOnly: false,
   };
 
   const host = ts.createIncrementalCompilerHost(incrementalOptions, ts.sys);
@@ -82,10 +87,24 @@ export function createBatchProgram(rootPath: string): BatchTypeScriptService {
       builderProgram.emit(
         undefined,
         (fileName, data) => {
-          ts.sys.writeFile(fileName, data);
+          // Only write .tsbuildinfo, skip any other output
+          if (fileName.endsWith(".tsbuildinfo")) {
+            try {
+              // Atomic write (write-to-temp + rename) prevents corruption if
+              // concurrent CLI invocations (e.g., CI running parallel lint
+              // commands) read .tsbuildinfo while it's being written.
+              const tmpFile = `${fileName}.${randomBytes(4).toString("hex")}.tmp`;
+              writeFileSync(tmpFile, data);
+              renameSync(tmpFile, fileName);
+            } catch {
+              // On Windows, concurrent reads may lock the file. Missing
+              // .tsbuildinfo on the next cold start is acceptable — it just
+              // means a full rebuild.
+            }
+          }
         },
         undefined,
-        true, // emitOnlyDtsFiles — we only want .tsbuildinfo, not actual .js/.d.ts
+        false, // emitOnlyDtsFiles=false — we need .tsbuildinfo which only writes when emitting
       );
     },
 
@@ -97,8 +116,11 @@ export function createBatchProgram(rootPath: string): BatchTypeScriptService {
 Key details:
 - `ts.createIncrementalCompilerHost` creates a host that reads `.tsbuildinfo` from disk if it exists
 - `ts.createIncrementalProgram` uses the stored build info to skip unchanged files
-- `builderProgram.emit(..., true)` with `emitOnlyDtsFiles=true` writes ONLY the `.tsbuildinfo` file — no `.js` or `.d.ts` output
-- `noEmit: true` in options ensures no emit happens during type checking
+- The custom `writeFile` callback filters to only write the `.tsbuildinfo` file, discarding any other output
+- `declaration: false`, `declarationMap: false`, `sourceMap: false`, and `emitDeclarationOnly: false` prevent `.d.ts`, `.d.ts.map`, `.js.map`, and declaration-only output — the `writeFile` filter is a safety net
+- `noEmit` is NOT set — setting it would make `emit()` a no-op, preventing `.tsbuildinfo` from being written
+- Atomic write (write-to-temp + rename) prevents corruption if concurrent CLI invocations (e.g., CI running parallel lint commands) read `.tsbuildinfo` while it's being written
+- On Windows, if the daemon reads `.tsbuildinfo` while the CLI writes it, the write may fail with `EBUSY` or `EACCES`. The catch block silently continues — missing `.tsbuildinfo` on the next cold start just means a full rebuild
 
 ---
 
@@ -195,7 +217,11 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
     ...parsedConfig.options,
     incremental: true,
     tsBuildInfoFile,
-    noEmit: true,
+    // Do NOT set noEmit — it prevents .tsbuildinfo from being written/read correctly
+    declaration: false,
+    declarationMap: false,
+    sourceMap: false,
+    emitDeclarationOnly: false,
   };
 
   const host = ts.createIncrementalCompilerHost(options, ts.sys);
@@ -215,6 +241,8 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
 Workers READ `.tsbuildinfo` but do NOT write it (multiple workers writing concurrently would corrupt the file). Only the main thread writes.
 
 All workers read the same `.tsbuildinfo` file. Since reads are concurrent and the file is immutable during the lint run, this is safe.
+
+Both main thread and workers MUST compute the cache path from the same base. Use `rootPath` consistently (passed via `WorkerTask.rootPath`), NOT `dirname(tsconfigPath)`. The `.tsbuildinfo` path is always `resolve(rootPath, 'node_modules/.cache/ganko/.tsbuildinfo')`.
 
 ---
 

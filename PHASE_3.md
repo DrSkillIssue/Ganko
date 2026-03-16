@@ -65,10 +65,11 @@ export function createTier1Program(
   filePath: string,
   content: string,
   compilerOptions?: ts.CompilerOptions,
+  cachedHost?: ts.CompilerHost,
 ): Tier1Result | null {
   const options: ts.CompilerOptions = compilerOptions ?? inferCompilerOptions(filePath);
 
-  const defaultHost = ts.createCompilerHost(options);
+  const defaultHost = cachedHost ?? ts.createCompilerHost(options);
 
   const host: ts.CompilerHost = {
     ...defaultHost,
@@ -142,12 +143,17 @@ The `inferCompilerOptions` reads the project's tsconfig once. The result should 
 
 ### New state fields on `ServerContext`
 
+All three fields must be added to the `ServerContext` interface definition in connection.ts:290-367. With `exactOptionalPropertyTypes: true` from root tsconfig, `boolean` fields must be explicitly initialized to `false`, and `| null` fields initialized to `null`.
+
 ```typescript
 export interface ServerContext {
   // ... existing fields ...
 
   /** Compiler options cached from tsconfig for Tier 1 programs */
   cachedCompilerOptions: ts.CompilerOptions | null
+
+  /** Cached CompilerHost for Tier 1 programs (avoids re-parsing lib.d.ts) */
+  cachedTier1Host: ts.CompilerHost | null
 
   /** Whether the full watch program is ready */
   watchProgramReady: boolean
@@ -161,6 +167,7 @@ Initialize in `createServer`:
 
 ```typescript
 cachedCompilerOptions: null,
+cachedTier1Host: null,
 watchProgramReady: false,
 workspaceReady: false,
 ```
@@ -225,9 +232,11 @@ function publishTier1Diagnostics(
   path: string,
   content: string,
 ): void {
+  if (!context.serverState.rootPath) return;
+
   const t0 = performance.now();
 
-  if (context.cachedCompilerOptions === null && context.serverState.rootPath) {
+  if (context.cachedCompilerOptions === null) {
     const tsconfigPath = ts.findConfigFile(
       context.serverState.rootPath,
       ts.sys.fileExists,
@@ -244,7 +253,19 @@ function publishTier1Diagnostics(
     }
   }
 
-  const tier1 = createTier1Program(path, content, context.cachedCompilerOptions ?? undefined);
+  // Cache the CompilerHost across Tier 1 calls to avoid re-parsing lib.d.ts
+  // for each opened file. lib.d.ts parsing is cached within a single CompilerHost
+  // instance, NOT globally — so reusing the host saves ~50-100ms per subsequent file.
+  if (context.cachedTier1Host === null && context.cachedCompilerOptions) {
+    context.cachedTier1Host = ts.createCompilerHost(context.cachedCompilerOptions);
+  }
+
+  const tier1 = createTier1Program(
+    path,
+    content,
+    context.cachedCompilerOptions ?? undefined,
+    context.cachedTier1Host ?? undefined,
+  );
   if (!tier1) {
     if (context.log.enabled) context.log.warning(`Tier 1: failed to create program for ${path}`);
     return;
@@ -280,7 +301,9 @@ function publishTier1Diagnostics(
 
 ### Restructured `handleInitialized`
 
-Split into three phases with readiness gates:
+Split into three phases with readiness gates.
+
+**Import required**: Add `import { getOpenDocumentPaths } from '../document'` to lifecycle.ts.
 
 ```typescript
 export async function handleInitialized(
@@ -299,12 +322,26 @@ export async function handleInitialized(
   const { log } = context;
   const rootPath = state.rootPath;
 
-  // Phase A: Create project with IncrementalTypeScriptService
-  // This starts the watch program build in the background
+  // Phase A: Load ESLint config BEFORE resolveReady() so Tier 1 diagnostics
+  // have rule overrides applied. ESLint config loading is ~50-200ms — fast enough
+  // to run synchronously before the readiness gate. Without this, Tier 1 diagnostics
+  // would run without overrides, then flicker when Tier 3 applies them.
+  if (state.useESLintConfig) {
+    const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
+      .catch((err: unknown) => {
+        if (log.enabled) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+        return EMPTY_ESLINT_RESULT;
+      });
+    state.eslintOverrides = eslintResult.overrides;
+    state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+  }
+
+  // Create project with IncrementalTypeScriptService
+  // NOTE: createProject does NOT call createWatchProgram yet — that is deferred below
   const project = createProject({
     rootPath,
     plugins: [SolidPlugin, CSSPlugin],
-    rules: {}, // overrides applied later
+    rules: state.ruleOverrides ?? {},
     log,
   });
   state.project = project;
@@ -316,23 +353,30 @@ export async function handleInitialized(
   // which returns true once initialized=true
   context.resolveReady();
 
-  // Phase B: Wait for watch program to be ready (background)
-  // The IncrementalTypeScriptService exposes a ready promise
-  // that resolves when createWatchProgram's initial build completes
+  // Phase B: Wait for watch program to be ready
+  // NOTE: createWatchProgram is SYNCHRONOUS — it blocks the event loop for 3-8s.
+  // The setImmediate inside createIncrementalProgram defers the blocking call by
+  // one event loop tick, which allows any pending didOpen events (queued during
+  // initialization) to be processed first and get Tier 1 treatment. The 3-8s block
+  // is deferred, NOT eliminated — after the first tick, the event loop is blocked
+  // until afterProgramCreate fires synchronously during the build.
   await project.watchProgramReady();
   context.watchProgramReady = true;
   if (log.enabled) log.info("Tier 2: full program ready");
 
   // Re-diagnose open files with full program (Tier 2)
+  // NOTE: Tier 2 re-diagnosis must NOT include cross-file analysis — workspace
+  // enrichment (file index, Tailwind, etc.) is not yet complete.
   const openPaths = getOpenDocumentPaths(context.documentState);
   for (let i = 0, len = openPaths.length; i < len; i++) {
     const p = openPaths[i];
     if (!p) continue;
-    publishFileDiagnostics(context, project, p);
+    publishFileDiagnostics(context, project, p, undefined, false);
   }
 
   // Phase C: Workspace enrichment (background)
-  await enrichWorkspace(state, context);
+  // rootPath is passed explicitly — enrichWorkspace must not use state.rootPath!
+  await enrichWorkspace(rootPath, state, context);
   context.workspaceReady = true;
   if (log.enabled) log.info("Tier 3: workspace enrichment complete");
 
@@ -349,13 +393,15 @@ export async function handleInitialized(
 
 ```typescript
 async function enrichWorkspace(
+  rootPath: string,
   state: ServerState,
   context: ServerContext,
 ): Promise<void> {
-  const rootPath = state.rootPath!;
   const log = context.log;
 
-  // ESLint config
+  // ESLint config is already loaded in Phase A (before resolveReady).
+  // Here we only reload ignores and re-apply overrides if ESLint is enabled,
+  // since Phase A only loaded overrides for Tier 1 diagnostic accuracy.
   if (state.useESLintConfig) {
     const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
       .catch((err: unknown) => {
@@ -420,6 +466,8 @@ watchProgramReady() {
 },
 ```
 
+**Architecture note**: Add a `mode: 'batch' | 'incremental'` parameter to `ProjectConfig`, or create separate factory functions: `createBatchProject()` for CLI/daemon, `createIncrementalProject()` for LSP. The `watchProgramReady()` method returns `Promise.resolve()` for batch mode.
+
 ---
 
 ## `packages/lsp/src/core/incremental-program.ts` changes
@@ -433,13 +481,22 @@ export interface IncrementalTypeScriptService {
 }
 ```
 
-Implementation: the `createWatchProgram` callback fires `afterProgramCreate` on initial build. Wire a `Promise` + resolver:
+Implementation: the `createWatchProgram` callback fires `afterProgramCreate` on initial build. Wire a `Promise` + resolver.
+
+**IMPORTANT**: `ts.createWatchProgram(host)` is synchronous — it blocks the event loop for 3-8s while building the initial program. The `afterProgramCreate` callback fires synchronously during this call, NOT asynchronously. To allow pending `didOpen` events to be processed with Tier 1 before the block, `createWatchProgram` is wrapped in `setImmediate`. The Tier 1→Tier 2 progression works like this:
+
+1. `resolveReady()` fires immediately (in `handleInitialized` Phase A)
+2. `setImmediate(() => { /* create watch program */ })` gives the event loop one tick
+3. Any `didOpen` events queued during initialization get Tier 1 treatment
+4. Then `createWatchProgram` blocks for 3-8s (unavoidable without worker thread)
+5. `afterProgramCreate` fires synchronously during the build, resolving the ready promise
 
 ```typescript
 export function createIncrementalProgram(rootPath: string): IncrementalTypeScriptService {
   let resolveReady: () => void;
   const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
   let isReady = false;
+  let watchProgram: ts.WatchOfConfigFile<ts.SemanticDiagnosticsBuilderProgram> | null = null;
 
   const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
   if (!tsconfigPath) throw new Error(`No tsconfig.json found in ${rootPath}`);
@@ -464,11 +521,23 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
     }
   };
 
-  const watchProgram = ts.createWatchProgram(host);
+  // Defer to allow event loop to process pending didOpen events.
+  // createWatchProgram is SYNCHRONOUS and blocks for 3-8s.
+  // afterProgramCreate fires synchronously during this call,
+  // which calls resolveReady().
+  setImmediate(() => {
+    watchProgram = ts.createWatchProgram(host);
+  });
 
   return {
     // ... existing methods ...
     ready() { return readyPromise; },
+    // getProgram() must handle the case where watchProgram is not yet created
+    getProgram() {
+      if (!watchProgram) return null;
+      const bp = watchProgram.getProgram();
+      return bp.getProgram();
+    },
   };
 }
 ```
@@ -566,6 +635,8 @@ This means:
 - JSX structure rules work correctly (JSX syntax is fully parsed)
 
 When Tier 2 fires, diagnostics are republished with full type resolution. The transient Tier 1 inaccuracies are replaced. Users may see diagnostics appear, disappear, or change severity — this matches the behavior of TypeScript's own "partial" mode in VS Code.
+
+**Cross-module type resolution caveat**: During Tier 1, imported symbols from other project files may resolve to `ts.TypeFlags.Unknown` rather than `any`, depending on `moduleResolution` settings. Type-aware rules that depend on cross-module type resolution (e.g., `show-truthy-conversion` checking `boolean | Signal<boolean>`) may produce false positives. Only `node_modules` types (solid-js, DOM) are reliably resolved in Tier 1. Set `compilerOptions.noResolve = false` (already default) to ensure imports are followed.
 
 ---
 

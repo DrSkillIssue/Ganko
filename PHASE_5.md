@@ -109,18 +109,54 @@ The cache-hit path:
 2. Still runs `runSolidRules` (rules may have changed between runs)
 3. Passes the CURRENT `sourceFile` — rules that compute locations use the current file's positions
 
+**sourceFile identity**: On cache hit, `graph.sourceFile` and the `sourceFile` parameter to
+`runSolidRules` are different object references but contain identical text (verified by content
+hash match). Rules that call `node.getText(graph.sourceFile)` work correctly. Rules that call
+`checker.getTypeAtLocation(cachedNode)` would FAIL — but rules do NOT call the TypeChecker
+(type resolution happens during `buildSolidGraph`, not `runSolidRules`).
+
+To prevent accidental TypeChecker usage on cached nodes, `runSolidRules` should NOT receive
+a TypeChecker. The graph already contains all resolved type information in entity properties.
+
+### Future optimization: rule result caching
+
+Between daemon requests, rules don't change (they're compiled into the binary). Rule OVERRIDES
+may change (ESLint config reload). If overrides haven't changed AND the graph is cached, re-running
+all rules produces identical diagnostics. A future optimization: cache
+`(contentHash, overridesHash) → Diagnostic[]` to skip rule execution entirely on the daemon warm path.
+
+This is a low-priority optimization. The current design is correct — rule execution on a cached
+graph costs ~1-2ms per file, acceptable for the daemon's typical 1-5 changed files.
+
 ---
 
-## `packages/lsp/src/cli/lint.ts` changes
+## Shared `contentHash` utility
 
-Replace `project.getScriptVersion(key)` with `contentHash`:
+Create `packages/shared/src/content-hash.ts`:
 
 ```typescript
 import { createHash } from "node:crypto";
 
-function contentHash(text: string): string {
+export function contentHash(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
+```
+
+Export from `packages/shared/src/index.ts`.
+
+Import in: `lint.ts`, `daemon.ts`, `analyze.ts`, `connection.ts`.
+
+No inline `contentHash` definitions — use the shared utility exclusively.
+
+---
+
+## `packages/lsp/src/cli/lint.ts` changes
+
+Import `contentHash` from `@drskillissue/ganko-shared` (defined in `packages/shared/src/content-hash.ts`).
+No inline `contentHash` definitions — use the shared utility exclusively.
+
+```typescript
+import { contentHash } from "@drskillissue/ganko-shared";
 
 // In the per-file loop:
 const version = contentHash(sourceFile.text);
@@ -133,9 +169,12 @@ cache.setSolidGraph(key, version, graph);
 
 ### Content sync + version computation
 
-Replace `project.getScriptVersion` with content hash:
+Import `contentHash` from `@drskillissue/ganko-shared` (defined in `packages/shared/src/content-hash.ts`).
+No inline `contentHash` definitions — use the shared utility exclusively.
 
 ```typescript
+import { contentHash } from "@drskillissue/ganko-shared";
+
 // In the per-file lint loop:
 const version = contentHash(content);
 const needsRebuild = !cache.hasSolidGraph(key, version);
@@ -179,14 +218,11 @@ Zero re-parsing. Zero graph rebuilding. Only rule execution on the cached graph.
 
 ### `buildSolidGraphForPath` (used by cross-file analysis)
 
-Replace version source:
+Import `contentHash` from `@drskillissue/ganko-shared` (defined in `packages/shared/src/content-hash.ts`).
+No inline `contentHash` definitions — use the shared utility exclusively.
 
 ```typescript
-import { createHash } from "node:crypto";
-
-function contentHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
+import { contentHash } from "@drskillissue/ganko-shared";
 ```
 
 In `rebuildGraphsAndRunCrossFileRules`:
@@ -227,24 +263,6 @@ getSolidGraph(path) {
 
 ---
 
-## Shared `contentHash` utility
-
-Create `packages/shared/src/content-hash.ts`:
-
-```typescript
-import { createHash } from "node:crypto";
-
-export function contentHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-```
-
-Export from `packages/shared/src/index.ts`.
-
-Import in: `lint.ts`, `daemon.ts`, `analyze.ts`, `connection.ts`.
-
----
-
 ## What is NOT cached on disk
 
 `SolidGraph` contains `ts.Node` references (pointers into the program's AST). These cannot be serialized/deserialized. Graph caching is in-memory only.
@@ -254,6 +272,16 @@ This is correct because:
 - The daemon keeps the program in memory → graphs persist naturally
 - The LSP keeps the watch program in memory → same
 - Disk serialization would require converting all `ts.Node` references to position-based identifiers and back — more expensive than rebuilding
+
+### Tier 1 graph isolation
+
+The LSP must NOT cache Tier 1 graphs (from single-file programs) in the main `GraphCache`.
+Tier 1 programs use different `CompilerOptions` than the full program — AST structure may differ
+slightly (different `jsx` or `target` settings). Content hash matches but the graph built with
+Tier 1 options may not be valid for Tier 2's full program.
+
+Tier 1 diagnostics are cached separately in `context.diagCache` and are fully replaced when
+Tier 2 re-publishes. The `GraphCache` only stores graphs built from the full program.
 
 ---
 
