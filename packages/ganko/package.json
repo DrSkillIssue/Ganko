@@ -77,9 +77,6 @@
     "tsc": "tsc --noEmit"
   },
   "dependencies": {
-    "@typescript-eslint/parser": "^8.57.0",
-    "@typescript-eslint/typescript-estree": "^8.57.0",
-    "@typescript-eslint/utils": "^8.57.0",
     "postcss": "^8.5.8",
     "postcss-safe-parser": "^7.0.1",
     "postcss-scss": "^4.0.9",
@@ -91,7 +88,8 @@
   },
   "devDependencies": {
     "@drskillissue/ganko-shared": "workspace:^",
-    "@typescript-eslint/rule-tester": "^8.57.0"
+    "@typescript-eslint/rule-tester": "^8.57.0",
+    "@typescript-eslint/utils": "^8.57.0"
   },
   "author": "DrSkillIssue",
   "engines": {

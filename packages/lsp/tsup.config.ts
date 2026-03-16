@@ -6,7 +6,6 @@ const BUNDLED_DEPS = [
   "vscode-languageserver",
   "vscode-languageserver-textdocument",
   "typescript",
-  "eslint",
   "zod",
   "ignore",
 ] as const;
