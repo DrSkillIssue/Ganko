@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "bun run --cwd packages/shared build && bun run --cwd packages/ganko build && bun run --cwd packages/lsp build && bun run --cwd packages/vscode build",
-    "test": "vitest run",
+    "test": "bun run --cwd packages/ganko test && bun run --cwd packages/lsp test",
     "tsc": "bun run --cwd packages/shared tsc && bun run --cwd packages/ganko tsc && bun run --cwd packages/lsp tsc && bun run --cwd packages/vscode tsc",
     "lint": "eslint --max-warnings=0",
     "ci": "bun run build && bun run test && bun run lint && bun run tsc && bun run --cwd packages/ganko generate:check",

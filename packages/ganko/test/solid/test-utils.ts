@@ -6,17 +6,35 @@ import type { Emit } from "../../src/graph"
 import type { SolidGraph, SolidInput } from "../../src"
 import type { Diagnostic, FixOperation } from "../../src/diagnostic"
 
+const compilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ESNext,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  jsx: ts.JsxEmit.Preserve,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+}
+
+/** Shared CompilerHost — created once, reused across all createTestProgram calls. */
+const defaultHost = ts.createCompilerHost(compilerOptions)
+
+/**
+ * Cache parsed lib SourceFile objects at module scope. Lib .d.ts files are
+ * immutable so parsing them once and reusing across all ts.createProgram
+ * invocations is safe and eliminates the dominant cost per call (~100 lib files).
+ */
+const libSourceFileCache = new Map<string, ts.SourceFile | undefined>()
+
 /**
  * Create an in-memory ts.Program from a map of virtual file contents.
  * Falls back to the real filesystem for lib files (e.g. lib.d.ts).
  */
 export function createTestProgram(files: Record<string, string>): ts.Program {
-  // Normalize paths to absolute so TypeScript's internal path normalization matches
   const fileMap = new Map<string, string>()
   for (const [key, value] of Object.entries(files)) {
     fileMap.set(resolve(key), value)
   }
-  const defaultHost = ts.createCompilerHost({})
 
   const host: ts.CompilerHost = {
     ...defaultHost,
@@ -25,7 +43,11 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
       if (content !== undefined) {
         return ts.createSourceFile(fileName, content, languageVersion, true)
       }
-      return defaultHost.getSourceFile(fileName, languageVersion)
+      const cached = libSourceFileCache.get(fileName)
+      if (cached !== undefined) return cached
+      const sf = defaultHost.getSourceFile(fileName, languageVersion)
+      libSourceFileCache.set(fileName, sf)
+      return sf
     },
     fileExists(fileName) {
       return fileMap.has(fileName) || defaultHost.fileExists(fileName)
@@ -37,15 +59,7 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
 
   return ts.createProgram({
     rootNames: [...fileMap.keys()],
-    options: {
-      target: ts.ScriptTarget.ESNext,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      jsx: ts.JsxEmit.Preserve,
-      strict: true,
-      noEmit: true,
-      skipLibCheck: true,
-    },
+    options: compilerOptions,
     host,
   })
 }
