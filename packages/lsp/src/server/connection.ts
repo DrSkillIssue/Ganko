@@ -25,9 +25,12 @@ import {
   type PublishDiagnosticsParams,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { GraphCache } from "@drskillissue/ganko";
+import ts from "typescript";
+import { dirname } from "node:path";
+import { GraphCache, createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { createTier1Program } from "../core/tier1-program";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics, buildSolidGraphForPath } from "../core/analyze";
@@ -284,6 +287,14 @@ export interface ServerContext {
   tailwindValidator: TailwindValidator | null
   /** CSS custom properties provided by external libraries (e.g., Kobalte's --kb-* properties) */
   externalCustomProperties?: ReadonlySet<string>
+  /** Compiler options cached from tsconfig for Tier 1 programs */
+  cachedCompilerOptions: ts.CompilerOptions | null
+  /** Cached CompilerHost for Tier 1 programs (avoids re-parsing lib.d.ts) */
+  cachedTier1Host: ts.CompilerHost | null
+  /** Whether the full TypeScript program is ready (Tier 2 gate) */
+  watchProgramReady: boolean
+  /** Whether workspace-level enrichment (ESLint, Tailwind, cross-file) is ready (Tier 3 gate) */
+  workspaceReady: boolean
   /** Debounced GC after request handlers */
   readonly gcTimer: GcTimer
   /** Periodic memory monitoring with high-water-mark gating */
@@ -430,6 +441,10 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     diagCache,
     graphCache,
     tailwindValidator: null,
+    cachedCompilerOptions: null,
+    cachedTier1Host: null,
+    watchProgramReady: false,
+    workspaceReady: false,
     gcTimer,
     memoryWatcher,
     ready,
@@ -546,6 +561,9 @@ function setupLifecycleHandlers(context: ServerContext): void {
 
   connection.onDidChangeWatchedFiles(async (params) => {
     await context.ready;
+    /* External file changes during Tier 1 are deferred — the full program
+       isn't built yet, and Tier 2/3 re-diagnosis will pick up disk changes. */
+    if (!context.watchProgramReady) return;
     let eslintConfigChanged = false;
     const changes = params.changes;
     const paths: string[] = new Array(changes.length);
@@ -637,6 +655,10 @@ function setupLifecycleHandlers(context: ServerContext): void {
       context.log.setLevel(parseLogLevel(rawLevel, "info"));
     }
 
+    /* Configuration changes during Tier 1 are deferred — ESLint config
+       was loaded in Phase A, and full re-diagnosis happens in Phase B/C. */
+    if (!context.watchProgramReady) return;
+
     const result = handleConfigurationChange(params, serverState);
     if (result === "none") return;
 
@@ -682,6 +704,22 @@ function setupDocumentHandlers(context: ServerContext): void {
     documentState.debounceTimer = null;
     const project = context.project;
     if (!project) return;
+
+    if (!context.watchProgramReady) {
+      /* Tier 1 path: program not built yet. Update the project's file buffers
+         (so the eventual program build uses current content) and publish
+         Tier 1 diagnostics for solid files. */
+      const changes = flushPendingChanges(documentState);
+      for (let i = 0, len = changes.length; i < len; i++) {
+        const change = changes[i];
+        if (!change) continue;
+        project.updateFile(change.path, change.content);
+        if (classifyFile(change.path) === "solid") {
+          publishTier1Diagnostics(context, change.path, change.content);
+        }
+      }
+      return;
+    }
 
     const t0 = performance.now();
     const changes = flushPendingChanges(documentState);
@@ -730,16 +768,33 @@ function setupDocumentHandlers(context: ServerContext): void {
 
   documents.onDidOpen(async (event) => {
     const path = handleDidOpen(event, documentState);
+    if (!path) return;
     await context.ready;
+
+    const key = canonicalPath(path);
     if (context.log.enabled) context.log.debug(
-      `didOpen: uri=${event.document.uri} path=${path} hasProject=${!!context.project} `
-      + `version=${event.document.version} openDocs=${documentState.openDocuments.size}`,
+      `didOpen: uri=${event.document.uri} path=${key} hasProject=${!!context.project} `
+      + `version=${event.document.version} openDocs=${documentState.openDocuments.size} `
+      + `watchReady=${context.watchProgramReady}`,
     );
+
+    if (!context.watchProgramReady) {
+      /* Tier 1: single-file program, no waiting for full build.
+         Only solid files get Tier 1 — CSS and unknown files wait for Tier 2/3. */
+      const kind = classifyFile(key);
+      if (kind === "solid") {
+        publishTier1Diagnostics(context, key, event.document.getText());
+      }
+      /* Tier 2 re-diagnosis is handled by handleInitialized Phase B
+         when the full program becomes available. */
+      return;
+    }
+
+    /* Tier 2+: full program available. */
     const project = context.project;
-    if (path && project) {
-      if (context.log.enabled) context.log.debug(`didOpen: calling publishFileDiagnostics for ${path}`);
-      publishFileDiagnostics(context, project, path, event.document.getText());
-      if (context.log.enabled) context.log.debug(`didOpen: publishFileDiagnostics complete for ${path}`);
+    if (project) {
+      if (context.log.enabled) context.log.debug(`didOpen: calling publishFileDiagnostics for ${key}`);
+      publishFileDiagnostics(context, project, key, event.document.getText());
     }
   });
 
@@ -773,6 +828,19 @@ function setupDocumentHandlers(context: ServerContext): void {
     }
 
     handleDidSave(event, documentState);
+
+    if (!context.watchProgramReady) {
+      /* During Tier 1: flush pending changes to project file buffers so the
+         eventual program build uses current content. Skip diagnosis — Tier 2
+         re-diagnosis in handleInitialized Phase B will pick this up. */
+      const changes = flushPendingChanges(documentState);
+      for (let i = 0, len = changes.length; i < len; i++) {
+        const change = changes[i];
+        if (!change) continue;
+        project.updateFile(change.path, change.content);
+      }
+      return;
+    }
 
     const changes = flushPendingChanges(documentState);
     const savedPath = uriToPath(event.document.uri);
@@ -853,7 +921,7 @@ function setupFeatureHandlers(context: ServerContext): void {
   }
 
   function isReady(): boolean {
-    return isServerReady(context.serverState);
+    return isServerReady(context.serverState) && context.watchProgramReady;
   }
 
   const { log, gcTimer } = context;
@@ -925,6 +993,92 @@ function setupFeatureHandlers(context: ServerContext): void {
 }
 
 /**
+ * Publish Tier 1 diagnostics for a file using a minimal single-file ts.Program.
+ *
+ * Used during startup before the full TypeScript program is built. Creates a
+ * real ts.Program with full TypeChecker scoped to the file and its direct
+ * imports (solid-js types, DOM libs are available). Cross-module project
+ * types are NOT available — they resolve to `any`.
+ *
+ * Cost: ~50-100ms on first call (lib.d.ts parsing), ~20-50ms thereafter
+ * (CompilerHost is cached across calls).
+ *
+ * @param context - Server context
+ * @param path - Canonical file path
+ * @param content - Current in-memory content
+ */
+function publishTier1Diagnostics(
+  context: ServerContext,
+  path: string,
+  content: string,
+): void {
+  if (!context.serverState.rootPath) return;
+
+  const t0 = performance.now();
+
+  /* Cache compiler options from tsconfig — parsed once, reused for all
+     Tier 1 calls during startup. */
+  if (context.cachedCompilerOptions === null) {
+    const tsconfigPath = ts.findConfigFile(
+      context.serverState.rootPath,
+      ts.sys.fileExists,
+      "tsconfig.json",
+    );
+    if (tsconfigPath) {
+      const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(
+        configFile.config,
+        ts.sys,
+        dirname(tsconfigPath),
+      );
+      context.cachedCompilerOptions = parsed.options;
+    }
+  }
+
+  /* Cache the CompilerHost across Tier 1 calls to avoid re-parsing lib.d.ts
+     for each opened file. lib.d.ts parsing is cached within a single
+     CompilerHost instance, NOT globally — reusing the host saves ~50-100ms
+     per subsequent file. */
+  if (context.cachedTier1Host === null && context.cachedCompilerOptions) {
+    context.cachedTier1Host = ts.createCompilerHost(context.cachedCompilerOptions);
+  }
+
+  const tier1 = createTier1Program(
+    path,
+    content,
+    context.cachedCompilerOptions ?? undefined,
+    context.cachedTier1Host ?? undefined,
+  );
+  if (!tier1) {
+    if (context.log.enabled) context.log.warning(`Tier 1: failed to create program for ${path}`);
+    return;
+  }
+
+  const input = createSolidInput(path, tier1.program, context.log);
+  const graph = buildSolidGraph(input);
+
+  const diagnostics: Diagnostic[] = [];
+  const rawEmit = (d: Diagnostic) => diagnostics.push(d);
+  const hasOverrides = Object.keys(context.serverState.ruleOverrides).length > 0;
+  const emit = hasOverrides ? createOverrideEmit(rawEmit, context.serverState.ruleOverrides) : rawEmit;
+  runSolidRules(graph, input.sourceFile, emit);
+
+  context.diagCache.set(path, diagnostics);
+
+  const converted = convertDiagnostics(diagnostics);
+  const uri = context.documentState.pathIndex.get(path) ?? pathToUri(path);
+  const docInfo = context.documentState.openDocuments.get(uri);
+
+  const params: PublishDiagnosticsParams = { uri, diagnostics: converted };
+  if (docInfo?.version !== undefined) params.version = docInfo.version;
+  context.connection.sendDiagnostics(params);
+
+  if (context.log.enabled) {
+    context.log.info(`Tier 1: ${path} → ${diagnostics.length} diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+}
+
+/**
  * Publish diagnostics for a file.
  *
  * @param context - Server context
@@ -936,7 +1090,7 @@ function setupFeatureHandlers(context: ServerContext): void {
  *   typing (debounced changes) where only single-file rules matter.
  *   Previous cross-file results are preserved when skipped.
  */
-function publishFileDiagnostics(
+export function publishFileDiagnostics(
   context: ServerContext,
   project: Project,
   path: string,

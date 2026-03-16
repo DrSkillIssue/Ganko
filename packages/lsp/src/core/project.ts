@@ -45,6 +45,11 @@ export interface Project {
   /** Update rule severity overrides. Takes effect on next run(). */
   setRuleOverrides(overrides: RuleOverrides): void
 
+  /** Resolves when the underlying TypeScript program's initial build completes.
+   *  For IncrementalTypeScriptService (LSP), this defers the build by one
+   *  event loop tick to allow Tier 1 single-file diagnostics to fire first. */
+  watchProgramReady(): Promise<void>
+
   /** Dispose resources */
   dispose(): void
 }
@@ -96,6 +101,10 @@ export function createProject(config: ProjectConfig): Project {
     setRuleOverrides(overrides) {
       if (log?.enabled) log.trace(`project.setRuleOverrides: ${Object.keys(overrides).length} overrides`);
       runner.setRuleOverrides(overrides);
+    },
+
+    watchProgramReady() {
+      return tsService.ready();
     },
 
     dispose() {

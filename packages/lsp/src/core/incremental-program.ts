@@ -4,6 +4,10 @@ export interface IncrementalTypeScriptService {
   getProgram(): ts.Program
   getLanguageService(): ts.LanguageService
   updateFile(path: string, content: string): void
+  /** Resolves when the initial program build completes.
+   *  The build is deferred by one event loop tick via setImmediate
+   *  to allow pending didOpen events to get Tier 1 treatment. */
+  ready(): Promise<void>
   dispose(): void
 }
 
@@ -37,6 +41,26 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
 
   const languageService = ts.createLanguageService(servicesHost, ts.createDocumentRegistry());
 
+  /* Readiness signal: the initial program build is deferred by one event loop
+     tick via setImmediate. This allows pending didOpen events (queued during
+     the initialization handshake) to be processed with Tier 1 single-file
+     programs before the 3-8s synchronous program build blocks the event loop.
+
+     After setImmediate fires, languageService.getProgram() triggers the full
+     build. The ready promise resolves once the build completes.
+
+     If getProgram() is called before setImmediate fires (e.g., by a feature
+     handler), it triggers the build synchronously — same as before Phase 3.
+     The ready promise will then resolve immediately when setImmediate fires
+     (getProgram is cached after first build). */
+  let resolveReady: () => void;
+  const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
+
+  setImmediate(() => {
+    languageService.getProgram();
+    resolveReady();
+  });
+
   return {
     getProgram(): ts.Program {
       const program = languageService.getProgram();
@@ -49,6 +73,9 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
     updateFile(path: string, content: string): void {
       fileContents.set(path, content);
       fileVersions.set(path, (fileVersions.get(path) ?? 0) + 1);
+    },
+    ready(): Promise<void> {
+      return readyPromise;
     },
     dispose(): void {
       languageService.dispose();

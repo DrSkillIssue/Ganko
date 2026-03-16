@@ -21,7 +21,8 @@ import { createFileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
-import type { DocumentState } from "./document";
+import { publishFileDiagnostics } from "../connection";
+import { type DocumentState, getOpenDocumentPaths } from "./document";
 import type { Logger } from "../../core/logger";
 
 
@@ -139,9 +140,16 @@ export function handleInitialize(
 /**
  * Handle initialized notification from client.
  *
- * Loads ESLint config (if enabled), merges overrides with VS Code settings,
- * creates the Project with SolidPlugin and CSSPlugin, and wires it into
- * the server context.
+ * Three-phase startup for progressive diagnostic delivery:
+ *
+ * Phase A (<200ms): Load ESLint config, create Project, resolve readiness gate.
+ *   Tier 1 single-file diagnostics become available immediately via didOpen.
+ *
+ * Phase B (3-8s): Wait for the full TypeScript program build to complete.
+ *   Re-diagnose all open files with the full TypeChecker (Tier 2).
+ *
+ * Phase C (5-10s): Workspace enrichment — file index, Tailwind, library
+ *   analysis, cross-file diagnostics. Re-diagnose with Tier 3.
  *
  * @param _params - Initialized params (unused)
  * @param state - Server state to update
@@ -154,64 +162,115 @@ export async function handleInitialized(
   connection: Connection,
   context?: ServerContext,
 ): Promise<void> {
-  if (state.rootPath && context) {
-    const { log } = context;
-
-    if (state.useESLintConfig) {
-      const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
-        .catch((err: unknown) => {
-          if (log.enabled) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
-          return EMPTY_ESLINT_RESULT;
-        });
-      state.eslintOverrides = eslintResult.overrides;
-      state.eslintIgnores = eslintResult.globalIgnores;
-    }
-
-    state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
-
-    const fileIndex = createFileIndex(state.rootPath, effectiveExclude(state), log);
-    context.fileIndex = fileIndex;
-    if (log.enabled) log.debug(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
-
-    /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
-    if (fileIndex.cssFiles.size > 0) {
-      const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-      context.tailwindValidator = await resolveTailwindValidator(cssFiles)
-        .catch(() => null);
-      if (log.enabled) log.debug(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
-    }
-
-    /* Library analysis: scan installed dependencies for CSS custom properties
-       they inject at runtime (e.g., Kobalte's --kb-* properties set via inline
-       style attributes in JSX). */
-    const externalProps = scanDependencyCustomProperties(state.rootPath);
-    if (externalProps.size > 0) {
-      context.externalCustomProperties = externalProps;
-      if (log.enabled) log.debug(`library analysis: ${externalProps.size} external custom properties`);
-    }
-
-    const project = createProject({
-      rootPath: state.rootPath,
-      plugins: [SolidPlugin, CSSPlugin],
-      rules: state.ruleOverrides,
-      log,
-    });
-
-    state.project = project;
-    context.setProject(project);
-
-    state.initialized = true;
-    context.resolveReady();
-
-    const eslintCount = Object.keys(state.eslintOverrides).length;
-    const vscodeCount = Object.keys(state.vscodeOverrides).length;
-    if (log.enabled) log.info(
-      `Solid LSP ready (${eslintCount} ESLint overrides, ${vscodeCount} VS Code overrides, ${fileIndex.solidFiles.size} solid files, ${fileIndex.cssFiles.size} css files)`,
-    );
-  } else {
+  if (!state.rootPath || !context) {
     state.initialized = true;
     context?.resolveReady();
     connection.console.log("Solid LSP ready (no workspace root)");
+    return;
+  }
+
+  const { log } = context;
+  const rootPath = state.rootPath;
+
+  /* ── Phase A: Fast startup — ESLint config, create project, resolve ready ──
+     ESLint config is loaded BEFORE resolveReady so Tier 1 diagnostics have
+     rule overrides applied. Without this, Tier 1 diagnostics would run
+     without overrides, then flicker when Tier 3 applies them. */
+
+  if (state.useESLintConfig) {
+    const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
+      .catch((err: unknown) => {
+        if (log.enabled) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+        return EMPTY_ESLINT_RESULT;
+      });
+    state.eslintOverrides = eslintResult.overrides;
+    state.eslintIgnores = eslintResult.globalIgnores;
+    state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+  }
+
+  const project = createProject({
+    rootPath,
+    plugins: [SolidPlugin, CSSPlugin],
+    rules: state.ruleOverrides,
+    log,
+  });
+
+  state.project = project;
+  context.setProject(project);
+  state.initialized = true;
+  context.resolveReady();
+
+  if (log.enabled) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
+
+  /* ── Phase B: Full program build — re-diagnose with full TypeChecker ──
+     The IncrementalTypeScriptService defers createProgram by one event loop
+     tick via setImmediate. This allows any didOpen events queued during the
+     initialization handshake to get Tier 1 treatment before the 3-8s
+     synchronous program build blocks the event loop. */
+
+  await project.watchProgramReady();
+  context.watchProgramReady = true;
+
+  if (log.enabled) log.info("Phase B: full program ready (Tier 2 active)");
+
+  /* Re-diagnose open files with full program (no cross-file yet — workspace
+     enrichment hasn't run). */
+  const openPaths = getOpenDocumentPaths(context.documentState);
+  for (let i = 0, len = openPaths.length; i < len; i++) {
+    const p = openPaths[i];
+    if (!p) continue;
+    publishFileDiagnostics(context, project, p, undefined, false);
+  }
+
+  /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
+
+  await enrichWorkspace(rootPath, state, context);
+  context.workspaceReady = true;
+
+  if (log.enabled) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
+
+  /* Re-diagnose with cross-file results. */
+  for (let i = 0, len = openPaths.length; i < len; i++) {
+    const p = openPaths[i];
+    if (!p) continue;
+    publishFileDiagnostics(context, project, p);
+  }
+}
+
+/**
+ * Workspace enrichment: file index, Tailwind validator, library analysis.
+ *
+ * Runs as Phase C of handleInitialized, after the full TypeScript program
+ * is available. These operations are needed for cross-file diagnostics
+ * but not for single-file Tier 1/2 analysis.
+ */
+async function enrichWorkspace(
+  rootPath: string,
+  state: ServerState,
+  context: ServerContext,
+): Promise<void> {
+  const { log } = context;
+
+  /* File index — uses ESLint ignores loaded in Phase A. */
+  const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
+  context.fileIndex = fileIndex;
+  if (log.enabled) log.debug(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
+
+  /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
+  if (fileIndex.cssFiles.size > 0) {
+    const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
+    context.tailwindValidator = await resolveTailwindValidator(cssFiles)
+      .catch(() => null);
+    if (log.enabled) log.debug(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
+  }
+
+  /* Library analysis: scan installed dependencies for CSS custom properties
+     they inject at runtime (e.g., Kobalte's --kb-* properties set via inline
+     style attributes in JSX). */
+  const externalProps = scanDependencyCustomProperties(rootPath);
+  if (externalProps.size > 0) {
+    context.externalCustomProperties = externalProps;
+    if (log.enabled) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
 }
 
