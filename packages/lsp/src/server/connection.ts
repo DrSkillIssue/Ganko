@@ -29,7 +29,7 @@ import ts from "typescript";
 import { dirname } from "node:path";
 import { GraphCache, createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, isToolingConfig, uriToPath, pathToUri, CROSS_FILE_DEPENDENTS, formatSnapshot, ALL_EXTENSIONS } from "@drskillissue/ganko-shared";
 import { createTier1Program } from "../core/tier1-program";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { FileKind, RuleOverrides } from "@drskillissue/ganko-shared";
@@ -142,7 +142,9 @@ function createHandlerContext(
 
     getSolidGraph(path) {
       if (classifyFile(path) !== "solid") return null;
-      const version = "0";
+      const sourceFile = project.getSourceFile(path);
+      if (!sourceFile) return null;
+      const version = contentHash(sourceFile.text);
       return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
     },
   };

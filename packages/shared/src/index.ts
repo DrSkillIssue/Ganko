@@ -70,5 +70,8 @@ export {
   type MemorySnapshotFormatted,
 } from "./memory";
 
+// Content-addressed hashing
+export { contentHash } from "./content-hash";
+
 // Shared utilities
 export * from "./util";

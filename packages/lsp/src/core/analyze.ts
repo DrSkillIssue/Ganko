@@ -16,7 +16,7 @@ import {
 } from "@drskillissue/ganko";
 import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";
 import { readFileSync } from "node:fs";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
 import type { FileIndex } from "./file-index";
@@ -190,8 +190,11 @@ function rebuildGraphsAndRunCrossFileRules(
   const log = cache.logger;
 
   let rebuilt = 0;
+  const program = project.getProgram();
   for (const solidPath of fileIndex.solidFiles) {
-    const version = "0";
+    const sourceFile = program.getSourceFile(solidPath);
+    if (!sourceFile) continue;
+    const version = contentHash(sourceFile.text);
     if (!cache.hasSolidGraph(solidPath, version)) {
       if (log.enabled) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
       cache.getSolidGraph(solidPath, version, buildSolidGraphForPath(project, solidPath, log));

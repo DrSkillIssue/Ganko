@@ -16,10 +16,9 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex, type FileIndex } from "../core/file-index";
@@ -344,7 +343,7 @@ async function handleLintRequest(
       continue;
     }
 
-    const version = `hash:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
+    const version = contentHash(content);
     const needsRebuild = !cache.hasSolidGraph(key, version);
 
     if (needsRebuild) {
@@ -360,18 +359,19 @@ async function handleLintRequest(
         allDiagnostics.push(result);
       }
     } else {
-      // File unchanged — re-run single-file rules from cached graph.
-      const cachedGraph = cache.getCachedSolidGraph(key, version);
-      if (cachedGraph === null) {
+      // File unchanged — re-run rules on cached graph, no re-parse needed.
+      // The cached graph contains all resolved type information from
+      // buildSolidGraph. Rules read entity data, not the TypeChecker.
+      const graph = cache.getCachedSolidGraph(key, version);
+      if (graph === null) {
         log.warning(`getCachedSolidGraph miss after hasSolidGraph hit for ${key} v=${version}`);
+        continue;
       }
-      const input = createSolidInput(key, program, log);
-      const graphToUse = cachedGraph ?? buildSolidGraph(input);
-      if (cachedGraph === null) {
-        cache.setSolidGraph(key, version, graphToUse);
-      }
+      const sourceFile = program.getSourceFile(key);
+      if (!sourceFile) continue;
+
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(graphToUse, input.sourceFile, emit);
+      runSolidRules(graph, sourceFile, emit);
       for (let j = 0, dLen = results.length; j < dLen; j++) {
         const result = results[j];
         if (!result) continue;
