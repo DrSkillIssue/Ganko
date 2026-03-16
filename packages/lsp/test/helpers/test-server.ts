@@ -41,11 +41,22 @@ export interface PrepareRenameResult {
   placeholder: string
 }
 
-/** Cached parse result for a file */
-interface CachedFile {
+/** Analyzed result for a file. */
+interface AnalyzedFile {
   readonly content: string
   readonly sourceFile: ts.SourceFile | null
   readonly diagnostics: readonly Diagnostic[]
+}
+
+/**
+ * Cached file entry. Stores content immediately but defers ts.Program
+ * creation and analysis until first diagnostic/AST access. Tests that
+ * only exercise file lifecycle (add/remove/clear) skip analysis entirely.
+ */
+interface CachedFile {
+  readonly content: string
+  analyzed: AnalyzedFile | null
+  readonly path: string
 }
 
 const CONTROL_FLOW = ["Show", "For", "Switch", "Match", "Index", "ErrorBoundary", "Suspense", "Portal"];
@@ -83,21 +94,31 @@ export class TestServer {
       getLanguageService: () => null,
       getSourceFile: () => null,
       getTSFileInfo: () => null,
-      getAST: (path) => this.files.get(path)?.sourceFile ?? null,
-      getDiagnostics: (path) => this.files.get(path)?.diagnostics ?? [],
+      getAST: (path) => this.ensureAnalyzed(path)?.sourceFile ?? null,
+      getDiagnostics: (path) => this.ensureAnalyzed(path)?.diagnostics ?? [],
       getContent: (path) => this.files.get(path)?.content ?? null,
       getSolidGraph: () => null,
     };
   }
 
+  /** Lazily analyze a file on first diagnostic/AST access. */
+  private ensureAnalyzed(path: string): AnalyzedFile | null {
+    const cached = this.files.get(path);
+    if (!cached) return null;
+    if (cached.analyzed === null) {
+      cached.analyzed = analyzeCachedFile(cached.path, cached.content);
+    }
+    return cached.analyzed;
+  }
+
   /** Add a file to the project. */
   addFile(filePath: string, content: string): void {
-    this.files.set(this.normalizePath(filePath), buildCachedFile(filePath, content));
+    this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
   }
 
   /** Update an existing file. */
   updateFile(filePath: string, content: string): void {
-    this.files.set(this.normalizePath(filePath), buildCachedFile(filePath, content));
+    this.files.set(this.normalizePath(filePath), { content, analyzed: null, path: filePath });
   }
 
   /** Remove a file from the project. */
@@ -185,14 +206,14 @@ export class TestServer {
 
   /** Get diagnostics for a file. */
   getDiagnostics(filePath: string): LSPDiagnostic[] {
-    const cached = this.files.get(this.normalizePath(filePath));
-    if (!cached) return [];
-    return convertDiagnostics(cached.diagnostics);
+    const analyzed = this.ensureAnalyzed(this.normalizePath(filePath));
+    if (!analyzed) return [];
+    return convertDiagnostics(analyzed.diagnostics);
   }
 
   /** Get raw internal diagnostics. */
   getRawDiagnostics(filePath: string): readonly Diagnostic[] {
-    return this.files.get(this.normalizePath(filePath))?.diagnostics ?? [];
+    return this.ensureAnalyzed(this.normalizePath(filePath))?.diagnostics ?? [];
   }
 
   /** Clear all files and reset state. */
@@ -248,9 +269,9 @@ const libSourceFileCache = new Map<string, ts.SourceFile | undefined>();
 
 /**
  * Build a ts.Program from virtual file content, run ganko analysis,
- * and return the cached result.
+ * and return the analyzed result. Called lazily on first diagnostic/AST access.
  */
-function buildCachedFile(path: string, content: string): CachedFile {
+function analyzeCachedFile(path: string, content: string): AnalyzedFile {
   try {
     const resolvedPath = resolve(path);
     const fileMap = new Map<string, string>([[resolvedPath, content]]);
