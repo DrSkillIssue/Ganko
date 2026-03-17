@@ -90,7 +90,7 @@ describe("handleConfigurationChange", () => {
 
   it("returns all-false for null payload", () => {
     const state = createServerState();
-    const result = handleConfigurationChange({ settings: {} } as ConfigurationChangePayload, state);
+    const result = handleConfigurationChange({ settings: {} }, state);
     expect(result.rebuildIndex).toBe(false);
     expect(result.reloadEslint).toBe(false);
     expect(result.rediagnose).toBe(false);

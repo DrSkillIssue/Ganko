@@ -26,7 +26,7 @@ function collectExpectedSelectorIdsByElement(
 
       const matcher = compileSelectorMatcher(selector);
       if (matcher === null) continue;
-      if (!selectorMatchesLayoutElement(matcher, element, perf)) continue;
+      if (selectorMatchesLayoutElement(matcher, element, perf) === "no-match") continue;
 
       const ids = out.get(element.key);
       if (ids) {

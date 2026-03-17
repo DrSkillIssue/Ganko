@@ -1400,6 +1400,87 @@ describe("CLS rule suite", () => {
     expect(diagnostics).toHaveLength(0)
   })
 
+  it("does not flag dynamic width when parent has contain:layout inline style", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { pct: number }) {
+          return (
+            <div style={{ contain: "layout" }}>
+              <div style={{ width: \`\${props.pct}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic width when element itself has contain:layout", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { pct: number }) {
+          return <div style={{ contain: "layout", width: \`\${props.pct}%\` }}>x</div>
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic height when parent has contain:strict", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { h: number }) {
+          return (
+            <div style={{ contain: "strict" }}>
+              <div style={{ height: \`\${props.h}px\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic width when parent has contain:content", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { w: number }) {
+          return (
+            <div style={{ contain: "content" }}>
+              <div style={{ width: \`\${props.w}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("still flags dynamic width when contain is paint-only (no layout containment)", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { w: number }) {
+          return (
+            <div style={{ contain: "paint" }}>
+              <div style={{ width: \`\${props.w}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(1)
+  })
+
   it("still flags dynamic style on in-flow elements", () => {
     const diagnostics = runRule(
       "jsx-layout-unstable-style-toggle",

@@ -52,6 +52,7 @@ export const layoutSignalNames = [
   "inset-block-end",
   "writing-mode",
   "direction",
+  "contain",
 ] as const
 
 export type LayoutSignalName = (typeof layoutSignalNames)[number]

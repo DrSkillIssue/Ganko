@@ -1176,4 +1176,169 @@ describe("css-layout-sibling-alignment-outlier", () => {
     // position: relative keeps the element in flow, so it should be flagged
     expect(diagnostics.length).toBeGreaterThan(0);
   });
+
+  describe("flex container exemptions", () => {
+    it("does not flag children when parent has display:flex align-items:center via CSS class", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div class="wrapper">
+                <input type="text" />
+                <button>copy</button>
+              </div>
+            );
+          }
+        `,
+        `.wrapper { display: flex; align-items: center; gap: 8px; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children in column flex container with align-items:flex-start", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function Form() {
+            return (
+              <div class="field">
+                <label>Name</label>
+                <input type="text" />
+                <span>Required</span>
+              </div>
+            );
+          }
+        `,
+        `.field { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via data-attribute selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-slot="wrapper">
+                <input type="text" />
+                <button>copy</button>
+              </div>
+            );
+          }
+        `,
+        `[data-slot="wrapper"] { display: flex; align-items: center; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via nested selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-component="text-field">
+                <div data-slot="wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"] {
+            [data-slot="wrapper"] {
+              display: flex;
+              align-items: center;
+            }
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via compound selector with dynamic attribute value", () => {
+      // data-variant is a dynamic prop — its value is null at analysis time.
+      // The CSS selector [data-component="text-field"][data-variant="normal"]
+      // must still potentially match so that display:flex is applied.
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField(props: { variant: string }) {
+            return (
+              <div data-component="text-field" data-variant={props.variant}>
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Description text</span>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via compound attribute+descendant selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-component="text-field" data-variant="normal">
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Helper text</span>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+  });
 });

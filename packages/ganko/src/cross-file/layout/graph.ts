@@ -52,6 +52,8 @@ export interface LayoutMatchEdge {
   readonly selectorId: number
   readonly specificityScore: number
   readonly sourceOrder: number
+  /** Whether the selector match is conditional due to dynamic attribute values. */
+  readonly conditionalMatch: boolean
 }
 
 export interface LayoutElementRef {
