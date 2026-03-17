@@ -12,8 +12,15 @@ interface CssFixture {
   readonly content: string;
 }
 
+const tsxCache = new Map<string, ReturnType<typeof parseCode>>();
+let fileCounter = 0;
+
 function runRule(tsx: string, css: string | readonly CssFixture[]): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  let solid = tsxCache.get(tsx);
+  if (!solid) {
+    solid = parseCode(tsx, `/project/align_${fileCounter++}.tsx`);
+    tsxCache.set(tsx, solid);
+  }
   const diagnostics: Diagnostic[] = [];
   const files = typeof css === "string"
     ? [{ path: "/project/layout.css", content: css }]
@@ -38,7 +45,12 @@ interface SolidFixture {
 }
 
 function runRuleMultiFile(solids: readonly SolidFixture[], css: string | readonly CssFixture[]): readonly Diagnostic[] {
-  const parsedSolids = solids.map((f) => parseCode(f.code, f.path));
+  const parsedSolids = solids.map((f) => {
+    const key = f.code + "::" + f.path;
+    let cached = tsxCache.get(key);
+    if (!cached) { cached = parseCode(f.code, f.path); tsxCache.set(key, cached); }
+    return cached;
+  });
   const diagnostics: Diagnostic[] = [];
   const files = typeof css === "string"
     ? [{ path: "/project/layout.css", content: css }]

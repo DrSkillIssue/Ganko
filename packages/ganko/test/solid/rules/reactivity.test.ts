@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { checkRule, lazyRuleBatch, applyAllFixes, at } from "../test-utils"
+import { lazyRuleBatch, applyAllFixes, at } from "../test-utils"
 import { storeReactiveBreak, derivedSignal, effectAsMemo, effectAsMount, cleanupScope, signalCall, signalInLoop, noTopLevelSignalCall, resourceImplicitSuspense } from "../../../src/solid/rules/reactivity"
 
 describe("store-reactive-break", () => {

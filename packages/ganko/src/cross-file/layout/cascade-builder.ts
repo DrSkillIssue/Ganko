@@ -16,11 +16,9 @@ import type { LayoutPerfStatsMutable } from "./perf"
 import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
-import type { LayoutRuleGuard } from "./guard-model"
-import { LayoutSignalGuard } from "./signal-model"
+import type { LayoutRuleGuard, LayoutGuardConditionProvenance } from "./guard-model"
 import type { SelectorBuildMetadata } from "./selector-dispatch"
 import { layoutOffsetSignals, parseOffsetPx } from "./offset-baseline"
-import type { LayoutGuardConditionProvenance } from "./guard-model"
 
 const DYNAMIC_ATTRIBUTE_GUARD: LayoutRuleGuard = {
   kind: LayoutSignalGuard.Conditional,
@@ -161,6 +159,13 @@ export function appendMatchingEdgesFromSelectorIds(
     }
     applies.push(edge)
     ctx.perf.matchEdgesCreated++
+
+    if (ctx.logger.enabled) {
+      ctx.logger.trace(
+        `[cascade] edge node=${node.key} selector=${selector.id} match=${matchResult}`
+        + ` conditional=${edge.conditionalMatch} selector-raw=${selector.raw.slice(0, 80)}`,
+      )
+    }
 
     const existing = appliesByElementNodeMutable.get(node)
     if (existing) {

@@ -71,7 +71,7 @@
     "build": "bun run generate && tsup",
     "dev": "tsup --watch",
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
-    "test": "vitest --run",
+    "test": "NODE_OPTIONS='--max-old-space-size=8192' vitest --run",
     "test:watch": "vitest",
     "lint": "eslint src",
     "tsc": "tsc --noEmit"

@@ -332,6 +332,10 @@ function matchesChain(
 
   // Same-file root element fallback for descendant combinators.
   if (fileRootElements !== null) {
+    if (logger.enabled) {
+      const compoundDesc = describeCompound(targetCompound)
+      logger.trace(`[selector-match] fallback: node=${node.key} tag=${node.tagName} checking ${fileRootElements.length} roots for compound=${compoundDesc}`)
+    }
     for (let r = 0; r < fileRootElements.length; r++) {
       const root = fileRootElements[r]
       if (root === undefined) continue
@@ -339,6 +343,9 @@ function matchesChain(
       if (root.solidFile !== node.solidFile) continue
       perf.ancestryChecks++
       const compoundResult = matchesCompound(root, targetCompound)
+      if (logger.enabled && compoundResult === "no-match") {
+        logger.trace(`[selector-match] fallback MISS: root=${root.key} tag=${root.tagName} attrs=[${[...root.attributes.entries()].map(([k,v]) => `${k}=${v}`).join(",")}]`)
+      }
       if (compoundResult !== "no-match") {
         if (logger.enabled) {
           const compoundDesc = describeCompound(targetCompound)

@@ -48,18 +48,47 @@ function wireJSXHierarchy(graph: SolidGraph): void {
 
 /**
  * Finds the nearest parent JSX element or fragment in the AST.
+ *
+ * Returns null when the element is defined inside a callback prop expression
+ * (e.g. `<Select itemComponent={(p) => <Item />} />`). These elements are
+ * rendered at arbitrary positions in the runtime tree by the component's
+ * internal logic — they are NOT layout children of the outer element.
+ *
+ * The heuristic: if the walk crosses a function boundary (ArrowFunction or
+ * FunctionExpression) and that function is inside a JsxAttribute, the element
+ * is a callback prop and has no static parent. Map/forEach callbacks in JSX
+ * children (`<Parent>{items.map(i => <Child />)}</Parent>`) are NOT affected
+ * because the function boundary is inside a JsxExpression child, not a
+ * JsxAttribute.
+ *
  * @param node - The JSX node
- * @returns The parent JSX node or null
+ * @returns The parent JSX node, or null if the element is a callback prop child
  */
 function findParentJSXNode(node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment): ts.JsxElement | ts.JsxFragment | null {
-  let current: ts.Node | undefined = node.parent;
+  let current: ts.Node | undefined = node.parent
+  let crossedFunctionBoundary = false
+
   while (current) {
     if (ts.isJsxElement(current) || ts.isJsxFragment(current)) {
-      return current;
+      return current
     }
-    current = current.parent;
+
+    // Track function boundaries — ArrowFunction or FunctionExpression.
+    // These create new execution scopes where the JSX element will be
+    // called/rendered by the parent component's internal logic.
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      crossedFunctionBoundary = true
+    }
+
+    // If we crossed a function boundary and reach a JsxAttribute, this
+    // element is inside a callback prop — not a layout child.
+    if (crossedFunctionBoundary && ts.isJsxAttribute(current)) {
+      return null
+    }
+
+    current = current.parent
   }
-  return null;
+  return null
 }
 
 /**

@@ -11,8 +11,11 @@ interface CssFixture {
   readonly content: string;
 }
 
+const _ctxCache = new Map<string, ReturnType<typeof parseCode>>()
+let _ctxFC = 0
+
 function runRule(tsx: string, files: readonly CssFixture[]): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  let solid = _ctxCache.get(tsx); if (!solid) { solid = parseCode(tsx, `/project/ctx_${_ctxFC++}.tsx`); _ctxCache.set(tsx, solid); }
   const diagnostics: Diagnostic[] = [];
 
   analyzeCrossFileInput(

@@ -212,6 +212,63 @@ export function lazyRuleBatch(rule: { check: (graph: SolidGraph, emit: Emit) => 
 }
 
 /**
+ * Batch parseCode — creates ONE ts.Program with all TSX snippets as separate
+ * virtual files, then returns SolidInput per file. Use for cross-file tests
+ * where each test needs a SolidInput but they can share a program.
+ *
+ * Usage:
+ * ```ts
+ * const batch = lazyParseBatch()
+ * const s0 = batch.add(`import "./layout.css"; ...`, "/project/App.tsx")
+ * const s1 = batch.add(`import "./layout.css"; ...`, "/project/Other.tsx")
+ *
+ * it("test", () => {
+ *   // First access triggers batch compilation
+ *   const input = batch.result(s0) // SolidInput
+ *   analyzeCrossFileInput({ solid: input, css: { files } }, emit)
+ * })
+ * ```
+ */
+export function lazyParseBatch(): {
+  add(code: string, filePath?: string): number
+  result(index: number): SolidInput
+} {
+  const entries: { code: string; filePath: string }[] = []
+  let results: SolidInput[] | null = null
+
+  return {
+    add(code: string, filePath?: string): number {
+      if (results !== null) throw new Error("Cannot add snippets after batch has been compiled")
+      const path = filePath ?? `/project/batch_${entries.length}.tsx`
+      entries.push({ code, filePath: path })
+      return entries.length - 1
+    },
+    result(index: number): SolidInput {
+      if (results === null) {
+        const fileMap: Record<string, string> = {}
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i]!
+          const code = entry.code
+          const needsModuleMarker = !code.includes("export ") && !code.includes("import ")
+          fileMap[entry.filePath] = needsModuleMarker ? code + "\nexport {}" : code
+        }
+        const program = createTestProgram(fileMap)
+        results = []
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i]!
+          const resolvedPath = resolve(entry.filePath)
+          results.push(createSolidInput(resolvedPath, program))
+        }
+        lastProgram = null
+      }
+      const r = results[index]
+      if (!r) throw new Error(`No result at index ${index}, batch has ${results.length} results`)
+      return r
+    },
+  }
+}
+
+/**
  * Run ALL rules against code.
  */
 export function checkAll(code: string): RuleTestResult {

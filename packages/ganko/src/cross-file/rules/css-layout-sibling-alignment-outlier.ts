@@ -43,7 +43,18 @@ const MIN_OFFSET_PX_THRESHOLD = 2.0
 const siblingAlignmentDetector: LayoutDetector<AlignmentCase> = {
   id: "sibling-alignment-outlier",
   collect: collectAlignmentCases,
-  evaluate(input) {
+  evaluate(input, context) {
+    if (context.logger.enabled) {
+      const ctx = input.context
+      context.logger.trace(
+        `[sibling-alignment] evaluate subject=${input.subject.elementKey} tag=${input.subject.tag}`
+        + ` parent=${ctx.parentElementKey} parentTag=${ctx.parentTag}`
+        + ` context.kind=${ctx.kind} certainty=${ctx.certainty}`
+        + ` display=${ctx.parentDisplay} alignItems=${ctx.parentAlignItems}`
+        + ` crossAxisIsBlockAxis=${ctx.crossAxisIsBlockAxis} crossAxisCertainty=${ctx.crossAxisIsBlockAxisCertainty}`
+        + ` baseline=${ctx.baselineRelevance}`,
+      )
+    }
     const decision = evaluateAlignmentCase(input)
     if (decision.kind === "reject") {
       return {

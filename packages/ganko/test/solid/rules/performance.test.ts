@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { checkRule, lazyRuleBatch } from "../test-utils"
+import { lazyRuleBatch } from "../test-utils"
 import {
   avoidArgumentsObject,
   avoidChainedArrayMethods,

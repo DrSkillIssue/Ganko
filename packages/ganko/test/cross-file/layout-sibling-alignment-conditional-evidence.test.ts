@@ -3,8 +3,11 @@ import type { Diagnostic } from "../../src/diagnostic";
 import { analyzeCrossFileInput, getLatestLayoutPerfStatsForTest } from "../../src/cross-file";
 import { parseCode } from "../solid/test-utils";
 
+const _ceCache = new Map<string, ReturnType<typeof parseCode>>()
+let _ceFC = 0
+
 function runRule(tsx: string, css: string): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  let solid = _ceCache.get(tsx); if (!solid) { solid = parseCode(tsx, `/project/ce_${_ceFC++}.tsx`); _ceCache.set(tsx, solid); }
   const diagnostics: Diagnostic[] = [];
 
   analyzeCrossFileInput(
