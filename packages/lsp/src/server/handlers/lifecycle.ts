@@ -393,6 +393,7 @@ export function handleConfigurationChange(
   state.eslintConfigPath = settings.eslintConfigPath;
   state.exclude = settings.exclude ?? [];
   state.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
+  state.vscodePolicy = settings.accessibilityPolicy;
   setActivePolicy(settings.accessibilityPolicy);
 
   const next = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
