@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import { analyzeCrossFileInput } from "../../src/cross-file";
 import { getLatestLayoutPerfStatsForTest } from "../../src/cross-file";
@@ -13,6 +13,7 @@ interface CssFixture {
 }
 
 const tsxCache = new Map<string, ReturnType<typeof parseCode>>();
+afterAll(() => tsxCache.clear())
 let fileCounter = 0;
 
 function runRule(tsx: string, css: string | readonly CssFixture[]): readonly Diagnostic[] {

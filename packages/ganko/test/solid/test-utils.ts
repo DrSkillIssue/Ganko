@@ -23,6 +23,7 @@ const defaultHost = ts.createCompilerHost(compilerOptions)
  * immutable so parsing them once and reusing across all ts.createProgram
  * invocations is safe and eliminates the dominant cost per call (~100 lib files).
  */
+const MODULE_MARKER_RE = /export |import /
 const LIB_CACHE_MAX = 200
 const libSourceFileCache = new Map<string, ts.SourceFile | undefined>()
 
@@ -40,9 +41,9 @@ let lastProgram: ts.Program | null = null
  * Falls back to the real filesystem for lib files (e.g. lib.d.ts).
  * Uses oldProgram for incremental reuse of lib SourceFiles and checker state.
  */
-export function createTestProgram(files: Record<string, string>): ts.Program {
+export function createTestProgram(files: Map<string, string>): ts.Program {
   const fileMap = new Map<string, string>()
-  for (const [key, value] of Object.entries(files)) {
+  for (const [key, value] of files) {
     fileMap.set(resolve(key), value)
   }
 
@@ -84,7 +85,7 @@ export function createTestProgram(files: Record<string, string>): ts.Program {
  */
 export function parseCode(code: string, filePath = "test.tsx"): SolidInput {
   const resolvedPath = resolve(filePath)
-  const program = createTestProgram({ [filePath]: code })
+  const program = createTestProgram(new Map([[filePath, code]]))
   return createSolidInput(resolvedPath, program)
 }
 
@@ -139,17 +140,19 @@ export function createRuleBatch(
   // Build a single program with all snippets as separate virtual files.
   // Each snippet gets `export {}` appended to force TypeScript module mode,
   // ensuring separate module scopes (no global variable collisions).
-  const fileMap: Record<string, string> = {}
+  const fileMap = new Map<string, string>()
   for (let i = 0; i < snippets.length; i++) {
     const code = snippets[i]!
     // Only add export {} if the snippet doesn't already have an export/import
-    const needsModuleMarker = !code.includes("export ") && !code.includes("import ")
-    fileMap[`batch_${i}.tsx`] = needsModuleMarker ? code + "\nexport {}" : code
+    const needsModuleMarker = !MODULE_MARKER_RE.test(code)
+    fileMap.set(`batch_${i}.tsx`, needsModuleMarker ? code + "\nexport {}" : code)
   }
   const program = createTestProgram(fileMap)
 
   // Build SolidGraph and run rule for each file independently
   const results: RuleTestResult[] = []
+  const collector: { target: Diagnostic[] | null } = { target: null }
+  const collect = (d: Diagnostic) => collector.target!.push(d)
   for (let i = 0; i < snippets.length; i++) {
     const filePath = resolve(`batch_${i}.tsx`)
     const input = createSolidInput(filePath, program)
@@ -157,7 +160,8 @@ export function createRuleBatch(
     const diagnostics: Diagnostic[] = []
     const setup = setupPerSnippet?.[i]
     if (setup) setup()
-    rule.check(graph, (d) => diagnostics.push(d))
+    collector.target = diagnostics
+    rule.check(graph, collect)
     results.push({ diagnostics, graph, code: snippets[i]! })
   }
 

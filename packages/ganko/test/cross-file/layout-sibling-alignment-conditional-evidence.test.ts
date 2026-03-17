@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import { analyzeCrossFileInput, getLatestLayoutPerfStatsForTest } from "../../src/cross-file";
 import { parseCode } from "../solid/test-utils";
 
 const _ceCache = new Map<string, ReturnType<typeof parseCode>>()
+afterAll(() => _ceCache.clear())
 let _ceFC = 0
 
 function runRule(tsx: string, css: string): readonly Diagnostic[] {
