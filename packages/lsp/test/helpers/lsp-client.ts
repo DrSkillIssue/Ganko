@@ -112,7 +112,7 @@ export class LSPClient {
   }
 
   /** Send initialize + initialized, wait for server to be ready. */
-  async initialize(): Promise<void> {
+  async initialize(extraOptions?: Record<string, unknown>): Promise<void> {
     await this.sendRequest("initialize", {
       processId: process.pid,
       rootUri: this.rootUri,
@@ -134,6 +134,7 @@ export class LSPClient {
       initializationOptions: {
         logLevel: "warning",
         useESLintConfig: false,
+        ...extraOptions,
       },
     });
 
