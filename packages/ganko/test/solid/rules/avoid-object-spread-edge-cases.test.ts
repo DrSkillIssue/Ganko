@@ -1,9 +1,3 @@
-/**
- * avoid-object-spread Edge Case Tests
- *
- * Comprehensive tests for option combinations, edge cases, and complex patterns.
- */
-
 import { describe, it, expect, beforeEach } from "vitest"
 import { checkRule, applyAllFixes, at } from "../test-utils"
 import { avoidObjectSpread } from "../../../src/solid/rules/correctness"

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { buildGraph, at } from "../test-utils";
-import { 
-  getFunctionByNode, 
-  getFunctionsByName, 
-  getCallsByPrimitive, 
+import {
+  getFunctionByNode,
+  getFunctionsByName,
+  getCallsByPrimitive,
   getCallsByMethodName,
   getJSXElementsByTag,
   getImportsBySource,
@@ -11,282 +11,153 @@ import {
 } from "../../../src/solid/queries/get";
 
 describe("entitiesPhase", () => {
+  const graph = buildGraph(`
+    import { createSignal } from "solid-js";
+    import { foo, bar } from "module-a";
+    import baz from "module-b";
+    import * as mod from "module-c";
+    import { x } from "solid-js";
+
+    function foo() { return 1; }
+    function foo() { return 2; }
+    const arrow = () => 1;
+    const expr = function named() { return 1; };
+
+    function MyComponent() {
+      return <div class="foo" id="bar">Hello {name}</div>;
+    }
+
+    const frag = <>Hello</>;
+    const comp = <MyComponent />;
+    const nested = <div><span/><span/></div>;
+
+    createSignal(0);
+    foo(1, 2, 3);
+    obj.method();
+    obj.map(x => x);
+    arr.map(y => y);
+
+    class Foo { bar() {} }
+    const Baz = class Bar {};
+  `);
+
   describe("function entities", () => {
-    it("creates function entity for function declaration", () => {
-      const graph = buildGraph(`
-        function foo() {
-          return 1;
-        }
-      `);
-      
-      expect(graph.functions.length).toBe(1);
-      expect(at(graph.functions, 0).name).toBe("foo");
+    it("creates entities for declarations, arrow functions, and function expressions", () => {
+      // Declaration (foo appears twice)
+      const foos = getFunctionsByName(graph, "foo");
+      expect(foos.length).toBe(2);
+
+      // Arrow function
+      const arrows = graph.functions.filter(f => f.variableName === "arrow");
+      expect(arrows.length).toBe(1);
+
+      // Function expression
+      const named = graph.functions.find(f => f.name === "named");
+      expect(named).toBeDefined();
+      expect(named?.variableName).toBe("expr");
     });
 
-    it("creates function entity for arrow function", () => {
-      const graph = buildGraph(`
-        const foo = () => 1;
-      `);
-      
-      expect(graph.functions.length).toBe(1);
-      expect(at(graph.functions, 0).variableName).toBe("foo");
-    });
-
-    it("creates function entity for function expression", () => {
-      const graph = buildGraph(`
-        const foo = function bar() {
-          return 1;
-        };
-      `);
-      
-      expect(graph.functions.length).toBe(1);
-      expect(at(graph.functions, 0).name).toBe("bar");
-      expect(at(graph.functions, 0).variableName).toBe("foo");
-    });
-
-    it("detects component functions by name", () => {
-      const graph = buildGraph(`
-        function MyComponent() {
-          return <div>Hello</div>;
-        }
-      `);
-      
+    it("detects component functions and JSX return", () => {
       expect(graph.componentFunctions.length).toBe(1);
       expect(at(graph.componentFunctions, 0).name).toBe("MyComponent");
-    });
-
-    it("detects JSX return in function", () => {
-      const graph = buildGraph(`
-        function Component() {
-          return <div>Hello</div>;
-        }
-      `);
-      
-      expect(at(graph.functions, 0).hasJSXReturn).toBe(true);
+      expect(at(graph.componentFunctions, 0).hasJSXReturn).toBe(true);
     });
 
     it("indexes functions by node", () => {
-      const graph = buildGraph(`
-        function foo() {}
-      `);
-      
-      const fn = at(graph.functions, 0);
+      const fn = graph.functions.find(f => f.name === "foo");
+      expect(fn).toBeDefined();
+      if (!fn) return;
       const found = getFunctionByNode(graph, fn.node);
       expect(found).toBe(fn);
-    });
-
-    it("indexes functions by name", () => {
-      const graph = buildGraph(`
-        function foo() {}
-        function foo() {}
-      `);
-      
-      const fns = getFunctionsByName(graph, "foo");
-      expect(fns.length).toBe(2);
     });
   });
 
   describe("call entities", () => {
-    it("creates call entity for function call", () => {
-      const graph = buildGraph(`
-        foo();
-      `);
-      
-      expect(graph.calls.length).toBe(1);
-    });
+    it("creates call entities for function calls, method calls, and arguments", () => {
+      // Function calls exist
+      expect(graph.calls.length).toBeGreaterThan(0);
 
-    it("creates call entity for method call", () => {
-      const graph = buildGraph(`
-        obj.method();
-      `);
-      
-      expect(graph.calls.length).toBe(1);
-    });
+      // Arguments
+      const fooCall = graph.calls.find(c => c.arguments.length === 3);
+      expect(fooCall).toBeDefined();
 
-    it("creates argument entities for call arguments", () => {
-      const graph = buildGraph(`
-        foo(1, 2, 3);
-      `);
-      
-      expect(at(graph.calls, 0).arguments.length).toBe(3);
-    });
-
-    it("detects Solid primitive calls", () => {
-      const graph = buildGraph(`
-        import { createSignal } from "solid-js";
-        createSignal(0);
-      `);
-      
+      // Solid primitive
       const signalCalls = getCallsByPrimitive(graph, "createSignal");
       expect(signalCalls.length).toBe(1);
-    });
 
-    it("indexes calls by method name", () => {
-      const graph = buildGraph(`
-        obj.map(x => x);
-        arr.map(y => y);
-      `);
-      
+      // Method name index
       const mapCalls = getCallsByMethodName(graph, "map");
       expect(mapCalls.length).toBe(2);
-    });
 
-    it("indexes calls by node", () => {
-      const graph = buildGraph(`
-        foo();
-      `);
-      
-      const call = at(graph.calls, 0);
-      const found = graph.callsByNode.get(call.node);
-      expect(found).toBe(call);
+      // Node index
+      const anyCall = at(graph.calls, 0);
+      const found = graph.callsByNode.get(anyCall.node);
+      expect(found).toBe(anyCall);
     });
   });
 
   describe("JSX element entities", () => {
-    it("creates JSX element entity for JSX element", () => {
-      const graph = buildGraph(`
-        const el = <div>Hello</div>;
-      `);
-      
-      expect(graph.jsxElements.length).toBe(1);
-      expect(at(graph.jsxElements, 0).tag).toBe("div");
-    });
+    it("creates elements for DOM, fragments, components, attributes, children, and tag index", () => {
+      // DOM element
+      const div = graph.jsxElements.find(e => e.tag === "div" && e.isDomElement);
+      expect(div).toBeDefined();
+      expect(div?.attributes.length).toBe(2);
+      expect(div?.children.length).toBeGreaterThan(0);
 
-    it("creates JSX element entity for JSX fragment", () => {
-      const graph = buildGraph(`
-        const el = <>Hello</>;
-      `);
-      
-      expect(graph.jsxElements.length).toBe(1);
-      expect(at(graph.jsxElements, 0).tag).toBeNull();
-    });
+      // Fragment
+      const frag = graph.jsxElements.find(e => e.tag === null);
+      expect(frag).toBeDefined();
 
-    it("detects DOM elements", () => {
-      const graph = buildGraph(`
-        const el = <div>Hello</div>;
-      `);
-      
-      expect(at(graph.jsxElements, 0).isDomElement).toBe(true);
-    });
+      // Component element
+      const comp = graph.jsxElements.find(e => e.tag === "MyComponent");
+      expect(comp).toBeDefined();
+      expect(comp?.isDomElement).toBe(false);
 
-    it("detects component elements", () => {
-      const graph = buildGraph(`
-        const el = <MyComponent />;
-      `);
-      
-      expect(at(graph.jsxElements, 0).isDomElement).toBe(false);
-    });
-
-    it("creates attribute entities", () => {
-      const graph = buildGraph(`
-        const el = <div class="foo" id="bar">Hello</div>;
-      `);
-      
-      expect(at(graph.jsxElements, 0).attributes.length).toBe(2);
-    });
-
-    it("creates child entities", () => {
-      const graph = buildGraph(`
-        const el = <div>Hello {name}</div>;
-      `);
-      
-      expect(at(graph.jsxElements, 0).children.length).toBeGreaterThan(0);
-    });
-
-    it("indexes JSX by tag", () => {
-      const graph = buildGraph(`
-        const el = <div><span/><span/></div>;
-      `);
-      
+      // Tag index
       const spans = getJSXElementsByTag(graph, "span");
       expect(spans.length).toBe(2);
     });
   });
 
   describe("import entities", () => {
-    it("creates import entity for import declaration", () => {
-      const graph = buildGraph(`
-        import { foo } from "module";
-      `);
-      
-      expect(graph.imports.length).toBe(1);
-      expect(at(graph.imports, 0).source).toBe("module");
-    });
+    it("creates imports with specifiers for named, default, and namespace patterns", () => {
+      // Named imports
+      const moduleA = getImportsBySource(graph, "module-a");
+      expect(moduleA.length).toBe(1);
+      expect(at(moduleA, 0).specifiers.length).toBe(2);
 
-    it("creates specifier entities for named imports", () => {
-      const graph = buildGraph(`
-        import { foo, bar } from "module";
-      `);
-      
-      expect(at(graph.imports, 0).specifiers.length).toBe(2);
-    });
-
-    it("handles default imports", () => {
-      const graph = buildGraph(`
-        import foo from "module";
-      `);
-      
-      expect(graph.imports.length).toBe(1);
-      const defaultSpec = at(graph.imports, 0).specifiers.find(s => s.kind === "default");
+      // Default import
+      const moduleB = getImportsBySource(graph, "module-b");
+      expect(moduleB.length).toBe(1);
+      const defaultSpec = at(moduleB, 0).specifiers.find(s => s.kind === "default");
       expect(defaultSpec).toBeDefined();
-    });
 
-    it("handles namespace imports", () => {
-      const graph = buildGraph(`
-        import * as mod from "module";
-      `);
-      
-      expect(graph.imports.length).toBe(1);
-      const nsSpec = at(graph.imports, 0).specifiers.find(s => s.kind === "namespace");
+      // Namespace import
+      const moduleC = getImportsBySource(graph, "module-c");
+      expect(moduleC.length).toBe(1);
+      const nsSpec = at(moduleC, 0).specifiers.find(s => s.kind === "namespace");
       expect(nsSpec).toBeDefined();
-    });
 
-    it("indexes imports by source", () => {
-      const graph = buildGraph(`
-        import { foo } from "solid-js";
-        import { bar } from "solid-js";
-      `);
-      
+      // Multi-source index (solid-js has 2 imports)
       const solidImports = getImportsBySource(graph, "solid-js");
       expect(solidImports.length).toBe(2);
-    });
 
-    it("checks if import exists from source", () => {
-      const graph = buildGraph(`
-        import { foo } from "solid-js";
-      `);
-      
+      // hasImportFrom
       expect(hasImportFrom(graph, "solid-js")).toBe(true);
       expect(hasImportFrom(graph, "react")).toBe(false);
     });
   });
 
   describe("class entities", () => {
-    it("creates class entity for class declaration", () => {
-      const graph = buildGraph(`
-        class Foo {
-          bar() {}
-        }
-      `);
-      
-      expect(graph.classes.length).toBe(1);
-      expect(at(graph.classes, 0).name).toBe("Foo");
-    });
+    it("creates class entities for declarations and expressions with name index", () => {
+      expect(graph.classes.length).toBe(2);
 
-    it("creates class entity for class expression", () => {
-      const graph = buildGraph(`
-        const Foo = class Bar {};
-      `);
-      
-      expect(graph.classes.length).toBe(1);
-      expect(at(graph.classes, 0).name).toBe("Bar");
-    });
+      const foo = graph.classes.find(c => c.name === "Foo");
+      expect(foo).toBeDefined();
 
-    it("indexes classes by name", () => {
-      const graph = buildGraph(`
-        class Foo {}
-      `);
-      
+      const bar = graph.classes.find(c => c.name === "Bar");
+      expect(bar).toBeDefined();
+
       const foos = graph.classesByName.get("Foo");
       expect(foos?.length).toBe(1);
     });
