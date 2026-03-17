@@ -227,11 +227,22 @@ export async function handleInitialized(
   await enrichWorkspace(rootPath, state, context);
   context.workspaceReady = true;
 
+  /* Invalidate any cross-file results that may have been cached during the
+     enrichment window. Even though fileIndex is set atomically after tailwind
+     resolves, belt-and-suspenders: force the re-diagnosis loop to rebuild
+     cross-file results with the fully-enriched context. */
+  context.graphCache.invalidateAll();
+
   if (log.enabled) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 
-  /* Re-diagnose with cross-file results. */
-  for (let i = 0, len = openPaths.length; i < len; i++) {
-    const p = openPaths[i];
+  /* Re-diagnose ALL currently open files with cross-file results.
+     Recapture open paths — files may have been opened during Phase B→C
+     (5-10s of async work). Using the stale Phase B snapshot would miss
+     any file opened after line 218, leaving it with single-file-only
+     diagnostics permanently. */
+  const currentOpenPaths = getOpenDocumentPaths(context.documentState);
+  for (let i = 0, len = currentOpenPaths.length; i < len; i++) {
+    const p = currentOpenPaths[i];
     if (!p) continue;
     publishFileDiagnostics(context, project, p);
   }
@@ -251,17 +262,21 @@ async function enrichWorkspace(
 ): Promise<void> {
   const { log } = context;
 
-  /* File index — uses ESLint ignores loaded in Phase A. */
+  /* File index — uses ESLint ignores loaded in Phase A.
+     Built first but NOT exposed on context until all enrichment (Tailwind,
+     external props) is complete. Otherwise a didOpen event firing between
+     fileIndex assignment and tailwind resolution runs cross-file analysis
+     with a null tailwind validator, caches the wrong results, and the stale
+     cache persists even after tailwind resolves. */
   const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
-  context.fileIndex = fileIndex;
-  if (log.enabled) log.debug(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
+  if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
   /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
     context.tailwindValidator = await resolveTailwindValidator(cssFiles)
       .catch(() => null);
-    if (log.enabled) log.debug(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
+    if (log.enabled) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
   }
 
   /* Library analysis: scan installed dependencies for CSS custom properties
@@ -272,6 +287,11 @@ async function enrichWorkspace(
     context.externalCustomProperties = externalProps;
     if (log.enabled) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
+
+  /* NOW expose the file index — all enrichment is complete, so any cross-file
+     analysis triggered by concurrent didOpen events will see both the file
+     index AND the resolved tailwind validator atomically. */
+  context.fileIndex = fileIndex;
 }
 
 /**

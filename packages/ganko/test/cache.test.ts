@@ -227,6 +227,31 @@ describe("GraphCache", () => {
       // cache entry is NEVER sent to the editor. The user sees missing diagnostics.
       // This is the bug: the cache is correct but the editor is never notified.
     });
+
+    it("setCachedCrossFileResults clears stale per-file entries for files that no longer have diagnostics", () => {
+      const cache = new GraphCache();
+      const fileA = "/project/A.tsx";
+      const fileB = "/project/B.tsx";
+
+      // Initial: both files have cross-file diagnostics
+      cache.setCachedCrossFileResults([
+        fakeDiag(fileA, 10, "jsx-no-undefined-css-class"),
+        fakeDiag(fileB, 20, "jsx-no-undefined-css-class"),
+      ]);
+      expect(cache.getCachedCrossFileDiagnostics(fileA)).toHaveLength(1);
+      expect(cache.getCachedCrossFileDiagnostics(fileB)).toHaveLength(1);
+
+      // Edit resolves A's issue. New cross-file run only produces diags for B.
+      cache.invalidate(fileA);
+      cache.setCachedCrossFileResults([
+        fakeDiag(fileB, 20, "jsx-no-undefined-css-class"),
+      ]);
+
+      // A must have zero cached diagnostics — the stale entry must be cleared
+      expect(cache.getCachedCrossFileDiagnostics(fileA)).toHaveLength(0);
+      // B retains its diagnostic
+      expect(cache.getCachedCrossFileDiagnostics(fileB)).toHaveLength(1);
+    });
   });
 
   it("rebuilds LayoutGraph when css generation is invalidated", () => {

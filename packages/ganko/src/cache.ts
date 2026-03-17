@@ -358,8 +358,11 @@ export class GraphCache {
       `setCachedCrossFileResults: ${allDiagnostics.length} diags across ${byFile.size} files `
       + `solidGen=${this.solidGeneration} cssGen=${this.cssGeneration}`,
     )
-    /* Also update the per-file cache used during typing (when cross-file
-       analysis is skipped and previous results are reused). */
+    /* Replace the per-file cache used during typing (when cross-file
+       analysis is skipped and previous results are reused). Must clear
+       first — files that previously had cross-file diagnostics but no
+       longer do must not retain stale entries. */
+    this.crossFileDiagnostics.clear()
     for (const [file, diagnostics] of byFile) {
       this.crossFileDiagnostics.set(file, diagnostics)
     }
