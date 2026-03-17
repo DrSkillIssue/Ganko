@@ -38,6 +38,7 @@ Daemon Commands:
 
 Server Options:
   --log-file <path>        Write server logs to file (for debugging)
+  --enable-ts              Push TypeScript diagnostics alongside ganko diagnostics
 
 The daemon keeps the TypeScript project service warm between lint runs,
 eliminating the startup cost on repeated invocations.

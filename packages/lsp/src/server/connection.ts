@@ -398,6 +398,8 @@ function createGuardedHandler<P, R>(
 interface CreateServerOptions {
   /** Path to a log file for debugging. Writes to both LSP connection and file when set. */
   readonly logFile?: string | undefined
+  /** Enable TypeScript diagnostics from CLI flag (overrides client initializationOptions). */
+  readonly enableTsDiagnostics?: boolean | undefined
 }
 
 /**
@@ -438,11 +440,14 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
 
+  const serverState = createServerState();
+  if (options?.enableTsDiagnostics) serverState.enableTsDiagnostics = true;
+
   const context: ServerContext = {
     connection,
     documents,
     log,
-    serverState: createServerState(),
+    serverState,
     documentState: createDocumentState(),
     handlerCtx: null,
     project: null,
@@ -1289,12 +1294,15 @@ export function propagateTsDiagnostics(
 export function main(): void {
   const args = process.argv.slice(2);
   let logFile: string | undefined;
+  let enableTsDiagnostics = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--log-file" && args[i + 1] !== undefined) {
       logFile = args[i + 1];
-      break;
+      i++;
+    } else if (args[i] === "--enable-ts") {
+      enableTsDiagnostics = true;
     }
   }
-  const context = createServer({ logFile });
+  const context = createServer({ logFile, enableTsDiagnostics });
   startServer(context);
 }
