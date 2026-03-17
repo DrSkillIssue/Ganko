@@ -337,7 +337,7 @@ context.tsPropagationCancel = null;
 
 **Edge case: `.json` files with `resolveJsonModule`.** `classifyFile` returns `"unknown"`. Not diagnosed. ✓ (JSON files rarely have TS diagnostics.)
 
-**Edge case: `.mts`, `.cts`, `.mjs`, `.cjs`.** Need to check `classifyFile`. If these return `"solid"`, they're diagnosed. If `"unknown"`, they're skipped. Either way, correctness is maintained — at worst, some files miss TS diagnostics.
+**Edge case: `.mts`, `.cts`, `.mjs`, `.cjs`.** `SOLID_EXTENSIONS` includes all 8: `.tsx`, `.jsx`, `.ts`, `.js`, `.mts`, `.cts`, `.mjs`, `.cjs`. All return `"solid"` from `classifyFile`. All are diagnosed. This is correct — these are TypeScript-compatible files that the `LanguageService` can process.
 
 ---
 
@@ -349,7 +349,7 @@ context.tsPropagationCancel = null;
 | 2. VS Code Extension | ✓ Correct | None |
 | 3. ConfigChangeResult | ✓ Correct | All 12 combinations traced |
 | 4. ts-diagnostics.ts | ✓ Correct | Emit filter, equality check, default case all verified |
-| 5. TS Diagnostic Cache | ✓ Correct | `rediagnoseAll` interface signature needs updating (TypeScript compiler catches this) |
+| 5. TS Diagnostic Cache | ✓ Correct | `rediagnoseAll` interface signature needs updating. TypeScript catches it at the CALL SITE (`context.rediagnoseAll(result.rediagnose)` fails against `rediagnoseAll(): void`), not at the implementation site (optional param satisfies no-param interface). Plan Section 5 explicitly adds the interface update. |
 | 6. publishFileDiagnostics | ✓ Correct | All 9 callers traced |
 | 7. publishTier1Diagnostics | ✓ Correct | Variable names match actual code |
 | 8. republishMergedDiagnostics | ✓ Correct | Early return + edge cases verified |

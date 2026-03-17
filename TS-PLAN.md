@@ -682,10 +682,14 @@ This prevents stale TS diagnostics from being merged if the file is re-opened.
 
 **File: `packages/lsp/src/server/handlers/lifecycle.ts`**
 
-In `handleShutdown` (line 292), before disposing the project:
+In `handleShutdown` (line 292), before disposing the project. Must be inside the existing `if (context)` guard at line 325 since `context` is an optional parameter:
 ```typescript
-context?.tsPropagationCancel?.();
-context.tsPropagationCancel = null;
+if (context) {
+  context.tsPropagationCancel?.();
+  context.tsPropagationCancel = null;
+  context.project = null;
+  context.handlerCtx = null;
+}
 ```
 
 Without this, an in-flight Phase 5 async loop continues running after shutdown. The loop captured the `project` parameter by reference — it would call `project.getLanguageService()` on a disposed `LanguageService`, throwing exceptions. Cancelling before disposal ensures the loop exits cleanly on its next `setImmediate` yield.
