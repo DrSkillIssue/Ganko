@@ -254,12 +254,12 @@ export function lazyParseBatch(): {
     },
     result(index: number): SolidInput {
       if (results === null) {
-        const fileMap: Record<string, string> = {}
+        const fileMap = new Map<string, string>()
         for (let i = 0; i < entries.length; i++) {
           const entry = entries[i]!
           const code = entry.code
-          const needsModuleMarker = !code.includes("export ") && !code.includes("import ")
-          fileMap[entry.filePath] = needsModuleMarker ? code + "\nexport {}" : code
+          const needsModuleMarker = !MODULE_MARKER_RE.test(code)
+          fileMap.set(entry.filePath, needsModuleMarker ? code + "\nexport {}" : code)
         }
         const program = createTestProgram(fileMap)
         results = []
