@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { lazyRuleBatch, checkRule, applyAllFixes, at } from "../test-utils"
+import { lazyRuleBatch, applyAllFixes, at } from "../test-utils"
 import { noBannerComments, avoidObjectAssign, noInlineImports, stringConcatInLoop, noAiSlopComments } from "../../../src/solid/rules/correctness"
 
 describe("no-banner-comments", () => {
@@ -142,25 +142,31 @@ describe("no-inline-imports", () => {
 })
 
 describe("no-ai-slop-comments", () => {
-  // This rule uses per-test mutable options, so it can't use lazyRuleBatch
-  // (all snippets in a batch share the same rule options).
-  const check = (code: string, words: string[] = []) => {
-    noAiSlopComments.options["words"] = words
-    return checkRule(noAiSlopComments, code)
-  }
+  const batch = lazyRuleBatch(noAiSlopComments)
+  const words = (w: string[]) => () => { noAiSlopComments.options["words"] = w }
+
+  const s0 = batch.add("// optimize this code", words([]))
+  const s1 = batch.add("// This is a normal comment", words(["forbidden"]))
+  const s2 = batch.add("// This is optimized", words(["optimized"]))
+  const s3 = batch.add("// OPTIMIZE this", words(["optimize"]))
+  const s4 = batch.add("// Optimize this", words(["optimize"]))
+  const s5 = batch.add("// optimize for efficiency", words(["optimize", "efficiency"]))
+  const s6 = batch.add("/* This is an optimized\n    implementation */", words(["optimized"]))
+  const s7 = batch.add("// optimize this", words(["optimize"]))
+  const s8 = batch.add(`// optimize here\nconst x = 1;\n// efficient code`, words(["optimize", "efficient"]))
 
   it("ignores comments without configured forbidden words", () => {
-    expect(check("// optimize this code").diagnostics).toHaveLength(0)
-    expect(check("// This is a normal comment", ["forbidden"]).diagnostics).toHaveLength(0)
+    expect(batch.result(s0).diagnostics).toHaveLength(0)
+    expect(batch.result(s1).diagnostics).toHaveLength(0)
   })
 
-  it("flags forbidden words case-insensitively and fixes", () => {
-    expect(check("// This is optimized", ["optimized"]).diagnostics).toHaveLength(1)
-    expect(check("// OPTIMIZE this", ["optimize"]).diagnostics).toHaveLength(1)
-    expect(check("// Optimize this", ["optimize"]).diagnostics).toHaveLength(1)
-    expect(check("// optimize for efficiency", ["optimize", "efficiency"]).diagnostics).toHaveLength(2)
-    expect(check("/* This is an optimized\n    implementation */", ["optimized"]).diagnostics).toHaveLength(1)
-    expect(applyAllFixes("// optimize this", check("// optimize this", ["optimize"]).diagnostics)).toBe("")
-    expect(check(`// optimize here\nconst x = 1;\n// efficient code`, ["optimize", "efficient"]).diagnostics).toHaveLength(2)
+  it("flags forbidden words case-insensitively and provides fixes", () => {
+    expect(batch.result(s2).diagnostics).toHaveLength(1)
+    expect(batch.result(s3).diagnostics).toHaveLength(1)
+    expect(batch.result(s4).diagnostics).toHaveLength(1)
+    expect(batch.result(s5).diagnostics).toHaveLength(2)
+    expect(batch.result(s6).diagnostics).toHaveLength(1)
+    expect(applyAllFixes("// optimize this", batch.result(s7).diagnostics)).toBe("")
+    expect(batch.result(s8).diagnostics).toHaveLength(2)
   })
 })

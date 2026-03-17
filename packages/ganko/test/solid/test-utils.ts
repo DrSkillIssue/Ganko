@@ -132,6 +132,7 @@ export function checkRule(rule: { check: (graph: SolidGraph, emit: Emit) => void
 export function createRuleBatch(
   rule: { check: (graph: SolidGraph, emit: Emit) => void },
   snippets: readonly string[],
+  setupPerSnippet?: readonly ((() => void) | null)[],
 ): readonly RuleTestResult[] {
   if (snippets.length === 0) return []
 
@@ -154,6 +155,8 @@ export function createRuleBatch(
     const input = createSolidInput(filePath, program)
     const graph = buildSolidGraph(input)
     const diagnostics: Diagnostic[] = []
+    const setup = setupPerSnippet?.[i]
+    if (setup) setup()
     rule.check(graph, (d) => diagnostics.push(d))
     results.push({ diagnostics, graph, code: snippets[i]! })
   }
@@ -188,21 +191,23 @@ export function createRuleBatch(
  * ```
  */
 export function lazyRuleBatch(rule: { check: (graph: SolidGraph, emit: Emit) => void }): {
-  add(code: string): number
+  add(code: string, setup?: () => void): number
   result(index: number): RuleTestResult
 } {
   const snippets: string[] = []
+  const setups: ((() => void) | null)[] = []
   let results: readonly RuleTestResult[] | null = null
 
   return {
-    add(code: string): number {
+    add(code: string, setup?: () => void): number {
       if (results !== null) throw new Error("Cannot add snippets after batch has been compiled")
       snippets.push(code)
+      setups.push(setup ?? null)
       return snippets.length - 1
     },
     result(index: number): RuleTestResult {
       if (results === null) {
-        results = createRuleBatch(rule, snippets)
+        results = createRuleBatch(rule, snippets, setups)
       }
       const r = results[index]
       if (!r) throw new Error(`No result at index ${index}, batch has ${results.length} results`)
