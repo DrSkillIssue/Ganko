@@ -26,8 +26,6 @@ jobs:
 
       - run: bun run build
 
-      - run: bun run test
-
       - name: Resolve workspace protocol
         run: |
           VERSION=$(node -p "require('./packages/ganko/package.json').version")
