@@ -63,6 +63,10 @@ interface LintOptions {
   readonly accessibilityPolicy: AccessibilityPolicy | undefined
 }
 
+const ACCESSIBILITY_POLICY_MAP = new Map<string, AccessibilityPolicy>(
+  ACCESSIBILITY_POLICIES.map((p): [string, AccessibilityPolicy] => [p, p]),
+);
+
 /**
  * Parse lint command arguments.
  *
@@ -191,7 +195,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       if (next === undefined) {
         die(`--accessibility-policy requires a policy name. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
       }
-      const found = ACCESSIBILITY_POLICIES.find(p => p === next);
+      const found = ACCESSIBILITY_POLICY_MAP.get(next);
       if (found === undefined) {
         die(`Unknown accessibility policy: ${next}. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
       }
@@ -287,7 +291,6 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
   return result;
 }
 
-/** Markers that identify a project root (nearest-first, like TypeScript). */
 const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
 
 /**
@@ -305,7 +308,7 @@ const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
  */
 function findProjectRoot(from: string): string {
   let dir = from;
-  for (;;) {
+  for (; ;) {
     for (let i = 0, len = PROJECT_MARKERS.length; i < len; i++) {
       const marker = PROJECT_MARKERS[i];
       if (!marker) continue;
@@ -368,11 +371,10 @@ async function tryDaemonLint(
       noEslintConfig: options.noEslintConfig,
       logLevel: options.logLevel,
     };
-    const params: LintRequestParams = {
-      ...base,
-      ...(options.eslintConfig !== undefined ? { eslintConfigPath: options.eslintConfig } : {}),
-      ...(options.accessibilityPolicy !== undefined ? { accessibilityPolicy: options.accessibilityPolicy } : {}),
-    };
+    const extra: { eslintConfigPath?: string; accessibilityPolicy?: AccessibilityPolicy } = {};
+    if (options.eslintConfig !== undefined) extra.eslintConfigPath = options.eslintConfig;
+    if (options.accessibilityPolicy !== undefined) extra.accessibilityPolicy = options.accessibilityPolicy;
+    const params: LintRequestParams = { ...base, ...extra };
 
     const response = await requestLint(socket, params);
     if (response.kind === "lint-response") {
