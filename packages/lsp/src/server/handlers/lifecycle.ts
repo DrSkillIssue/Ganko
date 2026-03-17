@@ -21,7 +21,7 @@ import { createFileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
-import { publishFileDiagnostics } from "../connection";
+import { publishFileDiagnostics, propagateTsDiagnostics } from "../connection";
 import { type DocumentState, getOpenDocumentPaths } from "./document";
 import type { Logger } from "../../core/logger";
 
@@ -56,6 +56,8 @@ export interface ServerState {
   exclude: readonly string[]
   /** Global ignore patterns extracted from ESLint config file */
   eslintIgnores: readonly string[]
+  /** Whether TypeScript diagnostics are enabled */
+  enableTsDiagnostics: boolean
 }
 
 /**
@@ -78,6 +80,7 @@ export function createServerState(): ServerState {
     eslintConfigPath: undefined,
     exclude: [],
     eslintIgnores: [],
+    enableTsDiagnostics: false,
   };
 }
 
@@ -121,6 +124,7 @@ export function handleInitialize(
   state.useESLintConfig = options?.useESLintConfig ?? true;
   state.eslintConfigPath = options?.eslintConfigPath;
   state.exclude = options?.exclude ?? [];
+  state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? false;
 
   if (options?.accessibilityPolicy) {
     setActivePolicy(options.accessibilityPolicy);
@@ -246,6 +250,8 @@ export async function handleInitialized(
     if (!p) continue;
     publishFileDiagnostics(context, project, p);
   }
+
+  propagateTsDiagnostics(context, project, new Set());
 }
 
 /**
@@ -323,6 +329,8 @@ export function handleShutdown(
      (setTimeout that fired before clearTimeout ran) finds a null project
      and exits harmlessly. */
   if (context) {
+    context.tsPropagationCancel?.();
+    context.tsPropagationCancel = null;
     context.project = null;
     context.handlerCtx = null;
   }
@@ -352,38 +360,47 @@ export function handleExit(state: ServerState): number {
  * @returns Whether rule overrides changed
  */
 /**
- * Result of handleConfigurationChange indicating what action the caller
- * should take. `"none"` means nothing changed. `"rediagnose"` means
- * overrides changed synchronously. `"reload-eslint"` means the ESLint
- * config setting changed and must be re-read asynchronously before
- * re-diagnosing.
+ * Structured result from handleConfigurationChange. Each flag is independent —
+ * multiple actions can be required by a single settings update. The caller
+ * evaluates all flags without early returns.
  */
-export type ConfigChangeResult = "none" | "rediagnose" | "reload-eslint" | "rebuild-index";
+export interface ConfigChangeResult {
+  readonly rebuildIndex: boolean
+  readonly reloadEslint: boolean
+  readonly rediagnose: boolean
+}
+
+const NO_CHANGE: ConfigChangeResult = { rebuildIndex: false, reloadEslint: false, rediagnose: false };
 
 export function handleConfigurationChange(
   payload: ConfigurationChangePayload,
   state: ServerState,
 ): ConfigChangeResult {
   const settings = payload?.settings?.solid;
-  if (!settings) return "none";
+  if (!settings) return NO_CHANGE;
 
   const eslintSettingChanged =
     settings.useESLintConfig !== state.useESLintConfig ||
     settings.eslintConfigPath !== state.eslintConfigPath;
 
   const excludeChanged = !arraysEqual(settings.exclude ?? [], state.exclude);
+  const tsDiagsChanged = (settings.enableTypeScriptDiagnostics ?? false) !== state.enableTsDiagnostics;
 
   state.vscodeOverrides = settings.rules;
   state.useESLintConfig = settings.useESLintConfig;
   state.eslintConfigPath = settings.eslintConfigPath;
   state.exclude = settings.exclude ?? [];
+  state.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
   setActivePolicy(settings.accessibilityPolicy);
 
-  if (excludeChanged) return "rebuild-index";
-  if (eslintSettingChanged) return "reload-eslint";
-
   const next = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
-  return applyOverridesIfChanged(state, next) ? "rediagnose" : "none";
+  const overridesChanged = applyOverridesIfChanged(state, next);
+
+  return {
+    rebuildIndex: excludeChanged,
+    reloadEslint: eslintSettingChanged,
+    rediagnose: overridesChanged || tsDiagsChanged,
+  };
 }
 
 /**

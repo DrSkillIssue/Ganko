@@ -67,6 +67,11 @@
           "default": [],
           "description": "Glob patterns to exclude from analysis (e.g. [\"backend/**\", \"scripts/**\"]). Matched relative to workspace root."
         },
+        "solid.enableTypeScriptDiagnostics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Push TypeScript diagnostics alongside ganko diagnostics. Disable VS Code's built-in TypeScript extension to avoid duplicates."
+        },
         "solid.logLevel": {
           "type": "string",
           "enum": [

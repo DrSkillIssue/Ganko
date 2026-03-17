@@ -40,6 +40,7 @@ export function getInitializationOptions(): ServerSettings {
     useESLintConfig: config.get<boolean>("eslintConfig.enable", true) ?? true,
     accessibilityPolicy: config.get<AccessibilityPolicy>("accessibilityPolicy", "wcag-aa") ?? "wcag-aa",
     exclude: config.get<string[]>("exclude", []) ?? [],
+    enableTypeScriptDiagnostics: config.get<boolean>("enableTypeScriptDiagnostics", false) ?? false,
   };
   const eslintConfigPath = config.get<string>("eslintConfig.path");
   if (eslintConfigPath !== undefined) result.eslintConfigPath = eslintConfigPath;
