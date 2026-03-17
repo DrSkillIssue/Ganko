@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
 import { analyzeCSSInput, buildCSSGraph } from "../../src/css/plugin"
 import { selectorMaxAttributeAndUniversal } from "../../src/css/rules/selector"
+import { setActivePolicy } from "../../src/css/policy"
 
 function first(arr: readonly Diagnostic[]): Diagnostic {
   const item = arr[0]
@@ -892,6 +893,9 @@ describe("CSS rules", () => {
 })
 
 describe("CSS policy rules", () => {
+  beforeAll(() => { setActivePolicy("wcag-aa") })
+  afterAll(() => { setActivePolicy(null) })
+
   describe("css-policy-typography", () => {
     it("reports body font-size below wcag-aa minimum (16px) for paragraph elements", () => {
       const ds = lint(`p { font-size: 12px; }`)

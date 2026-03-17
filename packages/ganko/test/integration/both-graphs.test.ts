@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { SolidPlugin, CSSPlugin } from "../../src";
 import { analyzeCrossFileInput } from "../../src/cross-file";
 import { buildGraph, parseCode, at } from "../solid/test-utils";
@@ -10,6 +10,7 @@ import type { Diagnostic } from "../../src/diagnostic";
 import { createStaticValidator, detectTailwindEntry } from "../../src/css/tailwind";
 import type { TailwindValidator } from "../../src/css/tailwind";
 import { buildLayoutGraph } from "../../src/cross-file";
+import { setActivePolicy } from "../../src/css/policy";
 
 describe("Integration: Both Solid and CSS plugins", () => {
   describe("plugin properties", () => {
@@ -941,6 +942,9 @@ describe("Integration: Both Solid and CSS plugins", () => {
   });
 
   describe("jsx-style-policy", () => {
+    beforeAll(() => { setActivePolicy("wcag-aa") })
+    afterAll(() => { setActivePolicy(null) })
+
     const emptyCss = { files: [{ path: "empty.css", content: "" }] };
 
     it("reports inline font-size below minimum", () => {
