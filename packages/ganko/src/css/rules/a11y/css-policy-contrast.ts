@@ -65,7 +65,8 @@ export const cssPolicyContrast = defineCSSRule({
   options: {},
   check(graph, emit) {
     const policy = getActivePolicy()
-    const name = getActivePolicyName()
+    if (policy === null) return
+    const name = getActivePolicyName() ?? ""
 
     const colorDecls = graph.declarationsByProperty.get("color")
     if (!colorDecls) return

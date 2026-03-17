@@ -86,7 +86,8 @@ export const cssPolicyTypography = defineCSSRule({
   options: {},
   check(graph, emit) {
     const policy = getActivePolicy()
-    const name = getActivePolicyName()
+    if (policy === null) return
+    const name = getActivePolicyName() ?? ""
 
     const fontDecls = graph.declarationsByProperty.get("font-size")
     if (fontDecls) {

@@ -48,7 +48,8 @@ export const jsxStylePolicy = defineCrossRule({
   check(context, emit) {
     const { solids } = context
     const policy = getActivePolicy()
-    const name = getActivePolicyName()
+    if (policy === null) return
+    const name = getActivePolicyName() ?? ""
 
     forEachStylePropertyAcross(solids, (solid, p) => {
       if (!ts.isPropertyAssignment(p)) return

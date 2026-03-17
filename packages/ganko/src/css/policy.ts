@@ -168,19 +168,23 @@ export const POLICIES: Readonly<Record<PolicyName, PolicyThresholds>> = {
   "large-text": LARGE_TEXT,
 }
 
-/** Active policy name. Defaults to wcag-aa. */
-let activePolicyName: PolicyName = "wcag-aa"
+/** Active policy name. Null when no policy is set. */
+let activePolicyName: PolicyName | null = null
 
-/** Set the active policy for all policy rules. */
-export function setActivePolicy(name: string): void {
+/** Set the active policy for all policy rules. Pass null to disable. */
+export function setActivePolicy(name: string | null): void {
+  if (name === null) {
+    activePolicyName = null
+    return
+  }
   const match = ACCESSIBILITY_POLICIES.find(n => n === name)
   if (match) {
     activePolicyName = match
   }
 }
 
-/** Get the active policy name. */
-export function getActivePolicyName(): PolicyName {
+/** Get the active policy name. Null when no policy is set. */
+export function getActivePolicyName(): PolicyName | null {
   return activePolicyName
 }
 
@@ -191,7 +195,8 @@ export function resolvePolicy(name: string): PolicyThresholds {
   return WCAG_AA
 }
 
-/** Get the active policy thresholds. */
-export function getActivePolicy(): PolicyThresholds {
+/** Get the active policy thresholds. Null when no policy is set. */
+export function getActivePolicy(): PolicyThresholds | null {
+  if (activePolicyName === null) return null
   return POLICIES[activePolicyName]
 }

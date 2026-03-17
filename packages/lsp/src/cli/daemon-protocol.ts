@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { resolve, isAbsolute } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Socket } from "node:net";
-import { LOG_LEVELS } from "@drskillissue/ganko-shared";
+import { LOG_LEVELS, ACCESSIBILITY_POLICIES } from "@drskillissue/ganko-shared";
 
 /** Default idle timeout before the daemon shuts itself down (5 minutes). */
 export const DAEMON_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -127,6 +127,7 @@ export function daemonLogPath(projectRoot: string): string {
 }
 
 const LogLevelSchema = z.enum(LOG_LEVELS);
+const AccessibilityPolicySchema = z.enum(ACCESSIBILITY_POLICIES);
 
 const AbsolutePathSchema = z.string().check(
   z.refine((val) => isAbsolute(val), { message: "path must be absolute" }),
@@ -140,6 +141,7 @@ const LintRequestParamsSchema = z.object({
   eslintConfigPath: z.string().exactOptional(),
   noEslintConfig: z.boolean(),
   logLevel: LogLevelSchema,
+  accessibilityPolicy: AccessibilityPolicySchema.exactOptional(),
 }).readonly();
 
 export type LintRequestParams = z.infer<typeof LintRequestParamsSchema>;

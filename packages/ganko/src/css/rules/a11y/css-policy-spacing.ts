@@ -35,7 +35,8 @@ export const cssPolicySpacing = defineCSSRule({
   options: {},
   check(graph, emit) {
     const policy = getActivePolicy()
-    const name = getActivePolicyName()
+    if (policy === null) return
+    const name = getActivePolicyName() ?? ""
 
     const letterDecls = graph.declarationsByProperty.get("letter-spacing")
     if (letterDecls) {

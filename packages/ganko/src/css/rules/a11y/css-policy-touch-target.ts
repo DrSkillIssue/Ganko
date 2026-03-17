@@ -42,7 +42,8 @@ export const cssPolicyTouchTarget = defineCSSRule({
   options: {},
   check(graph, emit) {
     const policy = getActivePolicy()
-    const name = getActivePolicyName()
+    if (policy === null) return
+    const name = getActivePolicyName() ?? ""
 
     const decls = graph.declarationsForProperties(
       "height", "min-height", "width", "min-width",
