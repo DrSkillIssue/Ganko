@@ -357,6 +357,11 @@ readonly tsDiagCache: Map<string, readonly LSPDiagnostic[]>
 tsPropagationCancel: (() => void) | null
 ```
 
+Update `rediagnoseAll` signature in the same interface (line 351):
+```typescript
+rediagnoseAll(clearTsCache?: boolean): void
+```
+
 In `createServer` (line 403), initialize alongside `diagCache`:
 ```typescript
 const tsDiagCache = new Map<string, readonly LSPDiagnostic[]>();
