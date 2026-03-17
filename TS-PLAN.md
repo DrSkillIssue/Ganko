@@ -47,7 +47,7 @@ LSP's `textDocument/publishDiagnostics` replaces ALL diagnostics for a URI with 
 Three functions in `connection.ts` call `sendDiagnostics`:
 - `publishFileDiagnostics` (line 1139) — Tier 2/3 main path
 - `publishTier1Diagnostics` (line 1076) — Tier 1 startup path
-- `republishMergedDiagnostics` (line 1175) — cross-file cache refresh path
+- `republishMergedDiagnostics` (line 1178) — cross-file cache refresh path
 
 All three must merge TS diagnostics into their output.
 
@@ -191,10 +191,10 @@ if (result.reloadEslint) {
   if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
 }
 
-if (needRediagnose) context.rediagnoseAll();
+if (needRediagnose) context.rediagnoseAll(result.rediagnose);
 ```
 
-This eliminates the class of bugs where independent configuration changes interfere through the early-return cascade. Every field is always updated. Every action is always evaluated. The caller tracks whether actual rediagnosis is needed — an ESLint reload that finds no changes does not trigger a wasteful `rediagnoseAll`.
+This eliminates the class of bugs where independent configuration changes interfere through the early-return cascade. Every field is always updated. Every action is always evaluated. The caller tracks whether actual rediagnosis is needed — an ESLint reload that finds no changes does not trigger a wasteful `rediagnoseAll`. The `result.rediagnose` flag flows through to `clearTsCache` so the TS diagnostic cache is only cleared when overrides or the TS toggle changed.
 
 ---
 
@@ -384,7 +384,7 @@ if (tsDiags.length > 0) {
 }
 ```
 
-Update `evictFileCache` (line 328) to also clear TS cache:
+Update `evictFileCache` implementation (line 473, interface at line 328) to also clear TS cache:
 ```typescript
 evictFileCache(path) {
   const key = canonicalPath(path);
@@ -682,7 +682,7 @@ This prevents stale TS diagnostics from being merged if the file is re-opened.
 
 **File: `packages/lsp/src/server/handlers/lifecycle.ts`**
 
-In `handleShutdown` (line 292), before disposing the project. Must be inside the existing `if (context)` guard at line 325 since `context` is an optional parameter:
+In `handleShutdown` (line 304). The cancellation goes inside the existing `if (context)` guard at line 325, which is after `state.project.dispose()` at line 318. This is safe because `handleShutdown` runs synchronously — `dispose()` and the cancellation execute in the same event loop task. The Phase 5 `setImmediate` callback fires after `handleShutdown` returns, and the `cancelled` flag is already `true` by then:
 ```typescript
 if (context) {
   context.tsPropagationCancel?.();
