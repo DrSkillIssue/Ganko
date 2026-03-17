@@ -330,6 +330,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elements,
     appliesByNode,
     monitoredDeclarationsBySelectorId,
+    selectorsById,
   )
   const elementsWithConditionalOverflowDelta = buildConditionalDeltaSignalGroupElements(
     conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,

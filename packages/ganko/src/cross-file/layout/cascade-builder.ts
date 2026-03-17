@@ -400,6 +400,7 @@ export function buildConditionalDeltaIndex(
   elements: readonly LayoutElementNode[],
   appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>,
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
+  selectorsById: ReadonlyMap<number, SelectorEntity>,
 ): ConditionalDeltaIndex {
   const conditionalSignalDeltaFactsByNode = new Map<LayoutElementNode, ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact>>()
   const elementsWithConditionalDeltaBySignal = new Map<LayoutSignalName, LayoutElementNode[]>()
@@ -414,12 +415,24 @@ export function buildConditionalDeltaIndex(
 
     if (edges !== undefined && edges.length > 0) {
       const byProperty = new Map<LayoutSignalName, { conditional: Set<string>; unconditional: Set<string> }>()
+      // Lazily allocated. Tracks which attribute dispatch group each conditional (property, value)
+      // belongs to. Used to detect mutually exclusive attribute value selectors (e.g.
+      // [data-sizing="intrinsic"] vs [data-sizing="flex"]) where only one can match at a time.
+      let conditionalAttributeDispatch: Map<LayoutSignalName, Map<string, string>> | null = null
 
       for (let j = 0; j < edges.length; j++) {
         const currentEdge = edges[j]
         if (!currentEdge) continue
         const declarations = monitoredDeclarationsBySelectorId.get(currentEdge.selectorId)
         if (!declarations) continue
+
+        // Identify the dynamic attribute causing conditionality for this edge.
+        // A conditional match from a selector like [data-sizing="intrinsic"] on an element
+        // with data-sizing=null (dynamic) means the conditionality comes from data-sizing.
+        let conditionalAttributeName: string | null = null
+        if (currentEdge.conditionalMatch) {
+          conditionalAttributeName = identifyConditionalAttribute(currentEdge.selectorId, node, selectorsById)
+        }
 
         for (let k = 0; k < declarations.length; k++) {
           const declaration = declarations[k]
@@ -440,6 +453,16 @@ export function buildConditionalDeltaIndex(
 
             if (declaration.guardProvenance.kind === LayoutSignalGuard.Conditional || currentEdge.conditionalMatch) {
               bucket.conditional.add(expandedEntry.value)
+              // Track the attribute dispatch source for this conditional value
+              if (conditionalAttributeName !== null && declaration.guardProvenance.kind !== LayoutSignalGuard.Conditional) {
+                if (conditionalAttributeDispatch === null) conditionalAttributeDispatch = new Map()
+                let dispatchMap = conditionalAttributeDispatch.get(property)
+                if (!dispatchMap) {
+                  dispatchMap = new Map()
+                  conditionalAttributeDispatch.set(property, dispatchMap)
+                }
+                dispatchMap.set(expandedEntry.value, conditionalAttributeName)
+              }
               continue
             }
             bucket.unconditional.add(expandedEntry.value)
@@ -463,6 +486,29 @@ export function buildConditionalDeltaIndex(
               if (!bucket.unconditional.has(condVal)) {
                 hasDelta = true
                 break
+              }
+            }
+          }
+
+          // Suppress delta when all conditional values come from mutually exclusive
+          // attribute value selectors on the same attribute. E.g., [data-sizing="intrinsic"]
+          // sets white-space:nowrap and [data-sizing="flex"] sets white-space:normal — these
+          // are mutually exclusive on the same element, so the property never actually shifts.
+          if (hasDelta && conditionalAttributeDispatch !== null) {
+            const dispatchMap = conditionalAttributeDispatch.get(property)
+            if (dispatchMap !== undefined && dispatchMap.size === conditionalValues.length) {
+              let singleAttribute: string | null = null
+              let allSameAttribute = true
+              for (const attrName of dispatchMap.values()) {
+                if (singleAttribute === null) {
+                  singleAttribute = attrName
+                } else if (singleAttribute !== attrName) {
+                  allSameAttribute = false
+                  break
+                }
+              }
+              if (allSameAttribute && singleAttribute !== null) {
+                hasDelta = false
               }
             }
           }
@@ -569,6 +615,45 @@ export function buildConditionalDeltaSignalGroupElements(
   }
 
   return out
+}
+
+/**
+ * Identify the single dynamic attribute on the element that caused a conditional
+ * selector match. Returns the attribute name if exactly one attribute constraint
+ * in the selector's subject compound targets a dynamic attribute (value=null) on
+ * the element with an `equals` operator. Returns null if the conditionality comes
+ * from multiple attributes, non-equals operators, or non-attribute sources.
+ */
+function identifyConditionalAttribute(
+  selectorId: number,
+  node: LayoutElementNode,
+  selectorsById: ReadonlyMap<number, SelectorEntity>,
+): string | null {
+  const selector = selectorsById.get(selectorId)
+  if (!selector) return null
+
+  const constraints = selector.anchor.attributes
+  let dynamicAttributeName: string | null = null
+
+  for (let i = 0; i < constraints.length; i++) {
+    const constraint = constraints[i]
+    if (!constraint) continue
+    if (constraint.operator !== "equals") continue
+    if (constraint.value === null) continue
+
+    // Check if this attribute is dynamic on the element.
+    // attributes.get returns undefined (absent), string (known), or null (dynamic).
+    // Only null (dynamic value) is the conditionality source.
+    const elementValue = node.attributes.get(constraint.name)
+    if (elementValue !== null) continue
+    if (dynamicAttributeName !== null && dynamicAttributeName !== constraint.name) {
+      // Multiple different dynamic attributes — can't determine single dispatch source
+      return null
+    }
+    dynamicAttributeName = constraint.name
+  }
+
+  return dynamicAttributeName
 }
 
 function buildScrollValueProfile(
