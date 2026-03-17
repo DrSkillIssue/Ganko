@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
 import { analyzeCrossFileInput } from "../../src/cross-file"
-import { parseCode, lazyParseBatch } from "../solid/test-utils"
+import { parseCode } from "../solid/test-utils"
 
 interface CssFixture {
   readonly path: string
@@ -14,7 +14,6 @@ interface CssFixture {
  * The SolidInput is created lazily on first access and cached for reuse.
  */
 const tsxToSolidInput = new Map<string, ReturnType<typeof parseCode>>()
-let batchProgram: import("typescript").Program | null = null
 let batchFileCounter = 0
 
 function getOrCreateSolidInput(tsx: string): ReturnType<typeof parseCode> {
@@ -1625,6 +1624,29 @@ describe("CLS rule suite", () => {
     )
 
     expect(diagnostics).toHaveLength(1)
+  })
+
+  it("does not flag white-space wrap shifts from mutually exclusive attribute value selectors", () => {
+    const diagnostics = runRule(
+      "css-layout-conditional-white-space-wrap-shift",
+      `
+        import "./layout.css"
+        export function App() {
+          return (
+            <section>
+              <p class="cell" data-sizing={props.sizing}>content</p>
+              <p>peer</p>
+            </section>
+          )
+        }
+      `,
+      `
+        .cell[data-sizing="intrinsic"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cell[data-sizing="flex"] { white-space: normal; word-break: break-word; }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
   })
 
   it("flags conditional inset-block shorthand offsets", () => {

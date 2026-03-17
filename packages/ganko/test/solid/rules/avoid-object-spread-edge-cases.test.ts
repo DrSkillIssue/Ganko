@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import { lazyRuleBatch, applyAllFixes, at } from "../test-utils"
 import { avoidObjectSpread } from "../../../src/solid/rules/correctness"
 
