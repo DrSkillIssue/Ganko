@@ -78,6 +78,13 @@ function filterBySource(diags: LSPDiagnostic[], source: string): LSPDiagnostic[]
   return diags.filter(d => d.source === source);
 }
 
+function lastPublication(pubs: { diagnostics: LSPDiagnostic[] }[]): { diagnostics: LSPDiagnostic[] } {
+  expect(pubs.length).toBeGreaterThan(0);
+  const last = pubs[pubs.length - 1];
+  expect(last).toBeDefined();
+  return last!;
+}
+
 describe("ts-diagnostics", () => {
   let tempDir: string;
   let client: LSPClient;
@@ -100,159 +107,174 @@ describe("ts-diagnostics", () => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("disabled by default — no source:ts diagnostics", async () => {
-    writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
+  describe("feature gate", () => {
+    it("disabled by default — no source:ts diagnostics", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
 
-    client = new LSPClient(tempDir);
-    await client.initialize(); // no enableTypeScriptDiagnostics
+      client = new LSPClient(tempDir);
+      await client.initialize();
 
-    const appPath = join(tempDir, "App.tsx");
-    client.openFile(appPath, TSX_TYPE_ERROR);
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_TYPE_ERROR);
 
-    const pubs = await client.collectDiagnostics(appPath, 8000);
-    expect(pubs.length).toBeGreaterThan(0);
+      const last = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      const tsDiags = filterBySource(last.diagnostics, "ts");
+      expect(tsDiags).toHaveLength(0);
+    }, 30000);
+  });
 
-    const last = pubs[pubs.length - 1];
-    expect(last).toBeDefined();
+  describe("Tier 2 — semantic diagnostics on open/edit", () => {
+    it("TS type errors appear when enabled", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
 
-    const tsDiags = filterBySource(last?.diagnostics ?? [], "ts");
-    expect(tsDiags).toHaveLength(0);
-  }, 30000);
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
 
-  it("TS type errors appear when enabled", async () => {
-    writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_TYPE_ERROR);
 
-    client = new LSPClient(tempDir);
-    await client.initialize({ enableTypeScriptDiagnostics: true });
+      const last = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      const tsDiags = filterBySource(last.diagnostics, "ts");
+      expect(tsDiags.length).toBeGreaterThan(0);
 
-    const appPath = join(tempDir, "App.tsx");
-    client.openFile(appPath, TSX_TYPE_ERROR);
+      const typeError = tsDiags.find(d => d.code === 2322);
+      expect(typeError).toBeDefined();
+      expect(typeError?.source).toBe("ts");
+    }, 30000);
 
-    const pubs = await client.collectDiagnostics(appPath, 8000);
-    expect(pubs.length).toBeGreaterThan(0);
+    it("TS and ganko diagnostics merge in the same publication", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_BOTH_ERRORS);
 
-    const last = pubs[pubs.length - 1];
-    expect(last).toBeDefined();
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
 
-    const tsDiags = filterBySource(last?.diagnostics ?? [], "ts");
-    expect(tsDiags.length).toBeGreaterThan(0);
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_BOTH_ERRORS);
 
-    // TS2322: Type 'string' is not assignable to type 'number'
-    const typeError = tsDiags.find(d => d.code === 2322);
-    expect(typeError).toBeDefined();
-    expect(typeError?.source).toBe("ts");
-  }, 30000);
+      const last = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      const tsDiags = filterBySource(last.diagnostics, "ts");
+      const gankoDiags = filterBySource(last.diagnostics, "ganko");
 
-  it("TS and ganko diagnostics appear in the same publication", async () => {
-    writeFileSync(join(tempDir, "App.tsx"), TSX_BOTH_ERRORS);
+      expect(tsDiags.find(d => d.code === 2322)).toBeDefined();
+      expect(gankoDiags.find(d => d.code === "signal-call")).toBeDefined();
+    }, 30000);
 
-    client = new LSPClient(tempDir);
-    await client.initialize({ enableTypeScriptDiagnostics: true });
+    it("TS diagnostics update after edit introduces type error", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_CLEAN);
 
-    const appPath = join(tempDir, "App.tsx");
-    client.openFile(appPath, TSX_BOTH_ERRORS);
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
 
-    const pubs = await client.collectDiagnostics(appPath, 8000);
-    const last = pubs[pubs.length - 1];
-    expect(last).toBeDefined();
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_CLEAN);
 
-    const tsDiags = filterBySource(last?.diagnostics ?? [], "ts");
-    const gankoDiags = filterBySource(last?.diagnostics ?? [], "ganko");
+      const initialLast = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      const initialTs = filterBySource(initialLast.diagnostics, "ts");
+      expect(initialTs.filter(d => d.code === 2322)).toHaveLength(0);
 
-    // TS2322 type error
-    expect(tsDiags.find(d => d.code === 2322)).toBeDefined();
-    // ganko signal-call: count not called in JSX
-    expect(gankoDiags.find(d => d.code === "signal-call")).toBeDefined();
-  }, 30000);
+      client.changeFile(appPath, TSX_TYPE_ERROR, 2);
 
-  it("TS diagnostics update after edit introduces type error", async () => {
-    writeFileSync(join(tempDir, "App.tsx"), TSX_CLEAN);
+      const updatedLast = lastPublication(await client.collectDiagnostics(appPath, 5000));
+      const updatedTs = filterBySource(updatedLast.diagnostics, "ts");
+      expect(updatedTs.find(d => d.code === 2322)).toBeDefined();
+    }, 30000);
+  });
 
-    client = new LSPClient(tempDir);
-    await client.initialize({ enableTypeScriptDiagnostics: true });
+  describe("Phase 5 — async propagation to dependents", () => {
+    it("TS diagnostics propagate to dependent files after edit", async () => {
+      writeFileSync(join(tempDir, "types.ts"), TYPES_V1);
+      writeFileSync(join(tempDir, "App.tsx"), TSX_IMPORTS_FOO);
 
-    const appPath = join(tempDir, "App.tsx");
-    client.openFile(appPath, TSX_CLEAN);
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
 
-    // Wait for initial diagnostics (should have zero TS errors)
-    const initial = await client.collectDiagnostics(appPath, 8000);
-    const initialLast = initial[initial.length - 1];
-    const initialTs = filterBySource(initialLast?.diagnostics ?? [], "ts");
-    const initialTypeErrors = initialTs.filter(d => d.code === 2322);
-    expect(initialTypeErrors).toHaveLength(0);
+      const appPath = join(tempDir, "App.tsx");
+      const typesPath = join(tempDir, "types.ts");
 
-    // Edit to introduce a type error
-    client.changeFile(appPath, TSX_TYPE_ERROR, 2);
+      client.openFile(appPath, TSX_IMPORTS_FOO);
+      client.openFile(typesPath, TYPES_V1);
 
-    const updated = await client.collectDiagnostics(appPath, 5000);
-    const updatedLast = updated[updated.length - 1];
-    const updatedTs = filterBySource(updatedLast?.diagnostics ?? [], "ts");
-    expect(updatedTs.find(d => d.code === 2322)).toBeDefined();
-  }, 30000);
+      const initialLast = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      const initialTs = filterBySource(initialLast.diagnostics, "ts");
+      expect(initialTs.filter(d => d.code === 2322)).toHaveLength(0);
 
-  it("TS diagnostics propagate to dependent files after edit", async () => {
-    writeFileSync(join(tempDir, "types.ts"), TYPES_V1);
-    writeFileSync(join(tempDir, "App.tsx"), TSX_IMPORTS_FOO);
+      // Change Foo from number to string — App.tsx should get TS2322
+      client.changeFile(typesPath, TYPES_V2, 2);
+      writeFileSync(typesPath, TYPES_V2);
 
-    client = new LSPClient(tempDir);
-    await client.initialize({ enableTypeScriptDiagnostics: true });
-
-    const appPath = join(tempDir, "App.tsx");
-    const typesPath = join(tempDir, "types.ts");
-
-    // Open both files
-    client.openFile(appPath, TSX_IMPORTS_FOO);
-    client.openFile(typesPath, TYPES_V1);
-
-    // Wait for initial diagnostics — App.tsx uses Foo as number, types has Foo = number, no error
-    const initial = await client.collectDiagnostics(appPath, 8000);
-    const initialLast = initial[initial.length - 1];
-    const initialTs = filterBySource(initialLast?.diagnostics ?? [], "ts");
-    const initialTypeErrors = initialTs.filter(d => d.code === 2322);
-    expect(initialTypeErrors).toHaveLength(0);
-
-    // Change Foo from number to string — App.tsx should get a type error
-    client.changeFile(typesPath, TYPES_V2, 2);
-    writeFileSync(typesPath, TYPES_V2);
-
-    // Wait for propagation to App.tsx via Phase 5
-    // Phase 5 uses setImmediate, so it takes a few ticks after debounce settles
-    await client.delay(3000);
-
-    const propagated = client.getPublishedDiagnostics(appPath);
-    if (propagated) {
+      // Wait for Phase 5 propagation to App.tsx
+      const propagated = await client.waitForNextDiagnostics(appPath, 10000);
       const propagatedTs = filterBySource(propagated.diagnostics, "ts");
-      // Foo is now string, but App.tsx assigns 42 (number) to it → TS2322
       const typeError = propagatedTs.find(d => d.code === 2322);
       expect(typeError).toBeDefined();
-    }
-    // If no propagated diagnostics arrived, Phase 5 may not have completed
-    // in the timeout window on slow CI — skip rather than fail
-  }, 30000);
+    }, 30000);
+  });
 
-  it("TS syntax errors appear in Tier 1 during startup", async () => {
-    writeFileSync(join(tempDir, "App.tsx"), TSX_SYNTAX_ERROR);
+  describe("Tier 1 — syntactic diagnostics during startup", () => {
+    it("TS syntax errors appear in first publication", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_SYNTAX_ERROR);
 
-    client = new LSPClient(tempDir);
-    // Initialize with TS diagnostics enabled
-    // During startup, Tier 1 fires syntactic diagnostics before the full program builds
-    await client.initialize({ enableTypeScriptDiagnostics: true });
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
 
-    const appPath = join(tempDir, "App.tsx");
-    client.openFile(appPath, TSX_SYNTAX_ERROR);
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_SYNTAX_ERROR);
 
-    const pubs = await client.collectDiagnostics(appPath, 8000);
-    expect(pubs.length).toBeGreaterThan(0);
+      const pubs = await client.collectDiagnostics(appPath, 8000);
+      expect(pubs.length).toBeGreaterThan(0);
 
-    // At least one publication should contain TS syntax errors
-    let foundSyntaxError = false;
-    for (const pub of pubs) {
-      const tsDiags = filterBySource(pub.diagnostics, "ts");
-      if (tsDiags.length > 0) {
-        foundSyntaxError = true;
-        break;
-      }
-    }
-    expect(foundSyntaxError).toBe(true);
-  }, 30000);
+      // The FIRST publication must contain TS syntax errors (Tier 1)
+      const firstPub = pubs[0]!;
+      const tsDiags = filterBySource(firstPub.diagnostics, "ts");
+      expect(tsDiags.length).toBeGreaterThan(0);
+    }, 30000);
+  });
+
+  describe("save path", () => {
+    it("TS diagnostics survive save with fresh collection", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
+
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
+
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_TYPE_ERROR);
+
+      // Wait for initial diagnostics with TS errors
+      const initialLast = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      expect(filterBySource(initialLast.diagnostics, "ts").find(d => d.code === 2322)).toBeDefined();
+
+      // Save the file — should re-publish with fresh TS diagnostics
+      client.saveFile(appPath, TSX_TYPE_ERROR, 2);
+
+      const saved = await client.waitForNextDiagnostics(appPath, 10000);
+      const savedTs = filterBySource(saved.diagnostics, "ts");
+      expect(savedTs.find(d => d.code === 2322)).toBeDefined();
+    }, 30000);
+  });
+
+  describe("cached TS diagnostics survive cross-file rediagnosis", () => {
+    it("TS diagnostics preserved when publishFileDiagnostics called without content", async () => {
+      writeFileSync(join(tempDir, "App.tsx"), TSX_TYPE_ERROR);
+
+      client = new LSPClient(tempDir);
+      await client.initialize({ enableTypeScriptDiagnostics: true });
+
+      const appPath = join(tempDir, "App.tsx");
+      client.openFile(appPath, TSX_TYPE_ERROR);
+
+      // Wait for initial diagnostics with TS errors
+      const initialLast = lastPublication(await client.collectDiagnostics(appPath, 8000));
+      expect(filterBySource(initialLast.diagnostics, "ts").find(d => d.code === 2322)).toBeDefined();
+
+      // Save the file — triggers rediagnoseAffected which calls
+      // publishFileDiagnostics without content for affected files.
+      // TS diagnostics must survive from cache.
+      client.saveFile(appPath, TSX_TYPE_ERROR, 2);
+
+      const saved = await client.waitForNextDiagnostics(appPath, 10000);
+      const savedTs = filterBySource(saved.diagnostics, "ts");
+      expect(savedTs.find(d => d.code === 2322)).toBeDefined();
+    }, 30000);
+  });
 });
