@@ -1,5 +1,5 @@
 import { noopLogger } from "@drskillissue/ganko-shared";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import {
   analyzeCrossFileInput,
@@ -27,6 +27,7 @@ import { alignmentPolicyCalibration } from "../../src/cross-file/layout/calibrat
 import { parseCode } from "../solid/test-utils";
 
 const _psCache = new Map<string, ReturnType<typeof parseCode>>()
+afterAll(() => _psCache.clear())
 let _psFC = 0
 
 function runRule(tsx: string, css: string): readonly Diagnostic[] {

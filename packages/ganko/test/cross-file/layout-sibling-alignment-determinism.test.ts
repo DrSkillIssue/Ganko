@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import type { SolidInput } from "../../src/solid/input";
 import { analyzeCrossFileInput } from "../../src/cross-file";
@@ -10,6 +10,7 @@ interface CssFixture {
 }
 
 const _detCache = new Map<string, ReturnType<typeof parseCode>>()
+afterAll(() => _detCache.clear())
 let _detFC = 0
 
 function runRule(tsx: string, files: readonly CssFixture[]): readonly Diagnostic[] {

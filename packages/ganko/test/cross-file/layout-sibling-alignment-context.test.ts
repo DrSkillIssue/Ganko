@@ -1,5 +1,5 @@
 import { noopLogger } from "@drskillissue/ganko-shared";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../src/diagnostic";
 import { analyzeCrossFileInput, buildLayoutGraph, collectAlignmentCases, evaluateAlignmentCase, ContextCertainty } from "../../src/cross-file";
 import { buildSolidGraph } from "../../src/solid/plugin";
@@ -12,6 +12,7 @@ interface CssFixture {
 }
 
 const _ctxCache = new Map<string, ReturnType<typeof parseCode>>()
+afterAll(() => _ctxCache.clear())
 let _ctxFC = 0
 
 function runRule(tsx: string, files: readonly CssFixture[]): readonly Diagnostic[] {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
 import { analyzeCrossFileInput } from "../../src/cross-file"
 import { parseCode } from "../solid/test-utils"
@@ -14,6 +14,7 @@ interface CssFixture {
  * The SolidInput is created lazily on first access and cached for reuse.
  */
 const tsxToSolidInput = new Map<string, ReturnType<typeof parseCode>>()
+afterAll(() => tsxToSolidInput.clear())
 let batchFileCounter = 0
 
 function getOrCreateSolidInput(tsx: string): ReturnType<typeof parseCode> {
