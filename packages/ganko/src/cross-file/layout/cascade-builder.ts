@@ -16,9 +16,15 @@ import type { LayoutPerfStatsMutable } from "./perf"
 import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
 import { selectorMatchesLayoutElement } from "./selector-match"
-import type { LayoutRuleGuard } from "./guard-model"
+import type { LayoutRuleGuard, LayoutGuardConditionProvenance } from "./guard-model"
 import type { SelectorBuildMetadata } from "./selector-dispatch"
 import { layoutOffsetSignals, parseOffsetPx } from "./offset-baseline"
+
+const DYNAMIC_ATTRIBUTE_GUARD: LayoutRuleGuard = {
+  kind: LayoutSignalGuard.Conditional,
+  conditions: [{ kind: "dynamic-attribute", query: null, key: "dynamic-attribute:*" } satisfies LayoutGuardConditionProvenance],
+  key: "dynamic-attribute:*",
+}
 
 export interface MonitoredDeclaration {
   readonly property: MonitoredSignalKey
@@ -142,15 +148,24 @@ export function appendMatchingEdgesFromSelectorIds(
       throw new Error(`missing selector ${selectorId}`)
     }
 
-    if (!selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)) continue
+    const matchResult = selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)
+    if (matchResult === "no-match") continue
 
     const edge: LayoutMatchEdge = {
       selectorId: selector.id,
       specificityScore: selector.specificityScore,
       sourceOrder: selector.rule.sourceOrder,
+      conditionalMatch: matchResult === "conditional",
     }
     applies.push(edge)
     ctx.perf.matchEdgesCreated++
+
+    if (ctx.logger.enabled) {
+      ctx.logger.trace(
+        `[cascade] edge node=${node.key} selector=${selector.id} match=${matchResult}`
+        + ` conditional=${edge.conditionalMatch} selector-raw=${selector.raw.slice(0, 80)}`,
+      )
+    }
 
     const existing = appliesByElementNodeMutable.get(node)
     if (existing) {
@@ -258,10 +273,18 @@ export function buildCascadeMapForElement(
       const declaration = declarations[j]
       if (!declaration) continue
       const property = declaration.property
+      // When the selector match is conditional (dynamic attribute values),
+      // elevate the guard to Conditional even if the CSS rule itself is
+      // unconditional. This ensures signals from partially-matched selectors
+      // are weighted with reduced certainty in the scoring model.
+      const guardProvenance = edge.conditionalMatch && declaration.guardProvenance.kind === LayoutSignalGuard.Unconditional
+        ? DYNAMIC_ATTRIBUTE_GUARD
+        : declaration.guardProvenance
+
       const newDeclaration: LayoutCascadedDeclaration = {
         value: declaration.value,
         source: LayoutSignalSource.Selector,
-        guardProvenance: declaration.guardProvenance,
+        guardProvenance,
       }
 
       const existingPosition = positions.get(property)
@@ -415,7 +438,7 @@ export function buildConditionalDeltaIndex(
               byProperty.set(property, bucket)
             }
 
-            if (declaration.guardProvenance.kind === LayoutSignalGuard.Conditional) {
+            if (declaration.guardProvenance.kind === LayoutSignalGuard.Conditional || currentEdge.conditionalMatch) {
               bucket.conditional.add(expandedEntry.value)
               continue
             }

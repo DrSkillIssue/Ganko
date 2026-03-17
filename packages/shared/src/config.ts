@@ -47,6 +47,8 @@ export interface ServerSettings {
   readonly accessibilityPolicy: AccessibilityPolicy
   /** Glob patterns to exclude from file indexing and analysis. */
   readonly exclude: readonly string[]
+  /** Push TypeScript diagnostics alongside ganko diagnostics. */
+  readonly enableTypeScriptDiagnostics: boolean
 }
 
 /**
@@ -62,6 +64,7 @@ export const ServerSettingsSchema = z.object({
   eslintConfigPath: z.string().optional(),
   accessibilityPolicy: AccessibilityPolicySchema.default("wcag-aa"),
   exclude: z.array(z.string()).default([]),
+  enableTypeScriptDiagnostics: z.boolean().default(false),
 });
 
 /**

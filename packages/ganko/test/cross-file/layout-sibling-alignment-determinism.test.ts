@@ -9,8 +9,12 @@ interface CssFixture {
   readonly content: string;
 }
 
+const _detCache = new Map<string, ReturnType<typeof parseCode>>()
+let _detFC = 0
+
 function runRule(tsx: string, files: readonly CssFixture[]): readonly Diagnostic[] {
-  return runRuleWithInput(parseCode(tsx, "/project/App.tsx"), files);
+  let solid = _detCache.get(tsx); if (!solid) { solid = parseCode(tsx, `/project/det_${_detFC++}.tsx`); _detCache.set(tsx, solid); }
+  return runRuleWithInput(solid, files);
 }
 
 function runRuleWithInput(solid: SolidInput, files: readonly CssFixture[]): readonly Diagnostic[] {

@@ -7,6 +7,7 @@ import { constantTruthiness, getStaticValue } from "../../solid/util/static-valu
 import { defineCrossRule } from "../rule"
 import { normalizeStylePropertyKey } from "./rule-runtime"
 import type { LayoutGraph } from "../layout"
+import type { LayoutElementNode } from "../layout/graph"
 import { readFlowParticipationFact } from "../layout/signal-access"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 
@@ -111,7 +112,29 @@ function isExemptFromCLS(
     return true
   }
 
+  // CSS containment: `contain: layout`, `contain: strict`, or `contain: content`
+  // on the element or its parent isolates geometry changes to the containing
+  // subtree. Dynamic size changes within a layout-contained element cannot
+  // shift siblings outside the containment boundary.
+  if (hasLayoutContainment(node) || (node.parentElementNode !== null && hasLayoutContainment(node.parentElementNode))) {
+    return true
+  }
+
   return false
+}
+
+/**
+ * Check if an element has CSS layout containment via inline styles.
+ * `contain: layout`, `contain: strict`, and `contain: content` all
+ * include layout containment per the CSS Containment spec.
+ */
+function hasLayoutContainment(node: LayoutElementNode): boolean {
+  const contain = node.inlineStyleValues.get("contain")
+  if (contain === undefined) return false
+  return contain === "layout"
+    || contain === "strict"
+    || contain === "content"
+    || contain.includes("layout")
 }
 
 function hasUnstableLayoutDelta(property: string, node: ts.Node): boolean {

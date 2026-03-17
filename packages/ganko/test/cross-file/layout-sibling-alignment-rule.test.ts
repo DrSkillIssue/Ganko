@@ -12,8 +12,15 @@ interface CssFixture {
   readonly content: string;
 }
 
+const tsxCache = new Map<string, ReturnType<typeof parseCode>>();
+let fileCounter = 0;
+
 function runRule(tsx: string, css: string | readonly CssFixture[]): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  let solid = tsxCache.get(tsx);
+  if (!solid) {
+    solid = parseCode(tsx, `/project/align_${fileCounter++}.tsx`);
+    tsxCache.set(tsx, solid);
+  }
   const diagnostics: Diagnostic[] = [];
   const files = typeof css === "string"
     ? [{ path: "/project/layout.css", content: css }]
@@ -38,7 +45,12 @@ interface SolidFixture {
 }
 
 function runRuleMultiFile(solids: readonly SolidFixture[], css: string | readonly CssFixture[]): readonly Diagnostic[] {
-  const parsedSolids = solids.map((f) => parseCode(f.code, f.path));
+  const parsedSolids = solids.map((f) => {
+    const key = f.code + "::" + f.path;
+    let cached = tsxCache.get(key);
+    if (!cached) { cached = parseCode(f.code, f.path); tsxCache.set(key, cached); }
+    return cached;
+  });
   const diagnostics: Diagnostic[] = [];
   const files = typeof css === "string"
     ? [{ path: "/project/layout.css", content: css }]
@@ -1175,5 +1187,344 @@ describe("css-layout-sibling-alignment-outlier", () => {
 
     // position: relative keeps the element in flow, so it should be flagged
     expect(diagnostics.length).toBeGreaterThan(0);
+  });
+
+  describe("flex container exemptions", () => {
+    it("does not flag children when parent has display:flex align-items:center via CSS class", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div class="wrapper">
+                <input type="text" />
+                <button>copy</button>
+              </div>
+            );
+          }
+        `,
+        `.wrapper { display: flex; align-items: center; gap: 8px; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children in column flex container with align-items:flex-start", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function Form() {
+            return (
+              <div class="field">
+                <label>Name</label>
+                <input type="text" />
+                <span>Required</span>
+              </div>
+            );
+          }
+        `,
+        `.field { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via data-attribute selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-slot="wrapper">
+                <input type="text" />
+                <button>copy</button>
+              </div>
+            );
+          }
+        `,
+        `[data-slot="wrapper"] { display: flex; align-items: center; }`,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via nested selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-component="text-field">
+                <div data-slot="wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"] {
+            [data-slot="wrapper"] {
+              display: flex;
+              align-items: center;
+            }
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via compound selector with dynamic attribute value", () => {
+      // data-variant is a dynamic prop — its value is null at analysis time.
+      // The CSS selector [data-component="text-field"][data-variant="normal"]
+      // must still potentially match so that display:flex is applied.
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField(props: { variant: string }) {
+            return (
+              <div data-component="text-field" data-variant={props.variant}>
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Description text</span>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when parent has display:flex via compound attribute+descendant selector", () => {
+      const diagnostics = runRule(
+        `
+          import "./layout.css";
+
+          export function TextField() {
+            return (
+              <div data-component="text-field" data-variant="normal">
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Helper text</span>
+              </div>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when component root has display:flex via compound selector with dynamic attribute value", () => {
+      // Mirrors the bor-web text-field pattern: root is a component (not a DOM element),
+      // attributes are on the component call-site, CSS targets compound attributes.
+      // Component host resolution fails → tagName is null, but attributes are still collected.
+      const diagnostics = runRule(
+        `
+          import Base from "./base-component";
+          import "./layout.css";
+
+          export function TextField(props: { variant: string }) {
+            return (
+              <Base data-component="text-field" data-variant={props.variant}>
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Description text</span>
+              </Base>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when component root has Show-wrapped children", () => {
+      // Mirrors bor-web's pattern with <Show> around conditional children.
+      // <Show> is a transparent primitive — its children compose as children of <Base>.
+      const diagnostics = runRule(
+        `
+          import Base from "./base-component";
+          import { Show } from "solid-js";
+          import "./layout.css";
+
+          export function TextField(props: { variant: string; label?: string; error?: string }) {
+            return (
+              <Base data-component="text-field" data-variant={props.variant}>
+                <Show when={props.label}>
+                  <label data-slot="text-field-label">{props.label}</label>
+                </Show>
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <Show when={props.error}>
+                  <div data-slot="text-field-error-message">
+                    <span>{props.error}</span>
+                  </div>
+                </Show>
+                <span>aria live region</span>
+              </Base>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-error-message"] {
+            display: flex;
+            align-items: center;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag callback prop children as siblings of direct children", () => {
+      // Mirrors Kobalte's Select pattern: <Base itemComponent={(p) => <Item />}>
+      // The <Item> is in a callback prop, NOT a direct child of <Base>.
+      // At runtime, items render inside the listbox/portal, not as siblings of <Trigger>.
+      const diagnostics = runRule(
+        `
+          import Base from "./base-component";
+          import "./layout.css";
+
+          export function Select(props: { options: string[] }) {
+            return (
+              <Base
+                data-component="select"
+                itemComponent={(itemProps: any) => (
+                  <li data-slot="select-item">
+                    <span>{itemProps.label}</span>
+                    <span>indicator</span>
+                  </li>
+                )}
+              >
+                <button data-slot="select-trigger">
+                  <span>value</span>
+                  <span>chevron</span>
+                </button>
+              </Base>
+            );
+          }
+        `,
+        `
+          [data-component="select"] [data-slot="select-trigger"] {
+            display: flex;
+            align-items: center;
+          }
+          [data-component="select"] [data-slot="select-item"] {
+            display: flex;
+            align-items: center;
+          }
+        `,
+      );
+
+      // No alignment warnings — callback prop children are not siblings
+      // of direct children in the layout tree
+      expect(diagnostics).toHaveLength(0);
+    });
+
+    it("does not flag children when component root has display:flex via expression default value", () => {
+      // Mirrors bor-web's `data-variant={local.variant ?? "normal"}` pattern
+      // where the ?? expression prevents static string extraction.
+      const diagnostics = runRule(
+        `
+          import Base from "./base-component";
+          import "./layout.css";
+
+          export function TextField(props: { variant?: string }) {
+            const variant = props.variant ?? "normal";
+            return (
+              <Base data-component="text-field" data-variant={variant}>
+                <div data-slot="text-field-wrapper">
+                  <input type="text" />
+                  <button>copy</button>
+                </div>
+                <span>Description text</span>
+              </Base>
+            );
+          }
+        `,
+        `
+          [data-component="text-field"][data-variant="normal"] {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          [data-component="text-field"][data-variant="normal"] [data-slot="text-field-wrapper"] {
+            display: flex;
+            align-items: center;
+            width: 100%;
+          }
+        `,
+      );
+
+      expect(diagnostics).toHaveLength(0);
+    });
   });
 });

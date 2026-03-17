@@ -1,7 +1,7 @@
 import type { AtRuleEntity, RuleEntity } from "../../css/entities"
 import { LayoutSignalGuard } from "./signal-model"
 
-export type LayoutGuardConditionKind = "media" | "supports" | "container"
+export type LayoutGuardConditionKind = "media" | "supports" | "container" | "dynamic-attribute"
 
 export interface LayoutGuardConditionProvenance {
   readonly kind: LayoutGuardConditionKind

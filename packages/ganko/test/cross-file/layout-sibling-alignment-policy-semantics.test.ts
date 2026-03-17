@@ -26,8 +26,11 @@ import {
 import { alignmentPolicyCalibration } from "../../src/cross-file/layout/calibration";
 import { parseCode } from "../solid/test-utils";
 
+const _psCache = new Map<string, ReturnType<typeof parseCode>>()
+let _psFC = 0
+
 function runRule(tsx: string, css: string): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx");
+  let solid = _psCache.get(tsx); if (!solid) { solid = parseCode(tsx, `/project/ps_${_psFC++}.tsx`); _psCache.set(tsx, solid); }
   const diagnostics: Diagnostic[] = [];
 
   analyzeCrossFileInput(

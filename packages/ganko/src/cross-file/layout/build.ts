@@ -123,6 +123,25 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const moduleResolver = createLayoutModuleResolver(solids, css)
   const componentHostResolver = createLayoutComponentHostResolver(solids, moduleResolver, logger)
   const cssScopeBySolidFile = collectCSSScopeBySolidFile(solids, css, moduleResolver)
+
+  if (logger.enabled) {
+    for (const [solidFile, scopePaths] of cssScopeBySolidFile) {
+      if (scopePaths.length > 0) {
+        let names = ""
+        for (let k = 0; k < scopePaths.length; k++) {
+          const p = scopePaths[k]
+          if (!p) continue
+          if (names.length > 0) names += ", "
+          const slash = p.lastIndexOf("/")
+          names += slash === -1 ? p : p.slice(slash + 1)
+        }
+        logger.trace(`[scope] ${solidFile} → ${scopePaths.length} CSS files: ${names}`)
+      } else {
+        logger.trace(`[scope] ${solidFile} → EMPTY (no CSS in scope)`)
+      }
+    }
+  }
+
   const selectorIndexStartedAt = performance.now()
   const scopedSelectorsBySolidFile = buildScopedSelectorIndexBySolidFile(
     cssScopeBySolidFile,
@@ -281,6 +300,28 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     appliesByNode.set(node, edges)
   }
   perf.cascadeBuildMs = performance.now() - cascadeStartedAt
+
+  if (logger.enabled) {
+    for (let i = 0; i < elements.length; i++) {
+      const node = elements[i]
+      if (!node) continue
+      const cascade = cascadeByElementNode.get(node)
+      if (!cascade || cascade.size === 0) continue
+      const displayDecl = cascade.get("display")
+      const flexDirDecl = cascade.get("flex-direction")
+      if (!displayDecl && !flexDirDecl) continue
+      const displayGuard = displayDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
+      const flexDirGuard = flexDirDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
+      logger.trace(
+        `[cascade] node=${node.key} tag=${node.tagName ?? "null"}`
+        + ` display=${displayDecl ? `${displayDecl.value}(${displayGuard})` : "absent"}`
+        + ` flex-direction=${flexDirDecl ? `${flexDirDecl.value}(${flexDirGuard})` : "absent"}`
+        + ` edges=${(appliesByNode.get(node) ?? []).length}`
+        + ` attrs=[${[...node.attributes.keys()].join(",")}]`,
+      )
+    }
+  }
+
   const snapshotByElementNode = buildSignalSnapshotIndex(elements, cascadeByElementNode, perf)
   const measurementNodeByRootKey = buildMeasurementNodeIndex(elements, childrenByParentNodeMutable, snapshotByElementNode)
 
@@ -299,7 +340,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     layoutOffsetSignals,
   )
   const statefulRuleIndexes = buildStatefulRuleIndexes(css.rules)
-  const contextByParentNode = buildContextIndex(childrenByParentNodeMutable, snapshotByElementNode, perf)
+  const contextByParentNode = buildContextIndex(childrenByParentNodeMutable, snapshotByElementNode, perf, logger)
   const cohortIndex = buildCohortIndex({
     childrenByParentNode: childrenByParentNodeMutable,
     contextByParentNode,
@@ -760,8 +801,10 @@ function buildContextIndex(
   childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>,
   snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
   perf: LayoutPerfStatsMutable,
+  logger: Logger,
 ): Map<LayoutElementNode, AlignmentContext> {
   const out = new Map<LayoutElementNode, AlignmentContext>()
+  const trace = logger.enabled
 
   for (const [parent, children] of childrenByParentNode) {
     if (children.length < 2) continue
@@ -770,8 +813,26 @@ function buildContextIndex(
       throw new Error(`missing parent snapshot for context classification ${parent.key}`)
     }
 
-    out.set(parent, createAlignmentContextForParent(parent, snapshot))
+    const ctx = createAlignmentContextForParent(parent, snapshot)
+    out.set(parent, ctx)
     perf.contextsClassified++
+
+    if (trace) {
+      const displaySignal = snapshot.signals.get("display")
+      const flexDirSignal = snapshot.signals.get("flex-direction")
+      const displayDesc = displaySignal
+        ? `${displaySignal.kind}:${displaySignal.kind === "known" ? displaySignal.normalized : "?"}(guard=${displaySignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        : "absent"
+      const flexDirDesc = flexDirSignal
+        ? `${flexDirSignal.kind}:${flexDirSignal.kind === "known" ? flexDirSignal.normalized : "?"}(guard=${flexDirSignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        : "absent"
+      logger.trace(
+        `[context] parent=${parent.key} tag=${parent.tagName ?? "null"} children=${children.length}`
+        + ` display=${displayDesc} flex-direction=${flexDirDesc}`
+        + ` → kind=${ctx.kind} certainty=${ctx.certainty}`
+        + ` crossAxisIsBlockAxis=${ctx.crossAxisIsBlockAxis} baseline=${ctx.baselineRelevance}`,
+      )
+    }
   }
 
   return out

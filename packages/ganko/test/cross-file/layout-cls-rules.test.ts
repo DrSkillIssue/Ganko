@@ -1,11 +1,31 @@
 import { describe, expect, it } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
 import { analyzeCrossFileInput } from "../../src/cross-file"
-import { parseCode } from "../solid/test-utils"
+import { parseCode, lazyParseBatch } from "../solid/test-utils"
 
 interface CssFixture {
   readonly path: string
   readonly content: string
+}
+
+/**
+ * Batched parseCode — all unique tsx snippets share ONE ts.Program.
+ * Each unique tsx string gets its own virtual file path within the program.
+ * The SolidInput is created lazily on first access and cached for reuse.
+ */
+const tsxToSolidInput = new Map<string, ReturnType<typeof parseCode>>()
+let batchProgram: import("typescript").Program | null = null
+let batchFileCounter = 0
+
+function getOrCreateSolidInput(tsx: string): ReturnType<typeof parseCode> {
+  const existing = tsxToSolidInput.get(tsx)
+  if (existing) return existing
+
+  // Each unique tsx gets its own file path so they coexist in one program
+  const filePath = `/project/cls_${batchFileCounter++}.tsx`
+  const solid = parseCode(tsx, filePath)
+  tsxToSolidInput.set(tsx, solid)
+  return solid
 }
 
 function runRule(
@@ -13,7 +33,7 @@ function runRule(
   tsx: string,
   css: string | readonly CssFixture[] = "",
 ): readonly Diagnostic[] {
-  const solid = parseCode(tsx, "/project/App.tsx")
+  const solid = getOrCreateSolidInput(tsx)
   const diagnostics: Diagnostic[] = []
   const files = typeof css === "string"
     ? [{ path: "/project/layout.css", content: css }]
@@ -1398,6 +1418,87 @@ describe("CLS rule suite", () => {
     )
 
     expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic width when parent has contain:layout inline style", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { pct: number }) {
+          return (
+            <div style={{ contain: "layout" }}>
+              <div style={{ width: \`\${props.pct}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic width when element itself has contain:layout", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { pct: number }) {
+          return <div style={{ contain: "layout", width: \`\${props.pct}%\` }}>x</div>
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic height when parent has contain:strict", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { h: number }) {
+          return (
+            <div style={{ contain: "strict" }}>
+              <div style={{ height: \`\${props.h}px\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag dynamic width when parent has contain:content", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { w: number }) {
+          return (
+            <div style={{ contain: "content" }}>
+              <div style={{ width: \`\${props.w}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("still flags dynamic width when contain is paint-only (no layout containment)", () => {
+    const diagnostics = runRule(
+      "jsx-layout-unstable-style-toggle",
+      `
+        export function App(props: { w: number }) {
+          return (
+            <div style={{ contain: "paint" }}>
+              <div style={{ width: \`\${props.w}%\` }}>x</div>
+            </div>
+          )
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(1)
   })
 
   it("still flags dynamic style on in-flow elements", () => {

@@ -23,6 +23,7 @@ import {
   FileChangeType,
   type Connection,
   type PublishDiagnosticsParams,
+  type Diagnostic as LSPDiagnostic,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import ts from "typescript";
@@ -38,6 +39,7 @@ import type { Project } from "../core/project";
 import { createFileIndex, type FileIndex } from "../core/file-index";
 import type { HandlerContext } from "./handlers/handler-context";
 import { readFileSync } from "node:fs";
+import { collectTsDiagnosticsForFile, tsDiagsEqual, convertTsDiagnostic } from "./handlers/ts-diagnostics";
 
 import {
   type ServerState,
@@ -297,6 +299,10 @@ export interface ServerContext {
   watchProgramReady: boolean
   /** Whether workspace-level enrichment (ESLint, Tailwind, cross-file) is ready (Tier 3 gate) */
   workspaceReady: boolean
+  /** Cache of TypeScript diagnostics (already in LSP format) per file */
+  readonly tsDiagCache: Map<string, readonly LSPDiagnostic[]>
+  /** Cancellation handle for in-flight Phase 5 async TS diagnostic propagation */
+  tsPropagationCancel: (() => void) | null
   /** Debounced GC after request handlers */
   readonly gcTimer: GcTimer
   /** Periodic memory monitoring with high-water-mark gating */
@@ -348,7 +354,7 @@ export interface ServerContext {
    * Used for workspace-level events (ESLint config change,
    * VS Code settings change) that affect all rules.
    */
-  rediagnoseAll(): void
+  rediagnoseAll(clearTsCache?: boolean): void
 }
 
 /**
@@ -392,6 +398,8 @@ function createGuardedHandler<P, R>(
 interface CreateServerOptions {
   /** Path to a log file for debugging. Writes to both LSP connection and file when set. */
   readonly logFile?: string | undefined
+  /** Enable TypeScript diagnostics from CLI flag (overrides client initializationOptions). */
+  readonly enableTsDiagnostics?: boolean | undefined
 }
 
 /**
@@ -424,6 +432,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   });
 
   const diagCache = new Map<string, readonly Diagnostic[]>();
+  const tsDiagCache = new Map<string, readonly LSPDiagnostic[]>();
   const graphCache = new GraphCache(prefixLogger(log, "cache"));
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
@@ -431,11 +440,14 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
 
+  const serverState = createServerState();
+  if (options?.enableTsDiagnostics) serverState.enableTsDiagnostics = true;
+
   const context: ServerContext = {
     connection,
     documents,
     log,
-    serverState: createServerState(),
+    serverState,
     documentState: createDocumentState(),
     handlerCtx: null,
     project: null,
@@ -447,6 +459,8 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     cachedTier1Host: null,
     watchProgramReady: false,
     workspaceReady: false,
+    tsDiagCache,
+    tsPropagationCancel: null,
     gcTimer,
     memoryWatcher,
     ready,
@@ -474,6 +488,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       const key = canonicalPath(path);
       if (log.enabled) log.debug(`evictFileCache: ${key}`);
       diagCache.delete(key);
+      tsDiagCache.delete(key);
       graphCache.invalidate(key);
     },
 
@@ -493,19 +508,21 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       }
     },
 
-    rediagnoseAll() {
+    rediagnoseAll(clearTsCache = false) {
       const project = context.project;
       if (!project) return;
 
       graphCache.invalidateAll();
       diagCache.clear();
+      if (clearTsCache) tsDiagCache.clear();
       const paths = getOpenDocumentPaths(context.documentState);
-      if (log.enabled) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files`);
+      if (log.enabled) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
       for (let i = 0, len = paths.length; i < len; i++) {
         const p = paths[i];
         if (!p) continue;
         publishFileDiagnostics(context, project, p);
       }
+      propagateTsDiagnostics(context, project, new Set());
     },
   };
 
@@ -648,6 +665,7 @@ function setupLifecycleHandlers(context: ServerContext): void {
         if (context.log.enabled) context.log.debug(`didChangeWatchedFiles: re-diagnosing open file ${key}`);
         publishFileDiagnostics(context, project, key, content);
       }
+      propagateTsDiagnostics(context, project, new Set());
     }
   });
 
@@ -662,28 +680,26 @@ function setupLifecycleHandlers(context: ServerContext): void {
     if (!context.watchProgramReady) return;
 
     const result = handleConfigurationChange(params, serverState);
-    if (result === "none") return;
+    if (!result.rebuildIndex && !result.reloadEslint && !result.rediagnose) return;
 
-    if (result === "rebuild-index") {
-      if (serverState.rootPath) {
-        const excludes = effectiveExclude(serverState);
-        const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
-        context.fileIndex = fileIndex;
-        if (context.log.enabled) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
-      }
-      context.rediagnoseAll();
-      return;
+    let needRediagnose = result.rediagnose || result.rebuildIndex;
+
+    if (result.rebuildIndex && serverState.rootPath) {
+      const excludes = effectiveExclude(serverState);
+      const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
+      context.fileIndex = fileIndex;
+      if (context.log.enabled) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
 
-    if (result === "reload-eslint") {
+    if (result.reloadEslint) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
         context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
-      if (!outcome.overridesChanged && !outcome.ignoresChanged) return;
+      if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
     }
 
-    context.rediagnoseAll();
+    if (needRediagnose) context.rediagnoseAll(result.rediagnose);
   });
 }
 
@@ -766,6 +782,8 @@ function setupDocumentHandlers(context: ServerContext): void {
     context.connection.tracer.log(
       `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
     );
+
+    propagateTsDiagnostics(context, project, diagnosed);
   }
 
   documents.onDidOpen(async (event) => {
@@ -806,6 +824,8 @@ function setupDocumentHandlers(context: ServerContext): void {
     const queued = handleDidChange(event, documentState);
     if (context.log.enabled) context.log.debug(`didChange: queued=${queued} hasProject=${!!context.project} pendingChanges=${documentState.pendingChanges.size}`);
     if (!queued || !context.project) return;
+
+    context.tsPropagationCancel?.();
 
     const timer = documentState.debounceTimer;
     if (timer !== null) {
@@ -888,6 +908,7 @@ function setupDocumentHandlers(context: ServerContext): void {
     paths[changes.length] = savedPath;
 
     context.rediagnoseAffected(paths, diagnosed);
+    if (project) propagateTsDiagnostics(context, project, new Set([savedPath]));
     context.log.debug("didSave EXIT");
   });
 
@@ -905,6 +926,7 @@ function setupDocumentHandlers(context: ServerContext): void {
          file's script version changes (e.g. on disk modification). */
       const key = canonicalPath(path);
       context.diagCache.delete(key);
+      context.tsDiagCache.delete(key);
       if (context.log.enabled) context.log.debug(`didClose: cleared diag cache for ${key} (graph preserved)`);
     }
   });
@@ -1068,6 +1090,17 @@ function publishTier1Diagnostics(
   context.diagCache.set(path, diagnostics);
 
   const converted = convertDiagnostics(diagnostics);
+
+  if (context.serverState.enableTsDiagnostics) {
+    const syntactic = tier1.program.getSyntacticDiagnostics(tier1.sourceFile);
+    for (let i = 0, len = syntactic.length; i < len; i++) {
+      const d = syntactic[i];
+      if (!d) continue;
+      const lspDiag = convertTsDiagnostic(d);
+      if (lspDiag !== null) converted.push(lspDiag);
+    }
+  }
+
   const uri = context.documentState.pathIndex.get(path) ?? pathToUri(path);
   const docInfo = context.documentState.openDocuments.get(uri);
 
@@ -1076,7 +1109,7 @@ function publishTier1Diagnostics(
   context.connection.sendDiagnostics(params);
 
   if (context.log.enabled) {
-    context.log.info(`Tier 1: ${path} → ${diagnostics.length} diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
+    context.log.info(`Tier 1: ${path} → ${diagnostics.length} ganko + ${converted.length - diagnostics.length} ts diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
   }
 }
 
@@ -1121,6 +1154,26 @@ export function publishFileDiagnostics(
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
   context.diagCache.set(key, rawDiagnostics);
   const diagnostics = convertDiagnostics(rawDiagnostics);
+
+  if (context.serverState.enableTsDiagnostics && context.watchProgramReady && kind === "solid") {
+    let tsDiags: readonly LSPDiagnostic[];
+    if (content !== undefined) {
+      const ls = project.getLanguageService();
+      tsDiags = collectTsDiagnosticsForFile(ls, key, true);
+      if (tsDiags.length > 0) {
+        context.tsDiagCache.set(key, tsDiags);
+      } else {
+        context.tsDiagCache.delete(key);
+      }
+    } else {
+      tsDiags = context.tsDiagCache.get(key) ?? [];
+    }
+    for (let i = 0, len = tsDiags.length; i < len; i++) {
+      const td = tsDiags[i];
+      if (td) diagnostics.push(td);
+    }
+  }
+
   const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
   const docInfo = context.documentState.openDocuments.get(uri);
 
@@ -1158,19 +1211,31 @@ function republishMergedDiagnostics(
 ): void {
   const key = canonicalPath(path);
   const crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
-  if (crossFile.length === 0) return;
+  const hasTsDiags = context.serverState.enableTsDiagnostics && context.tsDiagCache.has(key);
+  if (crossFile.length === 0 && !hasTsDiags) return;
 
   const singleFile = context.diagCache.get(key);
   if (singleFile === undefined) return;
 
-  const rawDiagnostics = [...singleFile, ...crossFile];
+  const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
   context.diagCache.set(key, rawDiagnostics);
   const diagnostics = convertDiagnostics(rawDiagnostics);
+
+  if (hasTsDiags) {
+    const tsDiags = context.tsDiagCache.get(key);
+    if (tsDiags !== undefined) {
+      for (let i = 0, len = tsDiags.length; i < len; i++) {
+        const td = tsDiags[i];
+        if (td) diagnostics.push(td);
+      }
+    }
+  }
+
   const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
   const docInfo = context.documentState.openDocuments.get(uri);
 
   if (context.log.enabled) context.log.debug(
-    `republishMergedDiagnostics: ${key} single=${singleFile.length} cross=${crossFile.length} total=${rawDiagnostics.length}`,
+    `republishMergedDiagnostics: ${key} single=${singleFile.length} cross=${crossFile.length} ts=${hasTsDiags ? context.tsDiagCache.get(key)?.length ?? 0 : 0}`,
   );
 
   const params: PublishDiagnosticsParams = { uri, diagnostics };
@@ -1179,17 +1244,65 @@ function republishMergedDiagnostics(
 }
 
 /**
+ * Propagate TS diagnostic changes to open files that weren't directly edited.
+ * Async — yields between files via setImmediate. Cancellable on keystroke or
+ * new debounce cycle.
+ */
+export function propagateTsDiagnostics(
+  context: ServerContext,
+  project: Project,
+  exclude: ReadonlySet<string>,
+): void {
+  if (!context.serverState.enableTsDiagnostics || !context.watchProgramReady) return;
+
+  const ls = project.getLanguageService();
+  const allOpen = getOpenDocumentPaths(context.documentState).filter(p =>
+    p !== undefined && !exclude.has(p) && classifyFile(p) === "solid",
+  );
+  if (allOpen.length === 0) return;
+
+  let cancelled = false;
+  context.tsPropagationCancel?.();
+  context.tsPropagationCancel = () => { cancelled = true; };
+
+  (async () => {
+    for (let i = 0; i < allOpen.length; i++) {
+      if (cancelled) break;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      if (cancelled) break;
+
+      const p = allOpen[i];
+      if (!p) continue;
+      const tsDiags = collectTsDiagnosticsForFile(ls, p, true);
+      const prev = context.tsDiagCache.get(p);
+      if (!tsDiagsEqual(prev, tsDiags)) {
+        if (tsDiags.length > 0) {
+          context.tsDiagCache.set(p, tsDiags);
+        } else {
+          context.tsDiagCache.delete(p);
+        }
+        republishMergedDiagnostics(context, p);
+      }
+    }
+    context.tsPropagationCancel = null;
+  })();
+}
+
+/**
  * CLI entry point - create and start the server.
  */
 export function main(): void {
   const args = process.argv.slice(2);
   let logFile: string | undefined;
+  let enableTsDiagnostics = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--log-file" && args[i + 1] !== undefined) {
       logFile = args[i + 1];
-      break;
+      i++;
+    } else if (args[i] === "--enable-ts") {
+      enableTsDiagnostics = true;
     }
   }
-  const context = createServer({ logFile });
+  const context = createServer({ logFile, enableTsDiagnostics });
   startServer(context);
 }

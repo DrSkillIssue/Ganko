@@ -4,6 +4,8 @@ import type { SolidGraph } from "../../solid/impl"
 import { createLayoutModuleResolver } from "./module-resolver"
 import type { LayoutModuleResolver } from "./module-resolver"
 
+const CSS_COLOCATED_EXTENSIONS: readonly string[] = [".css"]
+
 export function collectCSSScopeBySolidFile(
   solids: readonly SolidGraph[],
   css: CSSGraph,
@@ -19,6 +21,25 @@ export function collectCSSScopeBySolidFile(
     const solid = solids[i]
     if (!solid) continue
     const scope = new Set<string>()
+
+    // Co-located CSS: if foo.tsx exists alongside foo.css, include foo.css
+    // (and its transitive @import chain) in scope. This handles CSS aggregation
+    // architectures where a central stylesheet @imports per-component CSS files
+    // rather than each component importing its own CSS via JS.
+    const colocatedCssPath = resolveColocatedCss(solid.file, cssFilesByNormalizedPath)
+    if (colocatedCssPath !== null) {
+      const colocatedScope = getOrCollectTransitiveScope(
+        colocatedCssPath,
+        resolver,
+        cssFilesByNormalizedPath,
+        transitiveScopeByEntryPath,
+      )
+      for (let k = 0; k < colocatedScope.length; k++) {
+        const cs = colocatedScope[k]
+        if (!cs) continue
+        scope.add(cs)
+      }
+    }
 
     for (let j = 0; j < solid.imports.length; j++) {
       const imp = solid.imports[j]
@@ -70,6 +91,31 @@ export function collectCSSScopeBySolidFile(
   }
 
   return out
+}
+
+/**
+ * Resolve a co-located CSS file for a solid file.
+ *
+ * Given `/project/components/select.tsx`, checks if any of
+ * `/project/components/select.css` exists in the CSS file index.
+ * Returns the canonical path if found, null otherwise.
+ */
+function resolveColocatedCss(
+  solidFilePath: string,
+  cssFilesByNormalizedPath: ReadonlyMap<string, unknown>,
+): string | null {
+  const dotIndex = solidFilePath.lastIndexOf(".")
+  if (dotIndex === -1) return null
+  const stem = solidFilePath.slice(0, dotIndex)
+
+  for (let i = 0; i < CSS_COLOCATED_EXTENSIONS.length; i++) {
+    const ext = CSS_COLOCATED_EXTENSIONS[i]
+    if (!ext) continue
+    const candidate = canonicalPath(stem + ext)
+    if (cssFilesByNormalizedPath.has(candidate)) return candidate
+  }
+
+  return null
 }
 
 function buildCSSFileIndex(
