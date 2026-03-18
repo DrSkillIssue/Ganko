@@ -32,15 +32,10 @@ const INLINE_TOUCH_TARGET_KEYS = new Set([
   "min-height",
   "width",
   "min-width",
-  "padding-left",
-  "padding-right",
-  "padding-inline",
-  "padding-inline-start",
-  "padding-inline-end",
 ])
 
 /** Native HTML tags that are inherently interactive touch targets. */
-const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea"])
+const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea", "label", "summary"])
 
 /**
  * ARIA roles whose purpose is direct user interaction. Elements with these roles

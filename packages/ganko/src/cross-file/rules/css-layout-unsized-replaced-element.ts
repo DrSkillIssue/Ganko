@@ -2,7 +2,7 @@ import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { parsePxValue } from "../../css/parser/value-util"
 import { defineCrossRule } from "../rule"
-import { type LayoutGraph, readElementsByTagName, readReservedSpaceFact } from "../layout"
+import { type LayoutGraph, type LayoutElementRef, readElementsByTagName, readReservedSpaceFact, readHostElementRef } from "../layout"
 import { getStaticNumericValue, getStaticStringFromJSXValue } from "../../solid/util/static-value"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { SolidGraph } from "../../solid/impl"
@@ -37,7 +37,8 @@ export const cssLayoutUnsizedReplacedElement = defineCrossRule({
       if (!ref) continue
 
       const reservedSpace = readReservedSpaceFact(context.layout, node)
-      if (hasReservedSize(ref.solid, node.attributes, ref.element, reservedSpace)) continue
+      const hostRef = readHostElementRef(context.layout, node)
+      if (hasReservedSize(ref.solid, node.attributes, ref.element, reservedSpace, hostRef)) continue
 
       emit(
         createDiagnostic(
@@ -59,27 +60,34 @@ function hasReservedSize(
   attributes: ReadonlyMap<string, string | null>,
   element: JSXElementEntity,
   reservedSpaceFact: ReturnType<typeof readReservedSpaceFact>,
+  hostElementRef: LayoutElementRef | null,
 ): boolean {
   if (reservedSpaceFact.hasReservedSpace) return true
 
   const attrWidth = parsePositiveLength(attributes.get("width"))
   const attrHeight = parsePositiveLength(attributes.get("height"))
+  // Call-site JSX attributes (static strings or numeric expressions).
   const jsxAttrWidth = readPositiveJsxAttribute(solid, element, "width")
   const jsxAttrHeight = readPositiveJsxAttribute(solid, element, "height")
+  // Host DOM element JSX attributes — populated when the node is a component call
+  // site resolved to a concrete DOM element (e.g. `<svg width={props.size ?? 24}>`).
+  // These cover dynamic expressions that are not capturable as static strings and
+  // are absent from `attributes` (which only stores statically-known values).
+  const hostJsxWidth = hostElementRef !== null
+    ? readPositiveJsxAttribute(hostElementRef.solid, hostElementRef.element, "width")
+    : false
+  const hostJsxHeight = hostElementRef !== null
+    ? readPositiveJsxAttribute(hostElementRef.solid, hostElementRef.element, "height")
+    : false
 
-  if ((attrWidth && attrHeight) || (jsxAttrWidth && jsxAttrHeight)) return true
+  if ((attrWidth && attrHeight) || (jsxAttrWidth && jsxAttrHeight) || (hostJsxWidth && hostJsxHeight)) return true
 
-  // Both width and height are declared via dynamic (non-static-string) expressions
-  // on the element or its resolved component host. `null` in the merged attributes
-  // map means the attribute is explicitly authored but not resolvable to a static
-  // string literal (e.g. `width={props.size ?? 24}`). Component call sites resolved
-  // to a replaced-media tag carry the host element's dynamic dimensions through the
-  // merged attribute map. Treat any element with both attributes explicitly declared
-  // — even as runtime expressions — as intentionally sized.
-  if (attributes.get("width") === null && attributes.get("height") === null) return true
-
-  const hasAnyWidth = attrWidth || jsxAttrWidth || reservedSpaceFact.hasUsableInlineDimension
-  const hasAnyHeight = attrHeight || jsxAttrHeight || reservedSpaceFact.hasUsableBlockDimension || reservedSpaceFact.hasContainIntrinsicSize
+  // Fold host JSX dimensions into the combined dimension flags so that
+  // aspect-ratio and contain-intrinsic-size branches benefit from them too.
+  // e.g. `<svg width={props.size ?? 24} style={{ aspectRatio: "1" }}>` has a
+  // usable inline dimension via the host even though no static `width` string exists.
+  const hasAnyWidth = attrWidth || jsxAttrWidth || hostJsxWidth || reservedSpaceFact.hasUsableInlineDimension
+  const hasAnyHeight = attrHeight || jsxAttrHeight || hostJsxHeight || reservedSpaceFact.hasUsableBlockDimension || reservedSpaceFact.hasContainIntrinsicSize
 
   if (reservedSpaceFact.hasUsableAspectRatio && (hasAnyWidth || hasAnyHeight)) return true
   if (reservedSpaceFact.hasContainIntrinsicSize && (hasAnyWidth || hasAnyHeight)) return true

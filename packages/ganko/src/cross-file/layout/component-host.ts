@@ -14,6 +14,7 @@ import type { Logger } from "@drskillissue/ganko-shared"
 import { noopLogger, isBlank } from "@drskillissue/ganko-shared"
 import type { LayoutModuleResolver } from "./module-resolver"
 import { resolveExternalModule } from "./module-resolver"
+import type { LayoutElementRef } from "./graph"
 
 const EMPTY_ATTRIBUTES: ReadonlyMap<string, string | null> = new Map()
 
@@ -28,6 +29,7 @@ const TRANSPARENT_SOLID_PRIMITIVES = new Set([
   "SuspenseList",
 ])
 
+/** Purely structural host metadata — no AST references. Safe to cache and compare. */
 export interface LayoutComponentHostDescriptor {
   readonly tagName: string | null
   readonly staticAttributes: ReadonlyMap<string, string | null>
@@ -35,14 +37,30 @@ export interface LayoutComponentHostDescriptor {
   readonly forwardsChildren: boolean
 }
 
+/**
+ * Pairs the structural host descriptor with a direct reference to the actual
+ * host DOM element in its own SolidGraph. The `hostElementRef` is non-null only
+ * when the component resolves unambiguously to a single concrete DOM element —
+ * it is null for polymorphic tags, unresolvable components, and components with
+ * multiple structurally-equal returns that use different JSX element nodes.
+ *
+ * Rules that need to inspect JSX attribute expressions on the host (e.g. dynamic
+ * `width={props.size ?? 24}`) should read `layout.hostElementRefsByNode` via
+ * `readHostElementRef`, which is populated from this field during graph construction.
+ */
+export interface ResolvedComponentHost {
+  readonly descriptor: LayoutComponentHostDescriptor
+  readonly hostElementRef: LayoutElementRef | null
+}
+
 export interface LayoutComponentHostResolver {
-  resolveHost(importerFile: string, tag: string): LayoutComponentHostDescriptor | null
+  resolveHost(importerFile: string, tag: string): ResolvedComponentHost | null
   isTransparentPrimitive(importerFile: string, tag: string): boolean
 }
 
 interface ComponentBinding {
   readonly kind: "component"
-  readonly host: LayoutComponentHostDescriptor
+  readonly host: ResolvedComponentHost
 }
 
 interface NamespaceBinding {
@@ -60,12 +78,15 @@ interface ImportBinding {
 }
 
 /**
- * A fully resolved host descriptor — the JSX root was a DOM element, so tagName,
+ * A fully resolved host entry — the JSX root was a DOM element, so tagName,
  * attributes, and class tokens are all known from the single-file analysis phase.
+ * `hostElementRef` points to the actual JSX element node and its SolidGraph so
+ * that rules can inspect dynamic attribute expressions on the host.
  */
 interface ResolvedComponentHostEntry {
   readonly resolution: "resolved"
   readonly descriptor: LayoutComponentHostDescriptor
+  readonly hostElementRef: LayoutElementRef | null
 }
 
 /**
@@ -112,7 +133,7 @@ export function createLayoutComponentHostResolver(
   const namespaceBindingCache = new Map<string, NamespaceBinding | null>()
   const resolvingLocal = new Set<string>()
   const resolvingExport = new Set<string>()
-  const hostByTagCache = new Map<string, LayoutComponentHostDescriptor | null>()
+  const hostByTagCache = new Map<string, ResolvedComponentHost | null>()
 
   return {
     resolveHost(importerFile, tag) {
@@ -129,13 +150,13 @@ export function createLayoutComponentHostResolver(
       }
 
       if (binding.kind === "component") {
-        if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): component, tagName=${binding.host.tagName}, attrs=[${[...binding.host.staticAttributes.keys()]}]`)
+        if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): component, tagName=${binding.host.descriptor.tagName}, attrs=[${[...binding.host.descriptor.staticAttributes.keys()]}]`)
         hostByTagCache.set(cacheKey, binding.host)
         return binding.host
       }
 
       const host = binding.base ? binding.base.host : null
-      if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): namespace, base=${host?.tagName ?? "null"}`)
+      if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): namespace, base=${host?.descriptor.tagName ?? "null"}`)
       hostByTagCache.set(cacheKey, host)
       return host
     },
@@ -151,49 +172,50 @@ export function createLayoutComponentHostResolver(
   }
 
   /**
-   * Resolves a ComponentHostEntry to a final LayoutComponentHostDescriptor.
+   * Resolves a ComponentHostEntry to a final ResolvedComponentHost.
    *
-   * For resolved entries, returns the descriptor directly.
+   * For resolved entries, returns the descriptor and hostElementRef directly.
    * For deferred entries, recursively resolves the inner component tag through
-   * the binding chain, then merges call-site attributes/classes from each layer.
+   * the binding chain, merges call-site attributes/classes from each layer,
+   * and propagates the leaf DOM element's hostElementRef.
    *
    * Returns null only when the inner component resolves to a non-component binding
    * or cyclic resolution is detected (handled by the existing resolvingLocal/resolvingExport guards).
    */
-  function resolveComponentHostEntry(entry: ComponentHostEntry): LayoutComponentHostDescriptor | null {
-    if (entry.resolution === "resolved") return entry.descriptor
+  function resolveComponentHostEntry(entry: ComponentHostEntry): ResolvedComponentHost | null {
+    if (entry.resolution === "resolved") {
+      return { descriptor: entry.descriptor, hostElementRef: entry.hostElementRef }
+    }
 
     if (logger.enabled) logger.trace(`[component-host] resolveComponentHostEntry: deferred innerTag=${entry.innerTag}, file=${entry.filePath}, attrs=[${[...entry.staticAttributes.keys()]}]`)
 
     const innerBinding = resolveLocalIdentifierBinding(entry.filePath, entry.innerTag)
     if (logger.enabled) logger.trace(`[component-host]   innerBinding=${innerBinding === null ? "null" : innerBinding.kind}`)
     const innerHost = extractHostFromBinding(innerBinding)
-    if (logger.enabled) logger.trace(`[component-host]   innerHost=${innerHost === null ? "null" : `tagName=${innerHost.tagName}, attrs=[${[...innerHost.staticAttributes.keys()]}]`}`)
+    if (logger.enabled) logger.trace(`[component-host]   innerHost=${innerHost === null ? "null" : `tagName=${innerHost.descriptor.tagName}, attrs=[${[...innerHost.descriptor.staticAttributes.keys()]}]`}`)
 
-    let tagName = innerHost !== null ? innerHost.tagName : null
+    let tagName = innerHost !== null ? innerHost.descriptor.tagName : null
     if (tagName === null) {
       tagName = resolveTagNameFromPolymorphicProp(entry.staticAttributes)
       if (logger.enabled) logger.trace(`[component-host]   polymorphic fallback: tagName=${tagName}`)
     }
     const staticAttributes = innerHost !== null
-      ? mergeStaticAttributes(entry.staticAttributes, innerHost.staticAttributes)
+      ? mergeStaticAttributes(entry.staticAttributes, innerHost.descriptor.staticAttributes)
       : entry.staticAttributes
     const staticClassTokens = innerHost !== null
-      ? mergeStaticClassTokens(entry.staticClassTokens, innerHost.staticClassTokens)
+      ? mergeStaticClassTokens(entry.staticClassTokens, innerHost.descriptor.staticClassTokens)
       : entry.staticClassTokens
-    const forwardsChildren = entry.forwardsChildren || (innerHost !== null && innerHost.forwardsChildren)
+    const forwardsChildren = entry.forwardsChildren || (innerHost !== null && innerHost.descriptor.forwardsChildren)
 
     if (logger.enabled) logger.trace(`[component-host]   resolved: tagName=${tagName}, attrs=[${[...staticAttributes.keys()]}], classes=[${staticClassTokens}]`)
 
     return {
-      tagName,
-      staticAttributes,
-      staticClassTokens,
-      forwardsChildren,
+      descriptor: { tagName, staticAttributes, staticClassTokens, forwardsChildren },
+      hostElementRef: innerHost?.hostElementRef ?? null,
     }
   }
 
-  function extractHostFromBinding(binding: LayoutBinding | null): LayoutComponentHostDescriptor | null {
+  function extractHostFromBinding(binding: LayoutBinding | null): ResolvedComponentHost | null {
     if (binding === null) return null
     if (binding.kind === "component") return binding.host
     return binding.base !== null ? binding.base.host : null
@@ -238,10 +260,7 @@ export function createLayoutComponentHostResolver(
     if (hostEntry) {
       const resolved = resolveComponentHostEntry(hostEntry)
       if (resolved !== null) {
-        const binding: ComponentBinding = {
-          kind: "component",
-          host: resolved,
-        }
+        const binding: ComponentBinding = { kind: "component", host: resolved }
         localBindingCache.set(key, binding)
         resolvingLocal.delete(key)
         return binding
@@ -321,7 +340,7 @@ export function createLayoutComponentHostResolver(
     const baseExpression = toExpressionArgument(firstArg)
     if (baseExpression === null) return null
     const baseBinding = resolveBindingFromExpression(filePath, baseExpression)
-    if (logger.enabled) logger.trace(`[component-host] Object.assign base: ${baseBinding === null ? "null" : baseBinding.kind}${baseBinding?.kind === "component" ? `, tagName=${baseBinding.host.tagName}` : ""}`)
+    if (logger.enabled) logger.trace(`[component-host] Object.assign base: ${baseBinding === null ? "null" : baseBinding.kind}${baseBinding?.kind === "component" ? `, tagName=${baseBinding.host.descriptor.tagName}` : ""}`)
 
     let baseComponent: ComponentBinding | null = null
     const members = new Map<string, LayoutBinding>()
@@ -353,7 +372,7 @@ export function createLayoutComponentHostResolver(
       appendObjectExpressionMembers(filePath, argument, members)
     }
 
-    if (logger.enabled) logger.trace(`[component-host] Object.assign result: base=${baseComponent === null ? "null" : `tagName=${baseComponent.host.tagName}`}, members=[${[...members.keys()]}]`)
+    if (logger.enabled) logger.trace(`[component-host] Object.assign result: base=${baseComponent === null ? "null" : `tagName=${baseComponent.host.descriptor.tagName}`}, members=[${[...members.keys()]}]`)
     if (baseComponent === null && members.size === 0) return null
 
     return {
@@ -667,6 +686,7 @@ function resolveComponentHostEntryForFunction(
   fn: FunctionEntity,
 ): ComponentHostEntry | null {
   let entry: ComponentHostEntry | null = null
+  let hostElementRefAgreed = true
 
   const bodyEntry = resolveHostEntryFromFunctionBody(graph, fn)
   if (bodyEntry !== null) {
@@ -686,8 +706,27 @@ function resolveComponentHostEntryForFunction(
       continue
     }
 
-    if (areComponentHostEntriesEqual(entry, returnEntry)) continue
+    if (areComponentHostEntriesEqual(entry, returnEntry)) {
+      // Two structurally equal resolved returns that point to different JSX element
+      // nodes (e.g., two `<svg>` returns with different dynamic expressions) cannot
+      // be resolved to a single authoritative host element. Nullify rather than
+      // silently inheriting the first one, which could produce incorrect dynamic
+      // attribute lookups in rules that call readHostElementRef.
+      if (
+        hostElementRefAgreed &&
+        entry.resolution === "resolved" &&
+        returnEntry.resolution === "resolved" &&
+        entry.hostElementRef !== returnEntry.hostElementRef
+      ) {
+        hostElementRefAgreed = false
+      }
+      continue
+    }
     return null
+  }
+
+  if (!hostElementRefAgreed && entry !== null && entry.resolution === "resolved") {
+    return { resolution: "resolved", descriptor: entry.descriptor, hostElementRef: null }
   }
 
   return entry
@@ -739,6 +778,7 @@ function resolveHostEntryFromJSXElement(graph: SolidGraph, node: ts.JsxElement |
         staticClassTokens: getStaticClassTokensForElementEntity(graph, element),
         forwardsChildren: detectChildrenForwarding(element),
       },
+      hostElementRef: { solid: graph, element },
     }
   }
 

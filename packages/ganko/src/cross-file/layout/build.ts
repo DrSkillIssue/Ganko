@@ -10,6 +10,7 @@ import {
   type LayoutCascadedDeclaration,
   type LayoutContainingBlockFact,
   type LayoutElementNode,
+  type LayoutElementRef,
   type LayoutFlowParticipationFact,
   type LayoutGraph,
   type LayoutMatchEdge,
@@ -82,6 +83,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const childrenByParentNodeMutable = new Map<LayoutElementNode, LayoutElementNode[]>()
   const elementBySolidFileAndIdMutable = new Map<string, Map<number, LayoutElementNode>>()
   const elementRefsBySolidFileAndIdMutable = new Map<string, Map<number, { solid: SolidGraph; element: JSXElementEntity }>>()
+  const hostElementRefsByNodeMutable = new Map<LayoutElementNode, LayoutElementRef>()
   const appliesByElementNodeMutable = new Map<LayoutElementNode, LayoutMatchEdge[]>()
   const selectorsById = new Map<number, SelectorEntity>()
   const monitoredDeclarationsBySelectorId = new Map<number, readonly MonitoredDeclaration[]>()
@@ -224,6 +226,10 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
         textualContent: record.textualContent,
         isControl: isControlTag(record.tagName),
         isReplaced: isReplacedTag(record.tagName),
+      }
+
+      if (record.hostElementRef !== null) {
+        hostElementRefsByNodeMutable.set(node, record.hostElementRef)
       }
 
       elements.push(node)
@@ -371,6 +377,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     childrenByParentNode: childrenByParentNodeMutable,
     elementBySolidFileAndId: elementBySolidFileAndIdMutable,
     elementRefsBySolidFileAndId: elementRefsBySolidFileAndIdMutable,
+    hostElementRefsByNode: hostElementRefsByNodeMutable,
     appliesByNode,
     selectorCandidatesByNode,
     selectorsById,

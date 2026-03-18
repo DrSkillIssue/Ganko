@@ -1,4 +1,5 @@
 export { LayoutScrollAxis } from "./graph"
+export type { ResolvedComponentHost } from "./component-host"
 export type {
   LayoutElementNode,
   LayoutElementRef,
@@ -131,6 +132,7 @@ export {
   readDynamicSlotCandidateElements,
   readElementRef,
   readElementRefById,
+  readHostElementRef,
   readElementsByKnownSignalValue,
   readElementsByTagName,
   readElementsWithConditionalOffsetDelta,
