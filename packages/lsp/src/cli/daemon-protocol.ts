@@ -325,7 +325,6 @@ function createFrameReader(
 
     for (;;) {
       if (contentLength < 0) {
-        // eslint-disable-next-line solid/prefer-set-lookup-in-loop -- Buffer.indexOf is a byte scan, not a collection lookup
         const sepIndex = buffer.indexOf(HEADER_SEPARATOR);
         if (sepIndex < 0) return;
 
@@ -361,7 +360,7 @@ function createFrameReader(
       buffer = buffer.subarray(contentLength);
       contentLength = -1;
 
-      // eslint-disable-next-line solid/avoid-unsafe-type-annotations -- JSON.parse returns unknown; Zod validates in onParsed
+      // eslint-disable-next-line solid/avoid-unsafe-type-annotations -- JSON.parse returns unknown by design
       let parsed: unknown;
       try {
         parsed = JSON.parse(body);

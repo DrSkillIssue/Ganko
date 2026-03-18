@@ -84,6 +84,10 @@ export function typeIsArray(graph: SolidGraph, node: ts.Node): boolean {
   return graph.typeResolver.isArrayType(node);
 }
 
+export function typeIsStrictArray(graph: SolidGraph, node: ts.Node): boolean {
+  return graph.typeResolver.isStrictArrayType(node);
+}
+
 export function typeIsCallable(graph: SolidGraph, node: ts.Node): boolean {
   return graph.typeResolver.isCallableType(node);
 }

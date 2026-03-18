@@ -10,7 +10,7 @@ import type {
 import { SymbolKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
-import { pathToUri } from "@drskillissue/ganko-shared";
+import { pathToUri, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle workspace/symbol request.
@@ -49,6 +49,6 @@ export function handleWorkspaceSymbol(
     });
   }
 
-  if (log.enabled) log.trace(`workspaceSymbol: query="${query}" → ${symbols.length} results`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`workspaceSymbol: query="${query}" → ${symbols.length} results`);
   return symbols.length > 0 ? symbols : null;
 }

@@ -10,7 +10,7 @@ import type {
 import { SymbolKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
 /**
@@ -30,7 +30,7 @@ export function handleDocumentSymbol(
   if (!tree) return null;
 
   const symbols = convertTree(tree, sf);
-  if (log.enabled) log.trace(`documentSymbol: ${symbols.length} symbols for ${path}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`documentSymbol: ${symbols.length} symbols for ${path}`);
   return symbols.length > 0 ? symbols : null;
 }
 

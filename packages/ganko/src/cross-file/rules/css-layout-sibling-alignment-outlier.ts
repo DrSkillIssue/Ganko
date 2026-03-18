@@ -1,3 +1,4 @@
+import { Level } from "@drskillissue/ganko-shared"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import {
@@ -44,7 +45,7 @@ const siblingAlignmentDetector: LayoutDetector<AlignmentCase> = {
   id: "sibling-alignment-outlier",
   collect: collectAlignmentCases,
   evaluate(input, context) {
-    if (context.logger.enabled) {
+    if (context.logger.isLevelEnabled(Level.Trace)) {
       const ctx = input.context
       context.logger.trace(
         `[sibling-alignment] evaluate subject=${input.subject.elementKey} tag=${input.subject.tag}`
@@ -102,7 +103,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
     const detections = runLayoutDetector(context, siblingAlignmentDetector)
     const uniqueDetections = dedupeDetectionsBySubject(detections)
 
-    if (log.enabled) {
+    if (log.isLevelEnabled(Level.Debug)) {
       log.debug(
         `[sibling-alignment] raw=${detections.length} deduped=${uniqueDetections.length}`,
       )
@@ -120,7 +121,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
 
       // Skip low-confidence detections where the rule itself is uncertain.
       if (detection.evidence.confidence < MIN_CONFIDENCE_THRESHOLD) {
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Debug)) {
           log.debug(
             `${logPrefix} SKIP: confidence=${detection.evidence.confidence.toFixed(2)} < threshold=${MIN_CONFIDENCE_THRESHOLD}`,
           )
@@ -140,7 +141,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         && Math.abs(estimatedOffset) < MIN_OFFSET_PX_THRESHOLD
         && !hasNonOffsetPrimaryEvidence(detection.evidence.topFactors)
       ) {
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Debug)) {
           log.debug(
             `${logPrefix} SKIP: offset=${estimatedOffset.toFixed(2)}px < ${MIN_OFFSET_PX_THRESHOLD}px`
             + ` (no non-offset primary evidence, topFactors=[${detection.evidence.topFactors.join(",")}])`,
@@ -158,7 +159,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         detection.caseData.cohort.parentElementKey,
         detection.caseData.subject.solidFile,
       )) {
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Debug)) {
           log.debug(`${logPrefix} SKIP: out-of-flow ancestor`)
         }
         continue
@@ -170,7 +171,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         detection.caseData.subject.elementId,
       )
       if (!subjectRef) {
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Debug)) {
           log.debug(`${logPrefix} SKIP: no node ref`)
         }
         continue
@@ -196,7 +197,7 @@ export const cssLayoutSiblingAlignmentOutlier = defineCrossRule({
         ? ` ${firstChar.toUpperCase()}${primaryFix.slice(1)}.`
         : ""
 
-      if (log.enabled) {
+      if (log.isLevelEnabled(Level.Debug)) {
         log.debug(
           `${logPrefix} EMIT: severity=${severity} confidence=${confidence}`
           + ` offset=${offset?.toFixed(2) ?? "null"}`

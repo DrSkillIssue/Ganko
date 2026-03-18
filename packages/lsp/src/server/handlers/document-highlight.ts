@@ -10,7 +10,7 @@ import type {
 import { DocumentHighlightKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/documentHighlight request.
@@ -41,6 +41,6 @@ export function handleDocumentHighlight(
     }
   }
 
-  if (log.enabled) log.trace(`documentHighlight: ${result.length} highlights at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`documentHighlight: ${result.length} highlights at ${path}:${params.position.line}:${params.position.character}`);
   return result.length > 0 ? result : null;
 }

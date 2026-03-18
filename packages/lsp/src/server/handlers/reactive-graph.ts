@@ -8,7 +8,7 @@
  */
 import type { HandlerContext } from "./handler-context";
 import type { SolidGraph, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /** Node in the reactive graph response. */
 interface ReactiveGraphNode {
@@ -55,7 +55,7 @@ export function handleReactiveGraph(
 
   const graph = ctx.getSolidGraph(path);
   if (!graph) {
-    if (log.enabled) log.trace(`reactiveGraph: no SolidGraph for ${path}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`reactiveGraph: no SolidGraph for ${path}`);
     return null;
   }
 
@@ -63,11 +63,11 @@ export function handleReactiveGraph(
   const edges = buildEdges(graph);
 
   if (nodes.length === 0) {
-    if (log.enabled) log.trace(`reactiveGraph: 0 nodes for ${path}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`reactiveGraph: 0 nodes for ${path}`);
     return null;
   }
 
-  if (log.enabled) log.trace(`reactiveGraph: ${nodes.length} nodes, ${edges.length} edges for ${path}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`reactiveGraph: ${nodes.length} nodes, ${edges.length} edges for ${path}`);
   return {
     mermaid: toMermaid(nodes, edges),
     dot: toDot(nodes, edges),

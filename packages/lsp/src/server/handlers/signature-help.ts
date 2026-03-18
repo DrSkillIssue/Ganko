@@ -15,7 +15,7 @@ import ts from "typescript";
 
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /** Solid primitive signatures — zero-cost static lookup for rich docs */
 const SOLID_SIGNATURES: ReadonlyMap<string, SignatureInformation> = new Map([
@@ -212,7 +212,7 @@ export function handleSignatureHelp(
     signatures[i] = sigInfo;
   }
 
-  if (log.enabled) log.trace(`signatureHelp: ${signatures.length} signatures at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`signatureHelp: ${signatures.length} signatures at ${path}:${params.position.line}:${params.position.character}`);
   return {
     signatures,
     activeSignature: items.selectedItemIndex,

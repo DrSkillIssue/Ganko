@@ -1,3 +1,4 @@
+import { Level } from "@drskillissue/ganko-shared"
 import type { AlignmentContextKind, ContextCertainty } from "./context-model"
 import type { AlignmentFactorId } from "./signal-model"
 import type { CrossRuleContext } from "../rule"
@@ -66,7 +67,7 @@ export function runLayoutDetector<TCase>(
         result.evidence.posteriorLower,
         result.evidence.posteriorUpper,
       )
-      if (log.enabled) {
+      if (log.isLevelEnabled(Level.Debug)) {
         log.debug(
           `[${detector.id}] accept case=${i}`
           + ` severity=${result.evidence.severity.toFixed(2)}`
@@ -85,7 +86,7 @@ export function runLayoutDetector<TCase>(
 
     recordPolicyMetrics(context, result.evidenceMass, result.posteriorLower, result.posteriorUpper)
 
-    if (log.enabled) {
+    if (log.isLevelEnabled(Level.Debug)) {
       log.debug(
         `[${detector.id}] reject case=${i}`
         + ` reason=${result.reason}`

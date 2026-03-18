@@ -29,11 +29,13 @@ export { canonicalPath, uriToPath, pathToUri } from "./path";
 // Logging
 export {
   LOG_LEVELS,
+  Level,
   noopLogger,
   parseLogLevel,
   createLogger,
   prefixLogger,
   type LogLevel,
+  type LevelValue,
   type Logger,
   type LeveledLogger,
   type LogWriter,

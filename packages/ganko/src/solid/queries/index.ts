@@ -69,6 +69,7 @@ export {
   typeIsObject,
   typeIsPrimitive,
   typeIsArray,
+  typeIsStrictArray,
   typeIsCallable,
   getArrayElementKind,
 } from "./type";

@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { prefixLogger, createLogger, noopLogger } from "@drskillissue/ganko-shared";
+import { prefixLogger, createLogger, noopLogger, Level } from "@drskillissue/ganko-shared";
 import type { LogWriter } from "@drskillissue/ganko-shared";
 import { createFileWriter, createCompositeWriter } from "../../src/core/logger";
 
@@ -45,14 +45,15 @@ describe("prefixLogger", () => {
     ]);
   });
 
-  it("delegates enabled and level to underlying logger", () => {
+  it("delegates isLevelEnabled and level to underlying logger", () => {
     const root = createLogger({
       trace() {}, debug() {}, info() {},
       warning() {}, error() {}, critical() {},
     }, "warning");
     const prefixed = prefixLogger(root, "gc");
 
-    expect(prefixed.enabled).toBe(true);
+    expect(prefixed.isLevelEnabled(Level.Warning)).toBe(true);
+    expect(prefixed.isLevelEnabled(Level.Debug)).toBe(false);
     expect(prefixed.level).toBe("warning");
   });
 
@@ -68,9 +69,9 @@ describe("prefixLogger", () => {
     expect(prefixed.level).toBe("error");
   });
 
-  it("returns enabled=false when wrapping noopLogger", () => {
+  it("returns isLevelEnabled=false when wrapping noopLogger", () => {
     const prefixed = prefixLogger(noopLogger, "test");
-    expect(prefixed.enabled).toBe(false);
+    expect(prefixed.isLevelEnabled(Level.Trace)).toBe(false);
     expect(prefixed.level).toBe("off");
   });
 

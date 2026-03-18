@@ -10,7 +10,7 @@
 
 import ts from "typescript";
 import type { Logger } from "@drskillissue/ganko-shared";
-import { noopLogger } from "@drskillissue/ganko-shared";
+import { noopLogger, Level } from "@drskillissue/ganko-shared";
 
 import type { ReactiveKind } from "../entities/variable";
 
@@ -247,6 +247,37 @@ export class TypeResolver {
     }
   }
 
+  /**
+   * Strict array check: only matches Array<T>, T[], ReadonlyArray<T>, and tuples.
+   * Does NOT match typed arrays (Uint8Array, Buffer, etc.) or other types with
+   * a numeric index signature.
+   */
+  isStrictArrayType(node: ts.Node): boolean {
+    try {
+      const tsType = this.checker.getTypeAtLocation(node);
+      return this.checkIsStrictArrayType(tsType);
+    } catch {
+      return false;
+    }
+  }
+
+  private checkIsStrictArrayType(tsType: ts.Type): boolean {
+    if (tsType.flags & 524288) { // TypeFlags.Object
+      const objFlags = getObjectFlags(tsType);
+      if (objFlags & 8) return true; // Tuple
+      if (objFlags & 4) { // Reference (Array<T>, ReadonlyArray<T>)
+        const name = tsType.getSymbol()?.getName();
+        if (name === "Array" || name === "ReadonlyArray") return true;
+      }
+    }
+    if (tsType.isUnion()) {
+      for (const t of tsType.types) {
+        if (this.checkIsStrictArrayType(t)) return true;
+      }
+    }
+    return false;
+  }
+
   private checkIsArrayType(tsType: ts.Type): boolean {
     // Check if it's an object type first
     if (tsType.flags & 524288) { // TypeFlags.Object
@@ -318,7 +349,7 @@ export class TypeResolver {
       // If assignable, the cast is unnecessary
       const result = this.checker.isTypeAssignableTo(exprTsType, targetTsType);
 
-      if (this.logger.enabled) {
+      if (this.logger.isLevelEnabled(Level.Debug)) {
         const exprStr = this.checker.typeToString(exprTsType);
         const targetStr = this.checker.typeToString(targetTsType);
         this.logger.debug(`isUnnecessaryCast: expr="${exprStr.slice(0, 120)}" target="${targetStr.slice(0, 120)}" assignable=${result} exprFlags=${exprTsType.flags} targetFlags=${targetTsType.flags}`);

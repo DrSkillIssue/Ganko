@@ -6,7 +6,7 @@
 import type { ReferenceParams, Location } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri } from "@drskillissue/ganko-shared";
+import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/references request.
@@ -19,7 +19,7 @@ export function handleReferences(
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) {
-    if (log.enabled) log.trace(`references: no TS file for ${path}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`references: no TS file for ${path}`);
     return null;
   }
   const { ls, sf } = tsFile;
@@ -27,7 +27,7 @@ export function handleReferences(
   const offset = positionToOffset(sf, params.position);
   const refs = ls.findReferences(path, offset);
   if (!refs || refs.length === 0) {
-    if (log.enabled) log.trace(`references: none at ${path}:${params.position.line}:${params.position.character}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`references: none at ${path}:${params.position.line}:${params.position.character}`);
     return null;
   }
 
@@ -46,6 +46,6 @@ export function handleReferences(
     }
   }
 
-  if (log.enabled) log.trace(`references: ${locations.length} at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`references: ${locations.length} at ${path}:${params.position.line}:${params.position.character}`);
   return locations.length > 0 ? locations : null;
 }

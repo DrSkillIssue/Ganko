@@ -9,7 +9,7 @@
  * On Node: uses `globalThis.gc()` if `--expose-gc` flag is set.
  */
 
-import { triggerGC, takeMemorySnapshot, snapshotToLogLine } from "@drskillissue/ganko-shared";
+import { triggerGC, takeMemorySnapshot, snapshotToLogLine, Level } from "@drskillissue/ganko-shared";
 import type { Logger } from "../core/logger";
 
 /** Default delay in ms before triggering GC after last request. */
@@ -54,7 +54,7 @@ export class GcTimer {
     const triggered = triggerGC();
     if (!triggered) return;
 
-    if (!this.log.enabled) return;
+    if (!this.log.isLevelEnabled(Level.Debug)) return;
     const snapshot = takeMemorySnapshot();
     this.log.debug(`completed | ${snapshotToLogLine(snapshot)}`);
   }

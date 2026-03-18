@@ -369,6 +369,38 @@ describe("CLS rule suite", () => {
     expect(diagnostics).toHaveLength(0)
   })
 
+  it("does not flag svg with nullish-coalescing dynamic width and height", () => {
+    const diagnostics = runRule(
+      "css-layout-unsized-replaced-element",
+      `
+        type Props = { size?: number }
+        export function Icon(props: Props) {
+          return <svg width={props.size ?? 24} height={props.size ?? 24} viewBox="0 0 24 24" />
+        }
+      `,
+    )
+
+    expect(diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag component-resolved svg whose host declares dynamic width and height", () => {
+    const diagnostics = runRule(
+      "css-layout-unsized-replaced-element",
+      `
+        type Props = { size?: number }
+        function Icon(props: Props) {
+          return <svg width={props.size ?? 24} height={props.size ?? 24} viewBox="0 0 24 24" />
+        }
+        export function App() {
+          return <Icon size={24} />
+        }
+      `,
+    )
+
+    // Neither the svg definition nor the component call site should be flagged
+    expect(diagnostics).toHaveLength(0)
+  })
+
   it("flags replaced elements with fit-content and auto dimensions", () => {
     const diagnostics = runRule(
       "css-layout-unsized-replaced-element",

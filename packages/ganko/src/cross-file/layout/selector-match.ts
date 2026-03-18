@@ -17,7 +17,7 @@ import {
 import type { LayoutElementNode } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { noopLogger } from "@drskillissue/ganko-shared"
+import { noopLogger, Level } from "@drskillissue/ganko-shared"
 
 interface CompoundPseudoConstraints {
   readonly firstChild: boolean
@@ -332,7 +332,7 @@ function matchesChain(
 
   // Same-file root element fallback for descendant combinators.
   if (fileRootElements !== null) {
-    if (logger.enabled) {
+    if (logger.isLevelEnabled(Level.Trace)) {
       const compoundDesc = describeCompound(targetCompound)
       logger.trace(`[selector-match] fallback: node=${node.key} tag=${node.tagName} checking ${fileRootElements.length} roots for compound=${compoundDesc}`)
     }
@@ -343,11 +343,11 @@ function matchesChain(
       if (root.solidFile !== node.solidFile) continue
       perf.ancestryChecks++
       const compoundResult = matchesCompound(root, targetCompound)
-      if (logger.enabled && compoundResult === "no-match") {
+      if (logger.isLevelEnabled(Level.Trace) && compoundResult === "no-match") {
         logger.trace(`[selector-match] fallback MISS: root=${root.key} tag=${root.tagName} attrs=[${[...root.attributes.entries()].map(([k,v]) => `${k}=${v}`).join(",")}]`)
       }
       if (compoundResult !== "no-match") {
-        if (logger.enabled) {
+        if (logger.isLevelEnabled(Level.Debug)) {
           const compoundDesc = describeCompound(targetCompound)
           logger.debug(`[selector-match] fallback HIT: node=${node.key} tag=${node.tagName} matched root=${root.key} tag=${root.tagName} compound=${compoundDesc} isFinal=${isFinal}`)
         }

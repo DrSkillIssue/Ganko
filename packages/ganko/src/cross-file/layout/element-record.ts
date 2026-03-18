@@ -4,13 +4,13 @@ import type { JSXElementEntity } from "../../solid/entities/jsx"
 import { getStaticClassTokensForElementEntity, getStaticStyleKeysForElement, objectKeyName } from "../../solid/queries/jsx-derived"
 import { getStaticNumericValue, getStaticStringValue } from "../../solid/util/static-value"
 import { containsJSX } from "../../solid/util/function"
-import { noopLogger, isBlank } from "@drskillissue/ganko-shared"
+import { noopLogger, isBlank, Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import { toKebabCase } from "@drskillissue/ganko-shared"
 import { LayoutTextualContentState } from "./signal-model"
 import { isControlTag, isMonitoredSignal } from "./signal-normalization"
-import { toLayoutElementKey } from "./graph"
-import { collectStaticAttributes, createLayoutComponentHostResolver, type LayoutComponentHostDescriptor } from "./component-host"
+import { toLayoutElementKey, type LayoutElementRef } from "./graph"
+import { collectStaticAttributes, createLayoutComponentHostResolver, type ResolvedComponentHost, type LayoutComponentHostDescriptor } from "./component-host"
 import type { SelectorFeatureRequirements } from "./selector-match"
 import { buildSelectorDispatchKeys } from "./selector-dispatch"
 
@@ -19,7 +19,7 @@ export interface LayoutElementCompositionMeta {
   readonly participates: boolean
   readonly tag: string | null
   readonly tagName: string | null
-  readonly hostDescriptor: LayoutComponentHostDescriptor | null
+  readonly resolvedHost: ResolvedComponentHost | null
 }
 
 export interface LayoutElementRecord {
@@ -35,6 +35,14 @@ export interface LayoutElementRecord {
   readonly inlineStyleValues: ReadonlyMap<string, string>
   readonly textualContent: LayoutTextualContentState
   readonly parentElementId: number | null
+  /**
+   * Reference to the actual host DOM element when this record represents a
+   * component call site resolved to a concrete DOM element. Null for native
+   * DOM elements (the element itself is the host) and unresolvable components.
+   * Used by rules that need to inspect host JSX attributes (e.g. dynamic
+   * `width`/`height` expressions) that are not captured in `attributes`.
+   */
+  readonly hostElementRef: LayoutElementRef | null
 }
 
 export interface SiblingTotals {
@@ -109,7 +117,7 @@ export function getTextualContentState(
     if (!child) continue
     if (child.kind === "expression") {
       if (isStructuralExpression(child.node)) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (structural expression child)`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (structural expression child)`)
         memo.set(element.id, LayoutTextualContentState.Unknown)
         return LayoutTextualContentState.Unknown
       }
@@ -134,12 +142,12 @@ export function getTextualContentState(
     if (!child.isDomElement) {
       const childMeta = compositionMetaByElementId.get(child.id)
       if (childMeta !== undefined && isControlTag(childMeta.tagName)) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag}#${child.id} resolves to control tag=${childMeta.tagName}, skipping`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag}#${child.id} resolves to control tag=${childMeta.tagName}, skipping`)
         continue
       }
 
       if (childState !== LayoutTextualContentState.No) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag ?? child.id}#${child.id} has state=${childState} → childHasUnknown`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag ?? child.id}#${child.id} has state=${childState} → childHasUnknown`)
         childHasUnknown = true
       }
       continue
@@ -154,13 +162,13 @@ export function getTextualContentState(
   }
 
   if (childHasUnknown) {
-    if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (child has unknown)`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (child has unknown)`)
     memo.set(element.id, LayoutTextualContentState.Unknown)
     return LayoutTextualContentState.Unknown
   }
 
   if (hasTextOnlyExpression || childHasDynamicText) {
-    if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → dynamic-text`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → dynamic-text`)
     memo.set(element.id, LayoutTextualContentState.DynamicText)
     return LayoutTextualContentState.DynamicText
   }
@@ -196,17 +204,19 @@ export function collectLayoutElementRecordsForSolid(
     const localClassTokens = selectorRequirements.needsClassTokens
       ? getStaticClassTokensForElementEntity(solid, element)
       : EMPTY_STRING_LIST
-    const classTokens = mergeClassTokens(localClassTokens, meta.hostDescriptor?.staticClassTokens)
+    const classTokens = mergeClassTokens(localClassTokens, meta.resolvedHost?.descriptor.staticClassTokens)
     const classTokenSet = classTokens.length === 0 ? EMPTY_CLASS_TOKEN_SET : createClassTokenSet(classTokens)
     const inlineStyleKeys = getStaticStyleKeysForElement(solid, element.id)
     const localAttributes = selectorRequirements.needsAttributes
       ? collectStaticAttributes(element)
       : EMPTY_ATTRIBUTES
-    const attributes = mergeAttributes(localAttributes, meta.hostDescriptor?.staticAttributes)
+    const attributes = mergeAttributes(localAttributes, meta.resolvedHost?.descriptor.staticAttributes)
     const selectorDispatchKeys = buildSelectorDispatchKeys(attributes, classTokens)
     const inlineStyleValues = inlineStyleValuesByElementId.get(element.id) ?? EMPTY_INLINE_STYLE_VALUES
     const textualContent = getTextualContentState(element, textContentMemo, compositionMetaByElementId, logger)
     const parentElementId = resolveComposedParentElementId(element, compositionMetaByElementId)
+
+    const hostElementRef: LayoutElementRef | null = meta.resolvedHost?.hostElementRef ?? null
 
     out.push({
       element,
@@ -221,6 +231,7 @@ export function collectLayoutElementRecordsForSolid(
       inlineStyleValues,
       textualContent,
       parentElementId,
+      hostElementRef,
     })
   }
 
@@ -237,7 +248,7 @@ function collectCompositionMetaByElementId(
     const element = solid.jsxElements[i]
     if (!element) continue
 
-    const hostDescriptor = resolveHostDescriptorForElement(
+    const resolvedHost = resolveHostForElement(
       componentHostResolver,
       solid.file,
       element,
@@ -246,10 +257,10 @@ function collectCompositionMetaByElementId(
       componentHostResolver,
       solid.file,
       element,
-      hostDescriptor,
+      resolvedHost,
     )
     const participates = element.tag !== null && !isTransparentPrimitive
-    const tag = resolveEffectiveTag(element, hostDescriptor)
+    const tag = resolveEffectiveTag(element, resolvedHost?.descriptor ?? null)
     const tagName = tag ? tag.toLowerCase() : null
 
     out.set(element.id, {
@@ -257,18 +268,18 @@ function collectCompositionMetaByElementId(
       participates,
       tag,
       tagName,
-      hostDescriptor,
+      resolvedHost,
     })
   }
 
   return out
 }
 
-function resolveHostDescriptorForElement(
+function resolveHostForElement(
   componentHostResolver: ReturnType<typeof createLayoutComponentHostResolver>,
   solidFile: string,
   element: JSXElementEntity,
-): LayoutComponentHostDescriptor | null {
+): ResolvedComponentHost | null {
   if (element.tag === null) return null
   if (element.isDomElement) return null
   return componentHostResolver.resolveHost(solidFile, element.tag)
@@ -278,11 +289,11 @@ function resolveTransparentPrimitiveStatus(
   componentHostResolver: ReturnType<typeof createLayoutComponentHostResolver>,
   solidFile: string,
   element: JSXElementEntity,
-  hostDescriptor: LayoutComponentHostDescriptor | null,
+  resolvedHost: ResolvedComponentHost | null,
 ): boolean {
   if (element.tag === null) return false
   if (element.isDomElement) return false
-  if (hostDescriptor !== null) return false
+  if (resolvedHost !== null) return false
   return componentHostResolver.isTransparentPrimitive(solidFile, element.tag)
 }
 

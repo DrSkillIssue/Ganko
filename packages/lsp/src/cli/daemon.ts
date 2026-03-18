@@ -18,7 +18,7 @@ import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "
 import { writeFile, rename, readFile } from "node:fs/promises";
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, createLogger, Level, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex, type FileIndex } from "../core/file-index";
@@ -654,7 +654,7 @@ export async function startDaemon(projectRoot: string): Promise<void> {
   };
 
   server.on("connection", (socket: Socket) => {
-    if (log.enabled) log.debug("client connected");
+    if (log.isLevelEnabled(Level.Debug)) log.debug("client connected");
     const feed = createRequestReader(
       (request) => { handleRequest(state, request, socket); },
       (id, message) => {

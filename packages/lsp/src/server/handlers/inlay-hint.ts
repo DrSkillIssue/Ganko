@@ -10,7 +10,7 @@ import type {
 import { InlayHintKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/inlayHint request.
@@ -47,6 +47,6 @@ export function handleInlayHint(
     result.push(item);
   }
 
-  if (log.enabled) log.trace(`inlayHint: ${result.length} hints for ${path}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`inlayHint: ${result.length} hints for ${path}`);
   return result.length > 0 ? result : null;
 }

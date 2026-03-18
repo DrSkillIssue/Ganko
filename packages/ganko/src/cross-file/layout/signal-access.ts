@@ -297,6 +297,16 @@ export function readElementRef(graph: LayoutGraph, node: LayoutElementNode): Lay
   return readElementRefById(graph, node.solidFile, node.elementId)
 }
 
+/**
+ * Returns the resolved host DOM element reference for a component call-site node,
+ * or null if the node is a native DOM element, an unresolvable component, or a
+ * component with structurally equal but element-distinct multi-return values.
+ * Rules use this to inspect dynamic JSX attribute expressions on the host.
+ */
+export function readHostElementRef(graph: LayoutGraph, node: LayoutElementNode): LayoutElementRef | null {
+  return graph.hostElementRefsByNode.get(node) ?? null
+}
+
 export function readElementRefById(
   graph: LayoutGraph,
   solidFile: string,

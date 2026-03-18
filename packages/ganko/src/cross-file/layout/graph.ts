@@ -147,6 +147,14 @@ export interface LayoutGraphTopology {
   readonly elementRefsBySolidFileAndId: ReadonlyMap<string, ReadonlyMap<number, LayoutElementRef>>
   readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
   readonly measurementNodeByRootKey: ReadonlyMap<string, LayoutElementNode>
+  /**
+   * Maps component call-site nodes to their resolved host DOM element reference.
+   * Only populated for nodes that represent a component resolved to a concrete DOM
+   * element. Native DOM element nodes and unresolvable components are absent.
+   * Used by rules that need to inspect the host element's JSX attributes (e.g.
+   * dynamic `width`/`height` expressions not capturable as static strings).
+   */
+  readonly hostElementRefsByNode: ReadonlyMap<LayoutElementNode, LayoutElementRef>
 }
 
 export interface LayoutGraphCascade {

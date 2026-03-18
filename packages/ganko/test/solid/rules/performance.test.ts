@@ -1085,6 +1085,23 @@ describe("prefer-set-lookup-in-loop", () => {
         }
       }
     `)
+  const s9 = batch.add(`
+      function test(buffer: Buffer) {
+        const SEPARATOR = Buffer.from("\\r\\n\\r\\n");
+        for (;;) {
+          const idx = buffer.indexOf(SEPARATOR);
+          if (idx < 0) break;
+          buffer = buffer.subarray(idx + 4);
+        }
+      }
+    `)
+  const s10 = batch.add(`
+      function test(data: Uint8Array) {
+        for (let i = 0; i < 10; i++) {
+          if (data.indexOf(0xFF) !== -1) {}
+        }
+      }
+    `)
 
   it("metadata", () => {
     expect(preferSetLookupInLoop.id).toBe("prefer-set-lookup-in-loop")
@@ -1133,6 +1150,14 @@ describe("prefer-set-lookup-in-loop", () => {
 
   it("does not flag when includes is inside a callback in a loop", () => {
     expect(batch.result(s8).diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag .indexOf() on Buffer receiver", () => {
+    expect(batch.result(s9).diagnostics).toHaveLength(0)
+  })
+
+  it("does not flag .indexOf() on Uint8Array receiver", () => {
+    expect(batch.result(s10).diagnostics).toHaveLength(0)
   })
 })
 

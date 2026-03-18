@@ -999,6 +999,76 @@ describe("Integration: Both Solid and CSS plugins", () => {
       expect(at(hits, 0).message).toContain("24px");
     });
 
+    it("does not report min-height below threshold on non-interactive container elements", () => {
+      const solid = parseCode(`
+        function App() {
+          return (
+            <div>
+              <span style={{ "min-height": "1.5rem" }}>dots</span>
+              <div style={{ "min-height": "2rem" }}>wrapper</div>
+            </div>
+          );
+        }
+      `);
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid, css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(0);
+    });
+
+    it("reports min-height below threshold on role=button elements", () => {
+      const solid = parseCode(`
+        function App() {
+          return <div role="button" style={{ "min-height": "16px" }}>click</div>;
+        }
+      `);
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid, css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(1);
+    });
+
+    it("reports height below threshold on component call site whose host resolves to a native interactive element", () => {
+      const buttonComponent = parseCode(
+        `export function MyButton(props: { style?: Record<string, string> }) {
+          return <button style={props.style}>click</button>;
+        }`,
+        "/project/ui/my-button.tsx",
+      );
+      const appGraph = parseCode(
+        `import { MyButton } from "../ui/my-button";
+        function App() {
+          return <MyButton style={{ height: "16px" }} />;
+        }`,
+        "/project/app/page.tsx",
+      );
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid: [buttonComponent, appGraph], css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(1);
+      expect(at(hits, 0).message).toContain("24px");
+    });
+
+    it("does not report height below threshold on component call site whose host resolves to a non-interactive element", () => {
+      const spanComponent = parseCode(
+        `export function MySpan(props: { style?: Record<string, string> }) {
+          return <span style={props.style}>text</span>;
+        }`,
+        "/project/ui/my-span.tsx",
+      );
+      const appGraph = parseCode(
+        `import { MySpan } from "../ui/my-span";
+        function App() {
+          return <MySpan style={{ height: "16px" }} />;
+        }`,
+        "/project/app/page.tsx",
+      );
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid: [spanComponent, appGraph], css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(0);
+    });
+
     it("reports inline letter-spacing below minimum", () => {
       const solid = parseCode(`
         function App() {
