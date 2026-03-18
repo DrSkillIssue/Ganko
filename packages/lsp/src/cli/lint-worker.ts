@@ -10,7 +10,7 @@
  */
 import { parentPort } from "node:worker_threads";
 import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, createOverrideEmit } from "@drskillissue/ganko";
+import { buildSolidGraph, runSolidRules, createSolidInput, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
@@ -27,6 +27,7 @@ port.on("message", (task: WorkerTask) => {
 });
 
 function runLintTask(task: WorkerTask): readonly WorkerResult[] {
+  setActivePolicy(task.accessibilityPolicy);
   const configFile = ts.readConfigFile(task.tsconfigPath, ts.sys.readFile);
   const parsedConfig = ts.parseJsonConfigFileContent(
     configFile.config,

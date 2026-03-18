@@ -14,7 +14,7 @@ import type {
 } from "vscode-languageserver";
 
 import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, type RuleOverrides, type ConfigurationChangePayload } from "@drskillissue/ganko-shared";
+import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
 import { createFileIndex } from "../../core/file-index";
@@ -58,6 +58,8 @@ export interface ServerState {
   eslintIgnores: readonly string[]
   /** Whether TypeScript diagnostics are enabled */
   enableTsDiagnostics: boolean
+  /** Accessibility policy from VS Code settings (wins over ESLint config) */
+  vscodePolicy: AccessibilityPolicy
 }
 
 /**
@@ -81,6 +83,7 @@ export function createServerState(): ServerState {
     exclude: [],
     eslintIgnores: [],
     enableTsDiagnostics: false,
+    vscodePolicy: "wcag-aa",
   };
 }
 
@@ -126,9 +129,8 @@ export function handleInitialize(
   state.exclude = options?.exclude ?? [];
   state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? false;
 
-  if (options?.accessibilityPolicy) {
-    setActivePolicy(options.accessibilityPolicy);
-  }
+  state.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
+  setActivePolicy(state.vscodePolicy);
 
   const capabilities = buildServerCapabilities();
 
@@ -391,6 +393,7 @@ export function handleConfigurationChange(
   state.eslintConfigPath = settings.eslintConfigPath;
   state.exclude = settings.exclude ?? [];
   state.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
+  state.vscodePolicy = settings.accessibilityPolicy;
   setActivePolicy(settings.accessibilityPolicy);
 
   const next = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
@@ -447,6 +450,7 @@ export async function reloadESLintConfig(
   const prevIgnores = state.eslintIgnores;
   state.eslintOverrides = eslintResult.overrides;
   state.eslintIgnores = eslintResult.globalIgnores;
+  setActivePolicy(state.vscodePolicy);
 
   const next = mergeOverrides(eslintResult.overrides, state.vscodeOverrides);
   const overridesChanged = applyOverridesIfChanged(state, next);

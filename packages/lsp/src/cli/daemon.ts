@@ -16,7 +16,7 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
@@ -186,6 +186,7 @@ async function handleLintRequest(
     });
   }
 
+  setActivePolicy(params.accessibilityPolicy ?? null);
   const project = state.project;
   project.setRuleOverrides(eslintResult.overrides);
 

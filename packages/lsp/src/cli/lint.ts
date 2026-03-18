@@ -14,9 +14,9 @@
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
 import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit } from "@drskillissue/ganko";
+import { buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
 import type { Diagnostic, SolidGraph, CSSInput, TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, ACCESSIBILITY_POLICIES, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { createBatchProgram } from "../core/batch-program";
 import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
@@ -59,7 +59,13 @@ interface LintOptions {
   readonly noDaemon: boolean
   /** Maximum number of parallel workers (0 = auto, 1 = serial) */
   readonly maxWorkers: number
+  /** Accessibility policy to enforce (undefined = no policy, rule is silent) */
+  readonly accessibilityPolicy: AccessibilityPolicy | undefined
 }
+
+const ACCESSIBILITY_POLICY_MAP = new Map<string, AccessibilityPolicy>(
+  ACCESSIBILITY_POLICIES.map((p): [string, AccessibilityPolicy] => [p, p]),
+);
 
 /**
  * Parse lint command arguments.
@@ -79,6 +85,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let logFile: string | undefined;
   let noDaemon = false;
   let maxWorkers = 0;
+  let accessibilityPolicy: AccessibilityPolicy | undefined;
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -183,6 +190,20 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       continue;
     }
 
+    if (arg === "--accessibility-policy") {
+      const next = args[i + 1];
+      if (next === undefined) {
+        die(`--accessibility-policy requires a policy name. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
+      }
+      const found = ACCESSIBILITY_POLICY_MAP.get(next);
+      if (found === undefined) {
+        die(`Unknown accessibility policy: ${next}. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
+      }
+      accessibilityPolicy = found;
+      i++;
+      continue;
+    }
+
     if (!arg) continue;
     if (arg.startsWith("-")) {
       die(`Unknown option: ${arg}`);
@@ -191,7 +212,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, maxWorkers };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, maxWorkers, accessibilityPolicy };
 }
 
 /** Glob metacharacters — presence means the arg is a pattern, not a literal path. */
@@ -270,7 +291,6 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
   return result;
 }
 
-/** Markers that identify a project root (nearest-first, like TypeScript). */
 const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
 
 /**
@@ -288,7 +308,7 @@ const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
  */
 function findProjectRoot(from: string): string {
   let dir = from;
-  for (;;) {
+  for (; ;) {
     for (let i = 0, len = PROJECT_MARKERS.length; i < len; i++) {
       const marker = PROJECT_MARKERS[i];
       if (!marker) continue;
@@ -351,9 +371,10 @@ async function tryDaemonLint(
       noEslintConfig: options.noEslintConfig,
       logLevel: options.logLevel,
     };
-    const params: LintRequestParams = options.eslintConfig !== undefined
-      ? { ...base, eslintConfigPath: options.eslintConfig }
-      : base;
+    const extra: { eslintConfigPath?: string; accessibilityPolicy?: AccessibilityPolicy } = {};
+    if (options.eslintConfig !== undefined) extra.eslintConfigPath = options.eslintConfig;
+    if (options.accessibilityPolicy !== undefined) extra.accessibilityPolicy = options.accessibilityPolicy;
+    const params: LintRequestParams = { ...base, ...extra };
 
     const response = await requestLint(socket, params);
     if (response.kind === "lint-response") {
@@ -453,7 +474,10 @@ export async function runLint(args: readonly string[]): Promise<void> {
     ? EMPTY_ESLINT_RESULT
     : await loadESLintConfig(projectRoot, options.eslintConfig, log).catch(() => EMPTY_ESLINT_RESULT);
 
-  if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores`);
+  if (options.accessibilityPolicy !== undefined) {
+    setActivePolicy(options.accessibilityPolicy);
+  }
+  if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores, policy: ${options.accessibilityPolicy ?? "none"}`);
 
   const effectiveExclude = eslintResult.globalIgnores.length > 0
     ? [...options.exclude, ...eslintResult.globalIgnores]
@@ -548,6 +572,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
         files,
         rootPath: projectRoot,
         overrides: eslintResult.overrides,
+        accessibilityPolicy: options.accessibilityPolicy ?? null,
       }));
 
       /* Start building main-thread program concurrently while workers run.
