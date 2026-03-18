@@ -40,22 +40,25 @@ export const CODE_ACTION_KINDS: string[] = [
 const SIGNATURE_HELP_TRIGGER_CHARS: string[] = ["(", ","];
 const SIGNATURE_HELP_RETRIGGER_CHARS: string[] = [")"];
 
-/** Cached capabilities singleton. */
-let cachedCapabilities: ServerCapabilities | null = null;
-
 /**
  * Build server capabilities.
  *
- * Returns a frozen singleton for consistent capability reporting.
+ * @param pullDiagnostics - Advertise `diagnosticProvider` (LSP 3.17 pull model).
+ *   Set to `true` only when the client is an AI agent that will use pull
+ *   diagnostics exclusively (e.g. `--warnings-as-errors` mode).
+ *
+ *   **Why this matters:** When a server advertises `diagnosticProvider`, VS Code
+ *   and other pull-capable clients enter pull-exclusive mode and suppress push
+ *   (`publishDiagnostics`) notifications for open files. If we unconditionally
+ *   advertise pull, interactive editing in VS Code stops receiving real-time
+ *   diagnostic updates (push notifications are silently dropped). AI agents
+ *   like opencode use pull exclusively anyway, so they are unaffected by the
+ *   absence of push — but they benefit from pull's synchronous guarantee.
  *
  * @returns Server capabilities
  */
-export function buildServerCapabilities(): ServerCapabilities {
-  if (cachedCapabilities !== null) {
-    return cachedCapabilities;
-  }
-
-  cachedCapabilities = {
+export function buildServerCapabilities(pullDiagnostics = false): ServerCapabilities {
+  const caps: ServerCapabilities = {
     textDocumentSync: TextDocumentSyncKind.Incremental,
     completionProvider: {
       triggerCharacters: COMPLETION_TRIGGER_CHARS,
@@ -117,8 +120,14 @@ export function buildServerCapabilities(): ServerCapabilities {
     },
   };
 
-  Object.freeze(cachedCapabilities);
-  return cachedCapabilities;
+  if (pullDiagnostics) {
+    caps.diagnosticProvider = {
+      interFileDependencies: true,
+      workspaceDiagnostics: false,
+    };
+  }
+
+  return caps;
 }
 
 /**

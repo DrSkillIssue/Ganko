@@ -361,7 +361,7 @@ function createFrameReader(
       buffer = buffer.subarray(contentLength);
       contentLength = -1;
 
-      // eslint-disable-next-line solid/avoid-unsafe-type-annotations -- JSON.parse returns unknown; Zod validates in onParsed
+      // ganko-disable-next-line avoid-unsafe-type-annotations
       let parsed: unknown;
       try {
         parsed = JSON.parse(body);

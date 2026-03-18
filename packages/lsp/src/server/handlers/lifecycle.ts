@@ -21,7 +21,7 @@ import { createFileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
-import { publishFileDiagnostics, propagateTsDiagnostics } from "../connection";
+import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import { type DocumentState, getOpenDocumentPaths } from "./document";
 import type { Logger } from "../../core/logger";
 
@@ -58,6 +58,8 @@ export interface ServerState {
   eslintIgnores: readonly string[]
   /** Whether TypeScript diagnostics are enabled */
   enableTsDiagnostics: boolean
+  /** Promote all warning-severity diagnostics to errors in LSP output */
+  warningsAsErrors: boolean
   /** Accessibility policy from VS Code settings (wins over ESLint config) */
   vscodePolicy: AccessibilityPolicy
 }
@@ -83,6 +85,7 @@ export function createServerState(): ServerState {
     exclude: [],
     eslintIgnores: [],
     enableTsDiagnostics: false,
+    warningsAsErrors: false,
     vscodePolicy: "wcag-aa",
   };
 }
@@ -127,12 +130,12 @@ export function handleInitialize(
   state.useESLintConfig = options?.useESLintConfig ?? true;
   state.eslintConfigPath = options?.eslintConfigPath;
   state.exclude = options?.exclude ?? [];
-  state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? false;
+  state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? state.enableTsDiagnostics;
 
   state.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
   setActivePolicy(state.vscodePolicy);
 
-  const capabilities = buildServerCapabilities();
+  const capabilities = buildServerCapabilities(state.warningsAsErrors);
 
   return {
     capabilities,
