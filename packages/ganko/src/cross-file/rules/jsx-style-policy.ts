@@ -11,10 +11,13 @@ import ts from "typescript"
 import { createDiagnostic, resolveMessage } from "../../diagnostic"
 import { defineCrossRule } from "../rule"
 import { forEachStylePropertyAcross, objectKeyName } from "../../solid/queries/jsx-derived"
-import { getStaticStringValue, getStaticNumericValue } from "../../solid/util/static-value"
+import { getStaticStringValue, getStaticNumericValue, getStaticStringFromJSXValue } from "../../solid/util/static-value"
 import { getActivePolicy, getActivePolicyName } from "../../css/policy"
 import { parsePxValue, parseUnitlessValue, parseEmValue } from "../../css/parser/value-util"
 import { formatRounded, normalizeStylePropertyKey } from "./rule-runtime"
+import { getJSXAttributeEntity } from "../../solid/queries/jsx"
+import type { SolidGraph } from "../../solid/impl"
+import type { JSXElementEntity } from "../../solid/entities/jsx"
 
 const messages = {
   fontTooSmall: "Inline style `{{prop}}: {{value}}` ({{resolved}}px) is below the minimum `{{min}}px` for policy `{{policy}}`.",
@@ -36,6 +39,28 @@ const INLINE_TOUCH_TARGET_KEYS = new Set([
   "padding-inline-end",
 ])
 
+/** Native HTML tags that are inherently interactive touch targets. */
+const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea"])
+
+/**
+ * ARIA roles whose purpose is direct user interaction. Elements with these roles
+ * are touch targets and must meet minimum-size thresholds.
+ */
+const INTERACTIVE_ARIA_ROLES = new Set([
+  "button", "link", "checkbox", "radio", "combobox", "listbox",
+  "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "tab",
+])
+
+function isInteractiveElement(solid: SolidGraph, element: JSXElementEntity): boolean {
+  if (element.tagName !== null && INTERACTIVE_HTML_TAGS.has(element.tagName)) return true
+  const roleAttr = getJSXAttributeEntity(solid, element, "role")
+  if (roleAttr !== null && roleAttr.valueNode !== null) {
+    const role = getStaticStringFromJSXValue(roleAttr.valueNode)
+    if (role !== null && INTERACTIVE_ARIA_ROLES.has(role)) return true
+  }
+  return false
+}
+
 export const jsxStylePolicy = defineCrossRule({
   id: "jsx-style-policy",
   severity: "warn",
@@ -51,7 +76,7 @@ export const jsxStylePolicy = defineCrossRule({
     if (policy === null) return
     const name = getActivePolicyName() ?? ""
 
-    forEachStylePropertyAcross(solids, (solid, p) => {
+    forEachStylePropertyAcross(solids, (solid, p, element) => {
       if (!ts.isPropertyAssignment(p)) return
       const key = objectKeyName(p.name)
       if (!key) return
@@ -87,6 +112,7 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (INLINE_TOUCH_TARGET_KEYS.has(normalizedKey)) {
+        if (!isInteractiveElement(solid, element)) return
         const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const px = parsePxValue(strVal)

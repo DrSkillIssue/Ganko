@@ -999,6 +999,35 @@ describe("Integration: Both Solid and CSS plugins", () => {
       expect(at(hits, 0).message).toContain("24px");
     });
 
+    it("does not report min-height below threshold on non-interactive container elements", () => {
+      const solid = parseCode(`
+        function App() {
+          return (
+            <div>
+              <span style={{ "min-height": "1.5rem" }}>dots</span>
+              <div style={{ "min-height": "2rem" }}>wrapper</div>
+            </div>
+          );
+        }
+      `);
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid, css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(0);
+    });
+
+    it("reports min-height below threshold on role=button elements", () => {
+      const solid = parseCode(`
+        function App() {
+          return <div role="button" style={{ "min-height": "16px" }}>click</div>;
+        }
+      `);
+      const diagnostics: Diagnostic[] = [];
+      analyzeCrossFileInput({ solid, css: emptyCss }, (d) => diagnostics.push(d));
+      const hits = diagnostics.filter((d) => d.rule === "jsx-style-policy" && d.message.includes("height"));
+      expect(hits).toHaveLength(1);
+    });
+
     it("reports inline letter-spacing below minimum", () => {
       const solid = parseCode(`
         function App() {

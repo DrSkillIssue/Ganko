@@ -69,6 +69,15 @@ function hasReservedSize(
 
   if ((attrWidth && attrHeight) || (jsxAttrWidth && jsxAttrHeight)) return true
 
+  // Both width and height are declared via dynamic (non-static-string) expressions
+  // on the element or its resolved component host. `null` in the merged attributes
+  // map means the attribute is explicitly authored but not resolvable to a static
+  // string literal (e.g. `width={props.size ?? 24}`). Component call sites resolved
+  // to a replaced-media tag carry the host element's dynamic dimensions through the
+  // merged attribute map. Treat any element with both attributes explicitly declared
+  // — even as runtime expressions — as intentionally sized.
+  if (attributes.get("width") === null && attributes.get("height") === null) return true
+
   const hasAnyWidth = attrWidth || jsxAttrWidth || reservedSpaceFact.hasUsableInlineDimension
   const hasAnyHeight = attrHeight || jsxAttrHeight || reservedSpaceFact.hasUsableBlockDimension || reservedSpaceFact.hasContainIntrinsicSize
 
