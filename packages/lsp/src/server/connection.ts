@@ -37,6 +37,7 @@ import {
   ALL_EXTENSIONS,
   prefixLogger,
   createLogger,
+  Level,
 } from "@drskillissue/ganko-shared";
 import type { FileKind } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
@@ -143,7 +144,7 @@ function collectAffectedPaths(
     if (exclude !== undefined && exclude.has(p)) continue;
     if (needed.has(classifyFile(p))) out.push(p);
   }
-  if (logger?.enabled) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
   return out;
 }
 
@@ -281,7 +282,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
     evictFileCache(path) {
       const key = canonicalPath(path);
-      if (log.enabled) log.debug(`evictFileCache: ${key}`);
+      if (log.isLevelEnabled(Level.Debug)) log.debug(`evictFileCache: ${key}`);
       diagCache.delete(key);
       tsDiagCache.delete(key);
       graphCache.invalidate(key);
@@ -294,7 +295,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
       const affected = collectAffectedPaths(changed, context.documentState, exclude, log);
       if (affected.length > 0) {
-        if (log.enabled) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
+        if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
       }
       for (let i = 0, len = affected.length; i < len; i++) {
         const affectedPath = affected[i];
@@ -311,7 +312,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       diagCache.clear();
       if (clearTsCache) tsDiagCache.clear();
       const paths = getOpenDocumentPaths(context.documentState);
-      if (log.enabled) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
+      if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
       for (let i = 0, len = paths.length; i < len; i++) {
         const p = paths[i];
         if (!p) continue;

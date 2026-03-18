@@ -19,7 +19,7 @@ import {
 } from "vscode-languageserver/node";
 import { createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, pathToUri } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, pathToUri, Level } from "@drskillissue/ganko-shared";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
 import { createTier1Program } from "../core/tier1-program";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics } from "../core/analyze";
@@ -46,10 +46,10 @@ export function runDiagnostics(
   logger?: Logger,
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
-  if (logger?.enabled) logger.trace(`runDiagnostics: ${key}`);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runDiagnostics: ${key}`);
   const diagnostics = runSingleFileDiagnostics(project, key, content, overrides, logger);
   diagCache.set(key, diagnostics);
-  if (logger?.enabled) logger.trace(`runDiagnostics: ${key} → ${diagnostics.length} diagnostics`);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runDiagnostics: ${key} → ${diagnostics.length} diagnostics`);
   return diagnostics;
 }
 
@@ -107,7 +107,7 @@ export function publishTier1Diagnostics(
     context.cachedTier1Host ?? undefined,
   );
   if (!tier1) {
-    if (context.log.enabled) context.log.warning(`Tier 1: failed to create program for ${path}`);
+    if (context.log.isLevelEnabled(Level.Warning)) context.log.warning(`Tier 1: failed to create program for ${path}`);
     return;
   }
 
@@ -141,7 +141,7 @@ export function publishTier1Diagnostics(
   if (docInfo?.version !== undefined) params.version = docInfo.version;
   context.connection.sendDiagnostics(params);
 
-  if (context.log.enabled) {
+  if (context.log.isLevelEnabled(Level.Info)) {
     context.log.info(`Tier 1: ${path} → ${diagnostics.length} ganko + ${converted.length - diagnostics.length} ts diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
   }
 }
@@ -170,18 +170,18 @@ export function publishFileDiagnostics(
   const resolved = content
     ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined)
     ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
-  if (context.log.enabled) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
   const t0 = performance.now();
   const singleFile = runDiagnostics(project, context.diagCache, key, resolved, context.serverState.ruleOverrides, context.log);
-  if (context.log.enabled) context.log.trace(`publishFileDiagnostics: ${key} singleFile=${singleFile.length} in ${(performance.now() - t0).toFixed(1)}ms`);
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: ${key} singleFile=${singleFile.length} in ${(performance.now() - t0).toFixed(1)}ms`);
 
   let crossFile: readonly Diagnostic[];
   if (includeCrossFile && context.fileIndex && context.project) {
-    if (context.log.enabled) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${context.fileIndex.solidFiles.size} cssFiles=${context.fileIndex.cssFiles.size})`);
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${context.fileIndex.solidFiles.size} cssFiles=${context.fileIndex.cssFiles.size})`);
     crossFile = runCrossFileDiagnostics(key, context.fileIndex, context.project, context.graphCache, context.tailwindValidator, context.resolveContent, context.serverState.ruleOverrides, context.externalCustomProperties);
   } else {
     crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
-    if (context.log.enabled) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);
   }
 
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
@@ -211,7 +211,7 @@ export function publishFileDiagnostics(
   const docInfo = context.documentState.openDocuments.get(uri);
 
   const elapsed = (performance.now() - t0).toFixed(1);
-  if (context.log.enabled) context.log.debug(
+  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
     `publishFileDiagnostics: ${key} kind=${kind} crossFile=${includeCrossFile} `
     + `single=${singleFile.length} cross=${crossFile.length} total=${rawDiagnostics.length} `
     + `elapsed=${elapsed}ms`,
@@ -267,7 +267,7 @@ export function republishMergedDiagnostics(
   const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
   const docInfo = context.documentState.openDocuments.get(uri);
 
-  if (context.log.enabled) context.log.debug(
+  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
     `republishMergedDiagnostics: ${key} single=${singleFile.length} cross=${crossFile.length} ts=${hasTsDiags ? context.tsDiagCache.get(key)?.length ?? 0 : 0}`,
   );
 

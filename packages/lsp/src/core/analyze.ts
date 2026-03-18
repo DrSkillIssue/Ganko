@@ -16,7 +16,7 @@ import {
 } from "@drskillissue/ganko";
 import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";
 import { readFileSync } from "node:fs";
-import { canonicalPath, classifyFile, contentHash } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, Level } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
 import type { FileIndex } from "./file-index";
@@ -84,31 +84,31 @@ export function runSingleFileDiagnostics(
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  if (logger?.enabled) logger.trace(`runSingleFileDiagnostics ENTER: ${key} kind=${kind} content=${content !== undefined ? `${content.length} chars` : "from disk"}`);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics ENTER: ${key} kind=${kind} content=${content !== undefined ? `${content.length} chars` : "from disk"}`);
 
   if (content === undefined) {
     const result = project.run([key]);
-    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (runner path)`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (runner path)`);
     return result;
   }
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
     const program = project.getProgram();
-    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics: ${key} program=yes`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics: ${key} program=yes`);
     const input = createSolidInput(key, program, logger);
     analyzeInput(input, emit);
-    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
     return results;
   }
 
   if (kind === "css") {
-    if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} 0 diags (css deferred to cross-file)`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} 0 diags (css deferred to cross-file)`);
     return [];
   }
 
   const result = project.run([key]);
-  if (logger?.enabled) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (fallback runner path)`);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (fallback runner path)`);
   return result;
 }
 
@@ -139,7 +139,7 @@ export function runCrossFileDiagnostics(
   externalCustomProperties?: ReadonlySet<string>,
 ): readonly Diagnostic[] {
   const log = cache.logger;
-  if (log.enabled) log.debug(`runCrossFileDiagnostics ENTER: path=${path} solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics ENTER: path=${path} solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
 
   if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) {
     log.debug("runCrossFileDiagnostics EXIT: no files to analyze");
@@ -152,7 +152,7 @@ export function runCrossFileDiagnostics(
   const cached = cache.getCachedCrossFileResults();
   if (cached !== null) {
     const result = cached.get(path) ?? [];
-    if (log.enabled) log.debug(`runCrossFileDiagnostics FAST PATH: ${result.length} diags for ${path}`);
+    if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics FAST PATH: ${result.length} diags for ${path}`);
     return result;
   }
 
@@ -160,14 +160,14 @@ export function runCrossFileDiagnostics(
 
   const { results: allResults, emit } = createEmit(overrides);
   rebuildGraphsAndRunCrossFileRules(fileIndex, project, cache, tailwind, resolveContent, emit, externalCustomProperties);
-  if (log.enabled) log.debug(`runCrossFileDiagnostics: ${allResults.length} diags`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics: ${allResults.length} diags`);
 
   /* Cache all results bucketed by file. Subsequent calls for other files
      hit the fast path above until a graph changes. */
   cache.setCachedCrossFileResults(allResults);
 
   const result = cache.getCachedCrossFileResults()?.get(path) ?? [];
-  if (log.enabled) log.debug(`runCrossFileDiagnostics EXIT: ${result.length} diags for ${path}`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics EXIT: ${result.length} diags for ${path}`);
   return result;
 }
 
@@ -196,12 +196,12 @@ function rebuildGraphsAndRunCrossFileRules(
     if (!sourceFile) continue;
     const version = contentHash(sourceFile.text);
     if (!cache.hasSolidGraph(solidPath, version)) {
-      if (log.enabled) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
+      if (log.isLevelEnabled(Level.Trace)) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
       cache.getSolidGraph(solidPath, version, buildSolidGraphForPath(project, solidPath, log));
       rebuilt++;
     }
   }
-  if (log.enabled) log.debug(`crossFile: rebuilt ${rebuilt}/${fileIndex.solidFiles.size} SolidGraphs`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: rebuilt ${rebuilt}/${fileIndex.solidFiles.size} SolidGraphs`);
 
   const cssGraph = cache.getCSSGraph(() => {
     const files: { path: string; content: string }[] = [];
@@ -209,17 +209,17 @@ function rebuildGraphsAndRunCrossFileRules(
       const content = resolveContent(cssPath);
       if (content !== null) {
         files.push({ path: cssPath, content });
-      } else if (log.enabled) {
+      } else if (log.isLevelEnabled(Level.Trace)) {
         log.trace(`crossFile: CSS file unreadable: ${cssPath}`);
       }
     }
-    if (log.enabled) log.trace(`crossFile: building CSSGraph from ${files.length} CSS files (tailwind=${tailwind !== null}, externalProps=${externalCustomProperties?.size ?? 0})`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`crossFile: building CSSGraph from ${files.length} CSS files (tailwind=${tailwind !== null}, externalProps=${externalCustomProperties?.size ?? 0})`);
     const cssInput = buildCSSInput(files, log, tailwind, externalCustomProperties);
     return buildCSSGraph(cssInput);
   });
 
   const solidGraphs = cache.getAllSolidGraphs();
-  if (log.enabled) log.debug(`crossFile: about to getLayoutGraph (${solidGraphs.length} solids)`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: about to getLayoutGraph (${solidGraphs.length} solids)`);
   const layoutGraph = cache.getLayoutGraph(() => buildLayoutGraph(solidGraphs, cssGraph, log));
 
   const t0 = performance.now();
@@ -228,7 +228,7 @@ function rebuildGraphsAndRunCrossFileRules(
     emit,
     log,
   );
-  if (log.enabled) log.debug(`crossFile: runCrossFileRules took ${performance.now() - t0}ms`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: runCrossFileRules took ${performance.now() - t0}ms`);
 }
 
 /**
@@ -255,13 +255,13 @@ export function runAllCrossFileDiagnostics(
   externalCustomProperties?: ReadonlySet<string>,
 ): readonly Diagnostic[] {
   const log = cache.logger;
-  if (log.enabled) log.debug(`runAllCrossFileDiagnostics ENTER: solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`runAllCrossFileDiagnostics ENTER: solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
 
   if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) return [];
 
   const { results, emit } = createEmit(overrides);
   rebuildGraphsAndRunCrossFileRules(fileIndex, project, cache, tailwind, resolveContent, emit, externalCustomProperties);
-  if (log.enabled) log.debug(`runAllCrossFileDiagnostics EXIT: ${results.length} diags`);
+  if (log.isLevelEnabled(Level.Debug)) log.debug(`runAllCrossFileDiagnostics EXIT: ${results.length} diags`);
 
   return results;
 }

@@ -2,7 +2,7 @@ import type { CSSGraph } from "../../css/impl"
 import type { SelectorEntity } from "../../css/entities"
 import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
-import { noopLogger } from "@drskillissue/ganko-shared"
+import { noopLogger, Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
 import {
@@ -126,7 +126,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const componentHostResolver = createLayoutComponentHostResolver(solids, moduleResolver, logger)
   const cssScopeBySolidFile = collectCSSScopeBySolidFile(solids, css, moduleResolver)
 
-  if (logger.enabled) {
+  if (logger.isLevelEnabled(Level.Trace)) {
     for (const [solidFile, scopePaths] of cssScopeBySolidFile) {
       if (scopePaths.length > 0) {
         let names = ""
@@ -256,7 +256,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 
   }
 
-  if (logger.enabled) {
+  if (logger.isLevelEnabled(Level.Debug)) {
     for (const [file, roots] of rootElementsByFile) {
       const descs = roots.map(r => `${r.key}(tag=${r.tagName}, attrs=[${[...r.attributes.entries()].map(([k, v]) => `${k}=${v}`).join(",")}])`)
       logger.debug(`[build] rootElementsByFile file=${file} count=${roots.length}: ${descs.join(", ")}`)
@@ -307,7 +307,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   }
   perf.cascadeBuildMs = performance.now() - cascadeStartedAt
 
-  if (logger.enabled) {
+  if (logger.isLevelEnabled(Level.Trace)) {
     for (let i = 0; i < elements.length; i++) {
       const node = elements[i]
       if (!node) continue
@@ -812,7 +812,7 @@ function buildContextIndex(
   logger: Logger,
 ): Map<LayoutElementNode, AlignmentContext> {
   const out = new Map<LayoutElementNode, AlignmentContext>()
-  const trace = logger.enabled
+  const trace = logger.isLevelEnabled(Level.Trace)
 
   for (const [parent, children] of childrenByParentNode) {
     if (children.length < 2) continue

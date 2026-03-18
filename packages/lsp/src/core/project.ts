@@ -6,6 +6,7 @@
  */
 import { createRunner, type Runner, type Diagnostic, type Plugin } from "@drskillissue/ganko";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
+import { Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 import { createIncrementalProgram, type IncrementalTypeScriptService } from "./incremental-program";
 import type { Logger } from "./logger";
@@ -59,7 +60,7 @@ export interface Project {
  */
 export function createProject(config: ProjectConfig): Project {
   const log = config.log;
-  if (log?.enabled) log.debug(`createProject: ${config.plugins.length} plugins, root=${config.rootPath}${config.rules ? `, ${Object.keys(config.rules).length} rule overrides` : ""}`);
+  if (log?.isLevelEnabled(Level.Debug)) log.debug(`createProject: ${config.plugins.length} plugins, root=${config.rootPath}${config.rules ? `, ${Object.keys(config.rules).length} rule overrides` : ""}`);
 
   let runner: Runner = config.rules !== undefined
     ? createRunner({ plugins: config.plugins, rules: config.rules })
@@ -67,13 +68,13 @@ export function createProject(config: ProjectConfig): Project {
 
   const tsService: IncrementalTypeScriptService = createIncrementalProgram(config.rootPath);
 
-  if (log?.enabled) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
+  if (log?.isLevelEnabled(Level.Trace)) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
 
   return {
     run(files) {
-      if (log?.enabled) log.trace(`project.run: ${files.length} files`);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`project.run: ${files.length} files`);
       const result = runner.run(files);
-      if (log?.enabled) log.trace(`project.run: ${result.length} diagnostics from ${files.length} files`);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`project.run: ${result.length} diagnostics from ${files.length} files`);
       return result;
     },
 
@@ -94,12 +95,12 @@ export function createProject(config: ProjectConfig): Project {
     },
 
     setPlugins(plugins) {
-      if (log?.enabled) log.trace(`project.setPlugins: [${plugins.map(p => p.kind).join(", ")}]`);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`project.setPlugins: [${plugins.map(p => p.kind).join(", ")}]`);
       runner = createRunner({ plugins });
     },
 
     setRuleOverrides(overrides) {
-      if (log?.enabled) log.trace(`project.setRuleOverrides: ${Object.keys(overrides).length} overrides`);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`project.setRuleOverrides: ${Object.keys(overrides).length} overrides`);
       runner.setRuleOverrides(overrides);
     },
 

@@ -13,7 +13,7 @@ import {
   DocumentDiagnosticReportKind,
   type DocumentDiagnosticParams,
 } from "vscode-languageserver/node";
-import { canonicalPath, classifyFile, uriToPath, formatSnapshot } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, uriToPath, formatSnapshot, Level } from "@drskillissue/ganko-shared";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { runCrossFileDiagnostics } from "../../core/analyze";
 import { runDiagnostics } from "../diagnostics-push";
@@ -66,12 +66,12 @@ function createGuardedHandler<P, R>(
     try {
       return handler(params, ctx);
     } catch (e) {
-      if (log.enabled) log.warning(`${handlerName} threw (returning fallback): ${e instanceof Error ? e.message : String(e)}`);
+      if (log.isLevelEnabled(Level.Warning)) log.warning(`${handlerName} threw (returning fallback): ${e instanceof Error ? e.message : String(e)}`);
       return fallback;
     } finally {
       const elapsed = performance.now() - t0;
       if (elapsed > 1) {
-        if (log.enabled) log.debug(`${handlerName}: ${elapsed.toFixed(1)}ms`);
+        if (log.isLevelEnabled(Level.Debug)) log.debug(`${handlerName}: ${elapsed.toFixed(1)}ms`);
       }
       gc.scheduleCollect();
     }
@@ -113,7 +113,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
     try {
       return handleSemanticTokens(params, ctx) ?? { data: [] };
     } catch (e) {
-      if (log.enabled) log.warning(`onSemanticTokens threw (returning fallback): ${e instanceof Error ? e.message : String(e)}`);
+      if (log.isLevelEnabled(Level.Warning)) log.warning(`onSemanticTokens threw (returning fallback): ${e instanceof Error ? e.message : String(e)}`);
       return { data: [] };
     } finally {
       gc.scheduleCollect();
@@ -239,7 +239,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
       }
     }
 
-    if (context.log.enabled) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics (contentUnchanged=${contentUnchanged})`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics (contentUnchanged=${contentUnchanged})`);
     gc.scheduleCollect();
     return { kind: DocumentDiagnosticReportKind.Full, items };
   });

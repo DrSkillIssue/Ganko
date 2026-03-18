@@ -9,7 +9,7 @@ import { resolve, join, extname, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod/v4";
 import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult, Logger } from "@drskillissue/ganko-shared";
-import { ESLINT_CONFIG_FILENAMES, numericSeverity, SEVERITY_LOOKUP } from "@drskillissue/ganko-shared";
+import { ESLINT_CONFIG_FILENAMES, numericSeverity, SEVERITY_LOOKUP, Level } from "@drskillissue/ganko-shared";
 import { getRule } from "@drskillissue/ganko";
 
 let importCounter = 0;
@@ -178,17 +178,17 @@ function findConfigFile(rootPath: string, explicitPath?: string, log?: Logger): 
   if (explicitPath) {
     const resolved = resolve(rootPath, explicitPath);
     const found = existsSync(resolved);
-    if (log?.enabled) log.trace(`eslintConfig: explicit path ${resolved} → ${found ? "found" : "NOT found"}`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`eslintConfig: explicit path ${resolved} → ${found ? "found" : "NOT found"}`);
     return found ? resolved : null;
   }
 
   for (const filename of ESLINT_CONFIG_FILENAMES) {
     const candidate = join(rootPath, filename);
     if (existsSync(candidate)) {
-      if (log?.enabled) log.trace(`eslintConfig: found config ${candidate}`);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`eslintConfig: found config ${candidate}`);
       return candidate;
     }
-    if (log?.enabled) log.trace(`eslintConfig: tried ${candidate} → not found`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`eslintConfig: tried ${candidate} → not found`);
   }
 
   return null;
@@ -228,20 +228,20 @@ export async function loadESLintConfig(
 ): Promise<ESLintConfigResult> {
   const configPath = findConfigFile(rootPath, explicitPath, log);
   if (!configPath) {
-    if (log?.enabled) log.debug(`eslintConfig: no config file found in ${rootPath}`);
+    if (log?.isLevelEnabled(Level.Debug)) log.debug(`eslintConfig: no config file found in ${rootPath}`);
     return EMPTY_ESLINT_RESULT;
   }
 
-  if (log?.enabled) log.debug(`eslintConfig: loading ${configPath}`);
+  if (log?.isLevelEnabled(Level.Debug)) log.debug(`eslintConfig: loading ${configPath}`);
   try {
     const raw = await importFresh(configPath);
     const parsed = ESLintConfigExportSchema.safeParse(raw);
     if (!parsed.success) {
-      if (log?.enabled) log.warning(`eslintConfig: ${configPath} export did not match expected schema`);
+      if (log?.isLevelEnabled(Level.Warning)) log.warning(`eslintConfig: ${configPath} export did not match expected schema`);
       return EMPTY_ESLINT_RESULT;
     }
     const result = processExport(parsed.data);
-    if (log?.enabled) {
+    if (log?.isLevelEnabled(Level.Trace)) {
       log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
       if (Object.keys(result.overrides).length > 0) {
         log.trace(`eslintConfig: overrides: ${JSON.stringify(result.overrides)}`);
@@ -252,7 +252,7 @@ export async function loadESLintConfig(
     }
     return result;
   } catch (e) {
-    if (log?.enabled) log.warning(`eslintConfig: failed to load ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
+    if (log?.isLevelEnabled(Level.Warning)) log.warning(`eslintConfig: failed to load ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
     return EMPTY_ESLINT_RESULT;
   }
 }

@@ -12,7 +12,7 @@ import type {
 } from "vscode-languageserver";
 import ts from "typescript";
 import type { HandlerContext } from "./handler-context";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
 const INITIAL_STACK_SIZE = 128;
@@ -189,7 +189,7 @@ export function handleSelectionRange(
   const filePath = uriToPath(params.textDocument.uri);
   const sf = ctx.getAST(filePath);
   if (!sf) return null;
-  if (ctx.log.enabled) ctx.log.trace(`selectionRange: ${params.positions.length} positions for ${filePath}`);
+  if (ctx.log.isLevelEnabled(Level.Trace)) ctx.log.trace(`selectionRange: ${params.positions.length} positions for ${filePath}`);
 
   currentSf = sf;
   const positions = params.positions;

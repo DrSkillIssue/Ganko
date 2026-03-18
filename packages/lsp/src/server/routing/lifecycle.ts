@@ -13,6 +13,7 @@ import {
   uriToPath,
   parseLogLevel,
   CROSS_FILE_DEPENDENTS,
+  Level,
 } from "@drskillissue/ganko-shared";
 import type { FileKind } from "@drskillissue/ganko-shared";
 import {
@@ -147,7 +148,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
         const doc = context.documents.get(uri);
         const content = doc !== undefined ? doc.getText() : undefined;
-        if (context.log.enabled) context.log.debug(`didChangeWatchedFiles: re-diagnosing open file ${key}`);
+        if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChangeWatchedFiles: re-diagnosing open file ${key}`);
         publishFileDiagnostics(context, project, key, content);
       }
       propagateTsDiagnostics(context, project, new Set());
@@ -173,7 +174,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       const excludes = effectiveExclude(serverState);
       const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
       context.fileIndex = fileIndex;
-      if (context.log.enabled) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
+      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
 
     if (result.reloadEslint) {

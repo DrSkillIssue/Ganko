@@ -12,7 +12,7 @@
 import ignore, { type Ignore } from "ignore";
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, matchesGlob } from "node:path";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { Logger } from "@drskillissue/ganko-shared";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".output", "coverage"]);
@@ -49,10 +49,10 @@ function classify(path: string, solidFiles: Set<string>, cssFiles: Set<string>, 
   const kind = classifyFile(key);
   if (kind === "solid") {
     solidFiles.add(key);
-    if (log?.enabled) log.trace(`fileIndex: classified solid: ${key}`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: classified solid: ${key}`);
   } else if (kind === "css") {
     cssFiles.add(key);
-    if (log?.enabled) log.trace(`fileIndex: classified css: ${key}`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: classified css: ${key}`);
   }
 }
 
@@ -70,7 +70,7 @@ function resolveSymlink(
     const st = statSync(realPath);
     return { realPath, isFile: st.isFile(), isDir: st.isDirectory() };
   } catch {
-    if (log?.enabled) log.trace(`fileIndex: cannot resolve symlink ${linkPath}`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: cannot resolve symlink ${linkPath}`);
     return null;
   }
 }
@@ -95,7 +95,7 @@ function tryLoadGitignore(dir: string, log?: Logger): ScopedIgnore | null {
     return null;
   }
   const ig = ignore().add(raw);
-  if (log?.enabled) log.trace(`fileIndex: loaded .gitignore from ${dir}`);
+  if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: loaded .gitignore from ${dir}`);
   return { dir, ig };
 }
 
@@ -146,7 +146,7 @@ function scanDir(
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    if (log?.enabled) log.trace(`fileIndex: scanDir error reading ${dir}`);
+    if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: scanDir error reading ${dir}`);
     return;
   }
 
@@ -186,17 +186,17 @@ function scanDir(
 
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) {
-        if (log?.enabled) log.trace(`fileIndex: skip dir (built-in): ${join(dir, entry.name)}`);
+        if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: skip dir (built-in): ${join(dir, entry.name)}`);
         continue;
       }
       if (entry.name.startsWith(".")) continue;
       const childDir = join(dir, entry.name);
       if (hasExcludes && isExcluded(relative(rootPath, childDir), excludes)) {
-        if (log?.enabled) log.trace(`fileIndex: skip dir (excluded): ${childDir}`);
+        if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: skip dir (excluded): ${childDir}`);
         continue;
       }
       if (hasGitignore && isGitignored(childDir, true, gitignoreStack)) {
-        if (log?.enabled) log.trace(`fileIndex: skip dir (gitignored): ${childDir}`);
+        if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: skip dir (gitignored): ${childDir}`);
         continue;
       }
       scanDir(childDir, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
@@ -235,7 +235,7 @@ export function createFileIndex(rootPath: string, excludes: readonly string[] = 
   const visited = new Set<string>();
   const gitignoreStack: ScopedIgnore[] = [];
   scanDir(rootPath, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
-  if (log?.enabled) log.debug(`fileIndex: scanned ${rootPath} → ${solidFiles.size} solid, ${cssFiles.size} css in ${(performance.now() - t0).toFixed(1)}ms`);
+  if (log?.isLevelEnabled(Level.Debug)) log.debug(`fileIndex: scanned ${rootPath} → ${solidFiles.size} solid, ${cssFiles.size} css in ${(performance.now() - t0).toFixed(1)}ms`);
 
   return {
     get solidFiles() { return solidFiles; },

@@ -3,15 +3,19 @@
  * When .includes() or .indexOf() is called on an array identifier inside a loop body,
  * the collection should be converted to a Set for O(1) lookups.
  *
- * Excludes string receivers — .indexOf() on strings is a substring search,
- * not a membership check convertible to Set.has().
+ * Only flags receivers confirmed as Array/ReadonlyArray/tuple by TypeScript's
+ * type checker. Excludes strings, typed arrays, Buffer, and any other type
+ * that happens to expose .indexOf()/.includes() with different semantics.
+ *
+ * When type information is unavailable, falls back to heuristics
+ * (string detection, declaration analysis) to avoid false positives.
  */
 
 import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
-import { getCallsByMethodName } from "../../queries"
+import { getCallsByMethodName, hasTypeInfo, typeIsStrictArray } from "../../queries"
 import { getEnclosingLoop, expressionReferencesAny } from "../../util"
 import { isStringLikeReceiver } from "./string-parsing-context"
 
@@ -104,6 +108,7 @@ export const preferSetLookupInLoop = defineSolidRule({
 
   check(graph, emit) {
     const reported = new Set<string>()
+    const graphHasTypes = hasTypeInfo(graph)
 
     for (const method of LINEAR_SEARCH_METHODS) {
       const calls = getCallsByMethodName(graph, method)
@@ -128,7 +133,11 @@ export const preferSetLookupInLoop = defineSolidRule({
 
         if (!isDeclaredOutsideLoop(loop, variable)) continue
 
-        // Skip string receivers — .indexOf() on strings is substring search
+        // When type info is available, only flag confirmed Array/ReadonlyArray/tuple.
+        // This uses TypeScript's type checker symbol resolution — no string matching.
+        if (graphHasTypes && !typeIsStrictArray(graph, callee.expression)) continue
+
+        // Fallback: skip string receivers when type info is unavailable
         if (isStringLikeReceiver(graph, callee.expression, variable)) continue
 
         // Deduplicate: one report per variable per loop

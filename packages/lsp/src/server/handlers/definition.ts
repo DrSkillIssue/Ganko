@@ -6,7 +6,7 @@
 import type { DefinitionParams, Definition } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri } from "@drskillissue/ganko-shared";
+import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/definition request.
@@ -19,7 +19,7 @@ export function handleDefinition(
   const path = uriToPath(params.textDocument.uri);
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) {
-    if (log.enabled) log.trace(`definition: no TS file for ${path}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`definition: no TS file for ${path}`);
     return null;
   }
   const { ls, sf } = tsFile;
@@ -27,11 +27,11 @@ export function handleDefinition(
   const offset = positionToOffset(sf, params.position);
   const defs = ls.getDefinitionAtPosition(path, offset);
   if (!defs || defs.length === 0) {
-    if (log.enabled) log.trace(`definition: no definitions at ${path}:${params.position.line}:${params.position.character}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`definition: no definitions at ${path}:${params.position.line}:${params.position.character}`);
     return null;
   }
 
-  if (log.enabled) log.trace(`definition: ${defs.length} definitions at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`definition: ${defs.length} definitions at ${path}:${params.position.line}:${params.position.character}`);
   return defs.map(def => {
     const defSf = ls.getProgram()?.getSourceFile(def.fileName);
     const range = defSf

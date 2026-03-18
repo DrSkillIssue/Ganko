@@ -7,7 +7,7 @@ import type { CompletionParams, CompletionItem } from "vscode-languageserver";
 import { CompletionItemKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
 const SOLID_CONTROL_FLOW: readonly CompletionItem[] = [
@@ -76,7 +76,7 @@ export function handleCompletion(
   }
 
   const jsxContext = isJSXTagContext(sf.text, offset);
-  if (log.enabled) log.trace(`completion: ${items.length} items, jsxContext=${jsxContext} at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`completion: ${items.length} items, jsxContext=${jsxContext} at ${path}:${params.position.line}:${params.position.character}`);
   if (jsxContext) {
     for (let ci = 0; ci < SOLID_CONTROL_FLOW.length; ci++) {
       const cf = SOLID_CONTROL_FLOW[ci];

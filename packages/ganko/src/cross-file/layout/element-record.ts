@@ -4,7 +4,7 @@ import type { JSXElementEntity } from "../../solid/entities/jsx"
 import { getStaticClassTokensForElementEntity, getStaticStyleKeysForElement, objectKeyName } from "../../solid/queries/jsx-derived"
 import { getStaticNumericValue, getStaticStringValue } from "../../solid/util/static-value"
 import { containsJSX } from "../../solid/util/function"
-import { noopLogger, isBlank } from "@drskillissue/ganko-shared"
+import { noopLogger, isBlank, Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import { toKebabCase } from "@drskillissue/ganko-shared"
 import { LayoutTextualContentState } from "./signal-model"
@@ -117,7 +117,7 @@ export function getTextualContentState(
     if (!child) continue
     if (child.kind === "expression") {
       if (isStructuralExpression(child.node)) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (structural expression child)`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (structural expression child)`)
         memo.set(element.id, LayoutTextualContentState.Unknown)
         return LayoutTextualContentState.Unknown
       }
@@ -142,12 +142,12 @@ export function getTextualContentState(
     if (!child.isDomElement) {
       const childMeta = compositionMetaByElementId.get(child.id)
       if (childMeta !== undefined && isControlTag(childMeta.tagName)) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag}#${child.id} resolves to control tag=${childMeta.tagName}, skipping`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag}#${child.id} resolves to control tag=${childMeta.tagName}, skipping`)
         continue
       }
 
       if (childState !== LayoutTextualContentState.No) {
-        if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag ?? child.id}#${child.id} has state=${childState} → childHasUnknown`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id}: non-DOM child ${child.tag ?? child.id}#${child.id} has state=${childState} → childHasUnknown`)
         childHasUnknown = true
       }
       continue
@@ -162,13 +162,13 @@ export function getTextualContentState(
   }
 
   if (childHasUnknown) {
-    if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (child has unknown)`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → unknown (child has unknown)`)
     memo.set(element.id, LayoutTextualContentState.Unknown)
     return LayoutTextualContentState.Unknown
   }
 
   if (hasTextOnlyExpression || childHasDynamicText) {
-    if (logger.enabled) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → dynamic-text`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[textual-content] element=${element.tagName ?? element.tag}#${element.id} → dynamic-text`)
     memo.set(element.id, LayoutTextualContentState.DynamicText)
     return LayoutTextualContentState.DynamicText
   }

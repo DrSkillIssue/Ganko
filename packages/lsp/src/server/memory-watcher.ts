@@ -13,6 +13,7 @@ import {
   takeMemorySnapshot,
   snapshotToLogLine,
   HighWaterMarkTracker,
+  Level,
   type MemorySnapshot,
 } from "@drskillissue/ganko-shared";
 import type { Logger } from "../core/logger";
@@ -83,7 +84,7 @@ export class MemoryWatcher {
 
     if (rssGrew || heapGrew) {
       const reason = rssGrew && heapGrew ? "rss+heap" : rssGrew ? "rss" : "heap";
-      if (this.log.enabled) this.log.info(`growth(${reason}): ${snapshotToLogLine(snapshot)}`);
+      if (this.log.isLevelEnabled(Level.Info)) this.log.info(`growth(${reason}): ${snapshotToLogLine(snapshot)}`);
     }
   }
 }

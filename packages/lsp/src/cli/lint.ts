@@ -23,7 +23,7 @@ import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { readCSSFilesFromDisk } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
-import { createLogger, parseLogLevel, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
+import { createLogger, parseLogLevel, Level, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
 import { ensureDaemon, requestLint } from "./daemon-client";
 import type { LintRequestParams } from "./daemon-protocol";
 import { createWorkerPool, defaultWorkerCount } from "./worker-pool";
@@ -378,16 +378,16 @@ async function tryDaemonLint(
 
     const response = await requestLint(socket, params);
     if (response.kind === "lint-response") {
-      if (log.enabled) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
+      if (log.isLevelEnabled(Level.Info)) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
       return response.diagnostics;
     }
     if (response.kind === "error-response") {
-      if (log.enabled) log.warning(`daemon error: ${response.message}`);
+      if (log.isLevelEnabled(Level.Warning)) log.warning(`daemon error: ${response.message}`);
       return null;
     }
     return null;
   } catch (err: unknown) {
-    if (log.enabled) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (log.isLevelEnabled(Level.Warning)) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   } finally {
     socket.destroy();
@@ -449,8 +449,8 @@ export async function runLint(args: readonly string[]): Promise<void> {
     log = createLogger(createStderrWriter(), options.logLevel);
   }
 
-  if (log.enabled) log.info(`cwd: ${cwd}`);
-  if (log.enabled) log.info(`args: ${JSON.stringify(options)}`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`cwd: ${cwd}`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`args: ${JSON.stringify(options)}`);
 
   const hasExplicitTargets = options.files.length > 0;
 
@@ -459,16 +459,16 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   if (hasExplicitTargets) {
     resolvedTargets = resolveFiles(options.files, cwd, options.exclude);
-    if (log.enabled) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
+    if (log.isLevelEnabled(Level.Debug)) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
     const ancestor = commonAncestor(resolvedTargets);
     projectRoot = findProjectRoot(ancestor);
-    if (log.enabled) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
+    if (log.isLevelEnabled(Level.Debug)) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
   } else {
     projectRoot = findProjectRoot(cwd);
-    if (log.enabled) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
+    if (log.isLevelEnabled(Level.Debug)) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
   }
 
-  if (log.enabled) log.info(`project root: ${projectRoot}`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`project root: ${projectRoot}`);
 
   const eslintResult = options.noEslintConfig
     ? EMPTY_ESLINT_RESULT
@@ -477,7 +477,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
   if (options.accessibilityPolicy !== undefined) {
     setActivePolicy(options.accessibilityPolicy);
   }
-  if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores, policy: ${options.accessibilityPolicy ?? "none"}`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores, policy: ${options.accessibilityPolicy ?? "none"}`);
 
   const effectiveExclude = eslintResult.globalIgnores.length > 0
     ? [...options.exclude, ...eslintResult.globalIgnores]
@@ -488,11 +488,11 @@ export async function runLint(args: readonly string[]): Promise<void> {
   }
 
   const fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
-  if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
   const filesToLint = resolvedTargets ?? fileIndex.allFiles();
 
-  if (log.enabled) log.info(`resolved ${filesToLint.length} files to lint`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`resolved ${filesToLint.length} files to lint`);
 
   if (!options.noDaemon) {
     const daemonResult = await tryDaemonLint(options, projectRoot, filesToLint, log);
@@ -500,7 +500,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       if (fileHandle !== undefined) await fileHandle.close();
       outputAndExit(daemonResult, options);
     }
-    if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
+    if (log.isLevelEnabled(Level.Info)) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
   if (filesToLint.length === 0) {
@@ -524,14 +524,14 @@ export async function runLint(args: readonly string[]): Promise<void> {
     cssContentMap.set(cssFile.path, cssFile.content);
   }
 
-  if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
 
   const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
-  if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
 
   const tLib = performance.now();
   const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
-  if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
 
   const tsconfigPath = ts.findConfigFile(projectRoot, ts.sys.fileExists, "tsconfig.json");
   if (!tsconfigPath) die(`No tsconfig.json found in ${projectRoot}`);
@@ -563,7 +563,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
   if (useWorkers) {
     /* ── Parallel path: dispatch file chunks to worker threads ── */
     const chunks = partitionFiles(solidFilesToLint, workerCount);
-    if (log.enabled) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
 
     const pool = createWorkerPool(chunks.length);
     try {
@@ -595,7 +595,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
         }
       }
     } catch (err: unknown) {
-      if (log.enabled) log.warning(`worker error: ${err instanceof Error ? err.message : String(err)}, falling back to serial`);
+      if (log.isLevelEnabled(Level.Warning)) log.warning(`worker error: ${err instanceof Error ? err.message : String(err)}, falling back to serial`);
       allDiagnostics.length = 0;
       serialBatch ??= createBatchProgram(projectRoot, allSolidFiles);
       runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
@@ -604,13 +604,13 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
   } else {
     /* ── Serial path: few files, no worker overhead ── */
-    if (log.enabled) log.info(`serial analysis: ${solidFilesToLint.length} files`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`serial analysis: ${solidFilesToLint.length} files`);
     serialBatch = createBatchProgram(projectRoot, allSolidFiles);
     runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
   }
 
   const t1 = performance.now();
-  if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
 
   let exitCode = 0;
   try {
@@ -630,7 +630,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       } else {
         solidGraphs = [];
         solidGraphRebuilt = allSolidFiles.length;
-        if (log.enabled) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
+        if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
         for (let i = 0, len = allSolidFiles.length; i < len; i++) {
           const path = allSolidFiles[i];
           if (!path) continue;
@@ -640,7 +640,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
           solidGraphs.push(buildSolidGraph(input));
         }
       }
-      if (log.enabled) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidGraphs`);
+      if (log.isLevelEnabled(Level.Info)) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidGraphs`);
 
       /* 2. Build CSSGraph from pre-read CSS content map. */
       const cssFiles: { path: string; content: string }[] = [];
@@ -683,7 +683,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
             crossCount++;
           }
         }
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Info)) {
           const t2 = performance.now();
           log.info(`cross-file analysis: ${crossCount} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
         }
@@ -693,7 +693,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
           if (!cd) continue;
           allDiagnostics.push(cd);
         }
-        if (log.enabled) {
+        if (log.isLevelEnabled(Level.Info)) {
           const t2 = performance.now();
           log.info(`cross-file analysis: ${crossDiagnostics.length} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
         }
@@ -715,7 +715,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
     const counts = countDiagnostics(allDiagnostics);
-    if (log.enabled) log.info(`total: ${allDiagnostics.length} diagnostics (${counts.errors} errors, ${counts.warnings} warnings) in ${(performance.now() - t0).toFixed(0)}ms`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`total: ${allDiagnostics.length} diagnostics (${counts.errors} errors, ${counts.warnings} warnings) in ${(performance.now() - t0).toFixed(0)}ms`);
 
     if (counts.errors > 0) {
       exitCode = 1;
@@ -782,18 +782,18 @@ function runSerialAnalysis(
 
     const sourceFile = program.getSourceFile(key);
     if (!sourceFile) {
-      if (log.enabled) log.trace(`lint: skipping ${key} (not in program)`);
+      if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: skipping ${key} (not in program)`);
       continue;
     }
 
-    if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
     const input = createSolidInput(key, program, log);
     const graph = buildSolidGraph(input);
     solidGraphsOut.push(graph);
 
     fileDiags.length = 0;
     runSolidRules(graph, input.sourceFile, emit);
-    if (log.enabled) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
     for (let j = 0, dLen = fileDiags.length; j < dLen; j++) {
       const d = fileDiags[j];
       if (!d) continue;

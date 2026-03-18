@@ -18,7 +18,7 @@ import {
  *   errors (e.g. AI agents via --stdio) receive all diagnostics.
  */
 export function toLSPDiagnostic(d: Diagnostic, warningsAsErrors = false): LSPDiagnostic {
-  const isError = d.severity === "error" || (warningsAsErrors && d.severity === "warn")
+  const isError = d.severity === "error" || (warningsAsErrors && d.severity === "warn");
   return {
     range: {
       start: { line: d.loc.start.line - 1, character: d.loc.start.column },

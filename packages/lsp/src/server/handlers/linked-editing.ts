@@ -12,7 +12,7 @@ import type {
 
 import ts from "typescript";
 import type { HandlerContext } from "./handler-context";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
 /**
@@ -41,10 +41,10 @@ export function handleLinkedEditingRanges(
   const { element, tagName } = result;
 
   if (!element.closingElement) {
-    if (log.enabled) log.trace(`linkedEditing: self-closing <${tagName}/> — skipped`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`linkedEditing: self-closing <${tagName}/> — skipped`);
     return null;
   }
-  if (log.enabled) log.trace(`linkedEditing: <${tagName}> at ${filePath}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`linkedEditing: <${tagName}> at ${filePath}:${params.position.line}:${params.position.character}`);
 
   const openTagName = element.openingElement.tagName;
   const closeTagName = element.closingElement.tagName;

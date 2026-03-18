@@ -9,7 +9,7 @@
  * The cache does not perform I/O or parsing — callers supply builder
  * functions that are invoked only on cache miss.
  */
-import { canonicalPath, classifyFile, noopLogger } from "@drskillissue/ganko-shared"
+import { canonicalPath, classifyFile, noopLogger, Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import type { Diagnostic } from "./diagnostic"
 import type { SolidGraph } from "./solid/impl"
@@ -72,7 +72,7 @@ export class GraphCache {
     const key = canonicalPath(path)
     const cached = this.solids.get(key)
     const hit = cached !== undefined && cached.version === version
-    if (this.log.enabled) this.log.debug(`hasSolidGraph: ${key} v=${version} cached=${cached?.version ?? "none"} hit=${hit} (${this.solids.size} total)`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`hasSolidGraph: ${key} v=${version} cached=${cached?.version ?? "none"} hit=${hit} (${this.solids.size} total)`)
     return hit
   }
 
@@ -90,7 +90,7 @@ export class GraphCache {
     const key = canonicalPath(path)
     this.solids.set(key, { version, graph })
     this.solidGeneration++
-    if (this.log.enabled) this.log.debug(`setSolidGraph: ${key} v=${version} (${this.solids.size} total) solidGen=${this.solidGeneration}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`setSolidGraph: ${key} v=${version} (${this.solids.size} total) solidGen=${this.solidGeneration}`)
   }
 
   /**
@@ -107,10 +107,10 @@ export class GraphCache {
     const key = canonicalPath(path)
     const cached = this.solids.get(key)
     if (cached !== undefined && cached.version === version) {
-      if (this.log.enabled) this.log.debug(`getCachedSolidGraph HIT: ${key} v=${version}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCachedSolidGraph HIT: ${key} v=${version}`)
       return cached.graph
     }
-    if (this.log.enabled) this.log.debug(`getCachedSolidGraph MISS: ${key} v=${version}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCachedSolidGraph MISS: ${key} v=${version}`)
     return null
   }
 
@@ -128,16 +128,16 @@ export class GraphCache {
     const key = canonicalPath(path)
     const cached = this.solids.get(key)
     if (cached !== undefined && cached.version === version) {
-      if (this.log.enabled) this.log.debug(`getSolidGraph HIT: ${key} v=${version}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getSolidGraph HIT: ${key} v=${version}`)
       return cached.graph
     }
 
-    if (this.log.enabled) this.log.debug(`getSolidGraph MISS: ${key} v=${version} (was ${cached?.version ?? "uncached"})`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getSolidGraph MISS: ${key} v=${version} (was ${cached?.version ?? "uncached"})`)
     const t0 = performance.now()
     const graph = build()
     this.solids.set(key, { version, graph })
     this.solidGeneration++
-    if (this.log.enabled) this.log.debug(`getSolidGraph BUILT: ${key} v=${version} in ${performance.now() - t0}ms (${this.solids.size} total) solidGen=${this.solidGeneration}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getSolidGraph BUILT: ${key} v=${version} in ${performance.now() - t0}ms (${this.solids.size} total) solidGen=${this.solidGeneration}`)
     return graph
   }
 
@@ -152,15 +152,15 @@ export class GraphCache {
    */
   getCSSGraph(build: () => CSSGraph): CSSGraph {
     if (this.css !== null && this.css.generation === this.cssGeneration) {
-      if (this.log.enabled) this.log.debug(`getCSSGraph HIT: gen=${this.cssGeneration}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCSSGraph HIT: gen=${this.cssGeneration}`)
       return this.css.graph
     }
 
-    if (this.log.enabled) this.log.debug(`getCSSGraph MISS: currentGen=${this.cssGeneration} cachedGen=${this.css?.generation ?? "none"}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCSSGraph MISS: currentGen=${this.cssGeneration} cachedGen=${this.css?.generation ?? "none"}`)
     const t0 = performance.now()
     const graph = build()
     this.css = { generation: this.cssGeneration, graph }
-    if (this.log.enabled) this.log.debug(`getCSSGraph BUILT: gen=${this.cssGeneration} in ${performance.now() - t0}ms`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCSSGraph BUILT: gen=${this.cssGeneration} in ${performance.now() - t0}ms`)
     return graph
   }
 
@@ -181,11 +181,11 @@ export class GraphCache {
       && this.layout.solidGeneration === solidGen
       && this.layout.cssGeneration === cssGen
     ) {
-      if (this.log.enabled) this.log.debug(`getLayoutGraph HIT: solidGen=${solidGen} cssGen=${cssGen}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getLayoutGraph HIT: solidGen=${solidGen} cssGen=${cssGen}`)
       return this.layout.graph
     }
 
-    if (this.log.enabled) this.log.debug(
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(
       `getLayoutGraph MISS: solidGen=${solidGen} cssGen=${cssGen} `
       + `cached=${this.layout !== null}`,
     )
@@ -197,7 +197,7 @@ export class GraphCache {
       cssGeneration: cssGen,
       graph,
     }
-    if (this.log.enabled) this.log.debug(`getLayoutGraph BUILT: in ${performance.now() - t0}ms`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getLayoutGraph BUILT: in ${performance.now() - t0}ms`)
     return graph
   }
 
@@ -213,7 +213,7 @@ export class GraphCache {
   invalidate(path: string): void {
     const key = canonicalPath(path)
     const kind = classifyFile(key)
-    if (this.log.enabled) this.log.debug(`invalidate: ${key} kind=${kind} solids=${this.solids.size} hasCrossFileResults=${this.crossFileResults !== null} hasLayout=${this.layout !== null}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`invalidate: ${key} kind=${kind} solids=${this.solids.size} hasCrossFileResults=${this.crossFileResults !== null} hasLayout=${this.layout !== null}`)
     if (kind === "solid") {
       const had = this.solids.has(key)
       this.solids.delete(key)
@@ -221,7 +221,7 @@ export class GraphCache {
       this.crossFileResults = null
       this.solidGeneration++
       this.layout = null
-      if (this.log.enabled) this.log.debug(`invalidate SOLID: ${key} wasInCache=${had} solids=${this.solids.size} solidGen=${this.solidGeneration}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`invalidate SOLID: ${key} wasInCache=${had} solids=${this.solids.size} solidGen=${this.solidGeneration}`)
     }
     if (kind === "css") {
       this.crossFileDiagnostics.delete(key)
@@ -229,7 +229,7 @@ export class GraphCache {
       this.cssGeneration++
       this.css = null
       this.layout = null
-      if (this.log.enabled) this.log.debug(`invalidate CSS: ${key} newCssGen=${this.cssGeneration}`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`invalidate CSS: ${key} newCssGen=${this.cssGeneration}`)
     }
   }
 
@@ -239,7 +239,7 @@ export class GraphCache {
    * Called on workspace-level events like config changes.
    */
   invalidateAll(): void {
-    if (this.log.enabled) this.log.debug(`invalidateAll: solids=${this.solids.size} solidGen=${this.solidGeneration} cssGen=${this.cssGeneration}`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`invalidateAll: solids=${this.solids.size} solidGen=${this.solidGeneration} cssGen=${this.cssGeneration}`)
     this.solids.clear()
     this.crossFileDiagnostics.clear()
     this.crossFileResults = null
@@ -256,7 +256,7 @@ export class GraphCache {
    * Used by cross-file analysis which needs all SolidGraphs.
    */
   getAllSolidGraphs(): readonly SolidGraph[] {
-    if (this.log.enabled) this.log.debug(`getAllSolidGraphs: ${this.solids.size} graphs`)
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getAllSolidGraphs: ${this.solids.size} graphs`)
     const out: SolidGraph[] = new Array(this.solids.size)
     let i = 0
     for (const entry of this.solids.values()) {
@@ -317,10 +317,10 @@ export class GraphCache {
     const solidMatch = this.crossFileResults.solidGeneration === this.solidGeneration
     const cssMatch = this.crossFileResults.cssGeneration === this.cssGeneration
     if (solidMatch && cssMatch) {
-      if (this.log.enabled) this.log.debug(`getCachedCrossFileResults HIT: ${this.crossFileResults?.byFile.size} files`)
+      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`getCachedCrossFileResults HIT: ${this.crossFileResults?.byFile.size} files`)
       return this.crossFileResults.byFile
     }
-    if (this.log.enabled) this.log.debug(
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(
       `getCachedCrossFileResults MISS: solidMatch=${solidMatch} cssMatch=${cssMatch} `
       + `cachedSolidGen=${this.crossFileResults?.solidGeneration} currentSolidGen=${this.solidGeneration} `
       + `cachedCssGen=${this.crossFileResults?.cssGeneration} currentCssGen=${this.cssGeneration}`,
@@ -354,7 +354,7 @@ export class GraphCache {
       cssGeneration: this.cssGeneration,
       byFile,
     }
-    if (this.log.enabled) this.log.debug(
+    if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(
       `setCachedCrossFileResults: ${allDiagnostics.length} diags across ${byFile.size} files `
       + `solidGen=${this.solidGeneration} cssGen=${this.cssGeneration}`,
     )

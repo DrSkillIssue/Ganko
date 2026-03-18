@@ -14,7 +14,7 @@ import type {
 } from "vscode-languageserver";
 
 import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
+import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
 import { createFileIndex } from "../../core/file-index";
@@ -189,7 +189,7 @@ export async function handleInitialized(
   if (state.useESLintConfig) {
     const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
       .catch((err: unknown) => {
-        if (log.enabled) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+        if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
         return EMPTY_ESLINT_RESULT;
       });
     state.eslintOverrides = eslintResult.overrides;
@@ -209,7 +209,7 @@ export async function handleInitialized(
   state.initialized = true;
   context.resolveReady();
 
-  if (log.enabled) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
+  if (log.isLevelEnabled(Level.Info)) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
 
   /* ── Phase B: Full program build — re-diagnose with full TypeChecker ──
      The IncrementalTypeScriptService defers createProgram by one event loop
@@ -220,7 +220,7 @@ export async function handleInitialized(
   await project.watchProgramReady();
   context.watchProgramReady = true;
 
-  if (log.enabled) log.info("Phase B: full program ready (Tier 2 active)");
+  if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
   /* Re-diagnose open files with full program (no cross-file yet — workspace
      enrichment hasn't run). */
@@ -242,7 +242,7 @@ export async function handleInitialized(
      cross-file results with the fully-enriched context. */
   context.graphCache.invalidateAll();
 
-  if (log.enabled) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
+  if (log.isLevelEnabled(Level.Info)) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 
   /* Re-diagnose ALL currently open files with cross-file results.
      Recapture open paths — files may have been opened during Phase B→C
@@ -280,14 +280,14 @@ async function enrichWorkspace(
      with a null tailwind validator, caches the wrong results, and the stale
      cache persists even after tailwind resolves. */
   const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
-  if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
+  if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
   /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
     context.tailwindValidator = await resolveTailwindValidator(cssFiles)
       .catch(() => null);
-    if (log.enabled) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
   }
 
   /* Library analysis: scan installed dependencies for CSS custom properties
@@ -296,7 +296,7 @@ async function enrichWorkspace(
   const externalProps = scanDependencyCustomProperties(rootPath);
   if (externalProps.size > 0) {
     context.externalCustomProperties = externalProps;
-    if (log.enabled) log.debug(`library analysis: ${externalProps.size} external custom properties`);
+    if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
 
   /* NOW expose the file index — all enrichment is complete, so any cross-file
@@ -446,7 +446,7 @@ export async function reloadESLintConfig(
 
   const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
     .catch((err: unknown) => {
-      if (log.enabled) log.warning(`Failed to reload ESLint config: ${err instanceof Error ? err.message : String(err)}`);
+      if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to reload ESLint config: ${err instanceof Error ? err.message : String(err)}`);
       return EMPTY_ESLINT_RESULT;
     });
 
@@ -460,7 +460,7 @@ export async function reloadESLintConfig(
   const ignoresChanged = !arraysEqual(prevIgnores, eslintResult.globalIgnores);
 
   if (overridesChanged || ignoresChanged) {
-    if (log.enabled) log.info(`Reloaded ESLint config (${Object.keys(eslintResult.overrides).length} overrides, ${eslintResult.globalIgnores.length} global ignores)`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`Reloaded ESLint config (${Object.keys(eslintResult.overrides).length} overrides, ${eslintResult.globalIgnores.length} global ignores)`);
   }
 
   return { overridesChanged, ignoresChanged };

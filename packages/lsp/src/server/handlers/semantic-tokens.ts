@@ -14,7 +14,7 @@ import type {
 import type { HandlerContext } from "./handler-context";
 import type ts from "typescript";
 import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Token type legend — Solid-specific types only.
@@ -105,7 +105,7 @@ export function handleSemanticTokens(
 
   if (tokens.length === 0) return null;
 
-  if (log.enabled) log.trace(`semanticTokens: ${tokens.length} tokens for ${path}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`semanticTokens: ${tokens.length} tokens for ${path}`);
   tokens.sort(compareTokens);
   return { data: deltaEncode(tokens) };
 }

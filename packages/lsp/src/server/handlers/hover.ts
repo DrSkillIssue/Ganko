@@ -6,7 +6,7 @@
 import { type HoverParams, type Hover, MarkupKind } from "vscode-languageserver";
 import type { HandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath } from "@drskillissue/ganko-shared";
+import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import ts from "typescript";
 
 /**
@@ -35,7 +35,7 @@ export function handleHover(
 
   const kind = detectReactiveKind(display);
   if (!kind) return null;
-  if (log.enabled) log.trace(`hover: reactive kind=${kind} at ${path}:${params.position.line}:${params.position.character}`);
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`hover: reactive kind=${kind} at ${path}:${params.position.line}:${params.position.character}`);
 
   const parts: string[] = [];
   parts.push(`**${kind}** (Solid.js)`);

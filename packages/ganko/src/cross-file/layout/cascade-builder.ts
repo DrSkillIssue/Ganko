@@ -4,6 +4,7 @@ import type { SelectorEntity, CascadePosition, RuleEntity } from "../../css/enti
 import { compareCascadePositions } from "../../css/analysis/cascade"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 import { expandShorthand } from "./shorthand-expansion"
+import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
 import type {
@@ -160,7 +161,7 @@ export function appendMatchingEdgesFromSelectorIds(
     applies.push(edge)
     ctx.perf.matchEdgesCreated++
 
-    if (ctx.logger.enabled) {
+    if (ctx.logger.isLevelEnabled(Level.Trace)) {
       ctx.logger.trace(
         `[cascade] edge node=${node.key} selector=${selector.id} match=${matchResult}`
         + ` conditional=${edge.conditionalMatch} selector-raw=${selector.raw.slice(0, 80)}`,

@@ -11,7 +11,7 @@
  *   4. Merge cross-file results into changed files (republish)
  */
 
-import { canonicalPath, classifyFile, uriToPath } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, uriToPath, Level } from "@drskillissue/ganko-shared";
 import { runCrossFileDiagnostics } from "../../core/analyze";
 import type { PendingChange } from "../handlers/document";
 import {
@@ -107,14 +107,14 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     const t0 = performance.now();
     const changes = flushPendingChanges(documentState);
-    if (context.log.enabled) context.log.debug(`processChangesCallback: ${changes.length} changes`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
     const paths: string[] = new Array(changes.length);
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
       paths[i] = change.path;
-      if (context.log.enabled) context.log.debug(`processChangesCallback: evicting ${change.path}`);
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: evicting ${change.path}`);
       project.updateFile(change.path, change.content);
       context.evictFileCache(change.path);
     }
@@ -123,12 +123,12 @@ export function setupDocumentHandlers(context: ServerContext): void {
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      if (context.log.enabled) context.log.debug(`processChangesCallback: diagnosing ${change.path} (includeCrossFile=false)`);
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: diagnosing ${change.path} (includeCrossFile=false)`);
       publishFileDiagnostics(context, project, change.path, change.content, false);
       diagnosed.add(change.path);
     }
 
-    if (context.log.enabled) context.log.debug("processChangesCallback: refreshing cross-file cache for changed batch");
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug("processChangesCallback: refreshing cross-file cache for changed batch");
     refreshCrossFileCache(context, project, changes);
 
     context.rediagnoseAffected(paths, diagnosed);
@@ -152,7 +152,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
     await context.ready;
 
     const key = canonicalPath(path);
-    if (context.log.enabled) context.log.debug(
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
       `didOpen: uri=${event.document.uri} path=${key} hasProject=${!!context.project} `
       + `version=${event.document.version} openDocs=${documentState.openDocuments.size} `
       + `watchReady=${context.watchProgramReady}`,
@@ -171,16 +171,16 @@ export function setupDocumentHandlers(context: ServerContext): void {
     /* Tier 2+: full program available. */
     const project = context.project;
     if (project) {
-      if (context.log.enabled) context.log.debug(`didOpen: calling publishFileDiagnostics for ${key}`);
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didOpen: calling publishFileDiagnostics for ${key}`);
       publishFileDiagnostics(context, project, key, event.document.getText());
     }
   });
 
   documents.onDidChangeContent(async (event) => {
-    if (context.log.enabled) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
     await context.ready;
     const queued = handleDidChange(event, documentState);
-    if (context.log.enabled) context.log.debug(`didChange: queued=${queued} hasProject=${!!context.project} pendingChanges=${documentState.pendingChanges.size}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: queued=${queued} hasProject=${!!context.project} pendingChanges=${documentState.pendingChanges.size}`);
     if (!queued || !context.project) return;
 
     context.tsPropagationCancel?.();
@@ -195,7 +195,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
   documents.onDidSave(async (event) => {
     await context.ready;
-    if (context.log.enabled) context.log.debug(`didSave ENTER: uri=${event.document.uri} version=${event.document.version}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave ENTER: uri=${event.document.uri} version=${event.document.version}`);
     if (!isServerReady(serverState)) {
       context.log.debug("didSave: server not ready, returning");
       return;
@@ -224,16 +224,16 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     const changes = flushPendingChanges(documentState);
     const savedPath = uriToPath(event.document.uri);
-    if (context.log.enabled) context.log.debug(`didSave: ${changes.length} pending changes, savedPath=${savedPath}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: ${changes.length} pending changes, savedPath=${savedPath}`);
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      if (context.log.enabled) context.log.debug(`didSave: evicting pending change ${change.path}`);
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: evicting pending change ${change.path}`);
       project.updateFile(change.path, change.content);
       context.evictFileCache(change.path);
     }
-    if (context.log.enabled) context.log.debug(`didSave: evicting saved file ${savedPath}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: evicting saved file ${savedPath}`);
     context.evictFileCache(savedPath);
 
     /* Use the current document text for the saved file to avoid the
@@ -248,12 +248,12 @@ export function setupDocumentHandlers(context: ServerContext): void {
       const change = changes[i];
       if (!change) continue;
       if (change.path !== savedPath) {
-        if (context.log.enabled) context.log.debug(`didSave: diagnosing pending change ${change.path}`);
+        if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: diagnosing pending change ${change.path}`);
         publishFileDiagnostics(context, project, change.path);
         diagnosed.add(change.path);
       }
     }
-    if (context.log.enabled) context.log.debug(`didSave: diagnosing saved file ${savedPath}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: diagnosing saved file ${savedPath}`);
     publishFileDiagnostics(context, project, savedPath, savedContent);
     diagnosed.add(savedPath);
 
@@ -272,7 +272,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
   documents.onDidClose((event) => {
     const path = handleDidClose(event, documentState);
-    if (context.log.enabled) context.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
     if (path) {
       clearDiagnostics(context.connection, event.document.uri);
       /* Do NOT call evictFileCache here. Closing a tab does not change file
@@ -285,7 +285,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       const key = canonicalPath(path);
       context.diagCache.delete(key);
       context.tsDiagCache.delete(key);
-      if (context.log.enabled) context.log.debug(`didClose: cleared diag cache for ${key} (graph preserved)`);
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: cleared diag cache for ${key} (graph preserved)`);
     }
   });
 }

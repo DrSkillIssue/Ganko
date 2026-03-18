@@ -11,7 +11,7 @@ import { runPhases } from "../../solid/phases"
 import { getStaticClassTokensForElementEntity } from "../../solid/queries/jsx-derived"
 import { getStaticStringFromJSXValue } from "../../solid/util/static-value"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { noopLogger, isBlank } from "@drskillissue/ganko-shared"
+import { noopLogger, isBlank, Level } from "@drskillissue/ganko-shared"
 import type { LayoutModuleResolver } from "./module-resolver"
 import { resolveExternalModule } from "./module-resolver"
 import type { LayoutElementRef } from "./graph"
@@ -144,19 +144,19 @@ export function createLayoutComponentHostResolver(
 
       const binding = resolveTagBinding(normalizedFile, tag)
       if (binding === null) {
-        if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): binding=null`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] resolveHost(${tag}): binding=null`)
         hostByTagCache.set(cacheKey, null)
         return null
       }
 
       if (binding.kind === "component") {
-        if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): component, tagName=${binding.host.descriptor.tagName}, attrs=[${[...binding.host.descriptor.staticAttributes.keys()]}]`)
+        if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] resolveHost(${tag}): component, tagName=${binding.host.descriptor.tagName}, attrs=[${[...binding.host.descriptor.staticAttributes.keys()]}]`)
         hostByTagCache.set(cacheKey, binding.host)
         return binding.host
       }
 
       const host = binding.base ? binding.base.host : null
-      if (logger.enabled) logger.trace(`[component-host] resolveHost(${tag}): namespace, base=${host?.descriptor.tagName ?? "null"}`)
+      if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] resolveHost(${tag}): namespace, base=${host?.descriptor.tagName ?? "null"}`)
       hostByTagCache.set(cacheKey, host)
       return host
     },
@@ -187,17 +187,17 @@ export function createLayoutComponentHostResolver(
       return { descriptor: entry.descriptor, hostElementRef: entry.hostElementRef }
     }
 
-    if (logger.enabled) logger.trace(`[component-host] resolveComponentHostEntry: deferred innerTag=${entry.innerTag}, file=${entry.filePath}, attrs=[${[...entry.staticAttributes.keys()]}]`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] resolveComponentHostEntry: deferred innerTag=${entry.innerTag}, file=${entry.filePath}, attrs=[${[...entry.staticAttributes.keys()]}]`)
 
     const innerBinding = resolveLocalIdentifierBinding(entry.filePath, entry.innerTag)
-    if (logger.enabled) logger.trace(`[component-host]   innerBinding=${innerBinding === null ? "null" : innerBinding.kind}`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   innerBinding=${innerBinding === null ? "null" : innerBinding.kind}`)
     const innerHost = extractHostFromBinding(innerBinding)
-    if (logger.enabled) logger.trace(`[component-host]   innerHost=${innerHost === null ? "null" : `tagName=${innerHost.descriptor.tagName}, attrs=[${[...innerHost.descriptor.staticAttributes.keys()]}]`}`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   innerHost=${innerHost === null ? "null" : `tagName=${innerHost.descriptor.tagName}, attrs=[${[...innerHost.descriptor.staticAttributes.keys()]}]`}`)
 
     let tagName = innerHost !== null ? innerHost.descriptor.tagName : null
     if (tagName === null) {
       tagName = resolveTagNameFromPolymorphicProp(entry.staticAttributes)
-      if (logger.enabled) logger.trace(`[component-host]   polymorphic fallback: tagName=${tagName}`)
+      if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   polymorphic fallback: tagName=${tagName}`)
     }
     const staticAttributes = innerHost !== null
       ? mergeStaticAttributes(entry.staticAttributes, innerHost.descriptor.staticAttributes)
@@ -207,7 +207,7 @@ export function createLayoutComponentHostResolver(
       : entry.staticClassTokens
     const forwardsChildren = entry.forwardsChildren || (innerHost !== null && innerHost.descriptor.forwardsChildren)
 
-    if (logger.enabled) logger.trace(`[component-host]   resolved: tagName=${tagName}, attrs=[${[...staticAttributes.keys()]}], classes=[${staticClassTokens}]`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   resolved: tagName=${tagName}, attrs=[${[...staticAttributes.keys()]}], classes=[${staticClassTokens}]`)
 
     return {
       descriptor: { tagName, staticAttributes, staticClassTokens, forwardsChildren },
@@ -340,7 +340,7 @@ export function createLayoutComponentHostResolver(
     const baseExpression = toExpressionArgument(firstArg)
     if (baseExpression === null) return null
     const baseBinding = resolveBindingFromExpression(filePath, baseExpression)
-    if (logger.enabled) logger.trace(`[component-host] Object.assign base: ${baseBinding === null ? "null" : baseBinding.kind}${baseBinding?.kind === "component" ? `, tagName=${baseBinding.host.descriptor.tagName}` : ""}`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] Object.assign base: ${baseBinding === null ? "null" : baseBinding.kind}${baseBinding?.kind === "component" ? `, tagName=${baseBinding.host.descriptor.tagName}` : ""}`)
 
     let baseComponent: ComponentBinding | null = null
     const members = new Map<string, LayoutBinding>()
@@ -372,7 +372,7 @@ export function createLayoutComponentHostResolver(
       appendObjectExpressionMembers(filePath, argument, members)
     }
 
-    if (logger.enabled) logger.trace(`[component-host] Object.assign result: base=${baseComponent === null ? "null" : `tagName=${baseComponent.host.descriptor.tagName}`}, members=[${[...members.keys()]}]`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] Object.assign result: base=${baseComponent === null ? "null" : `tagName=${baseComponent.host.descriptor.tagName}`}, members=[${[...members.keys()]}]`)
     if (baseComponent === null && members.size === 0) return null
 
     return {
@@ -430,7 +430,7 @@ export function createLayoutComponentHostResolver(
   function resolveBindingFromImport(filePath: string, importBinding: ImportBinding): LayoutBinding | null {
     const resolvedModule = moduleResolver.resolveSolid(filePath, importBinding.source)
       ?? resolveAndIndexExternalModule(filePath, importBinding.source)
-    if (logger.enabled) logger.trace(`[component-host] resolveBindingFromImport: source=${importBinding.source}, kind=${importBinding.kind}, resolvedModule=${resolvedModule}`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host] resolveBindingFromImport: source=${importBinding.source}, kind=${importBinding.kind}, resolvedModule=${resolvedModule}`)
     if (resolvedModule === null) return null
 
     const normalized = resolve(resolvedModule)
@@ -441,7 +441,7 @@ export function createLayoutComponentHostResolver(
     const exportName = importBinding.kind === "default" ? "default" : importBinding.importedName
     if (exportName === null) return null
     const result = resolveExportBinding(normalized, exportName)
-    if (logger.enabled) logger.trace(`[component-host]   export ${exportName}: ${result === null ? "null" : result.kind}`)
+    if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   export ${exportName}: ${result === null ? "null" : result.kind}`)
     return result
   }
 

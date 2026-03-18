@@ -1,3 +1,4 @@
+import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 import { selectKth } from "./util"
 
@@ -222,7 +223,7 @@ export function getLatestLayoutPerfStatsForTest(): LayoutPerfStats {
 
 export function maybeLogLayoutPerf(stats: LayoutPerfStatsMutable, log?: Logger): void {
   if (process.env["SOLID_LINT_LAYOUT_PROFILE"] !== "1") return
-  if (!log || !log.enabled) return
+  if (!log || !log.isLevelEnabled(Level.Debug)) return
   const view = snapshotLayoutPerfStats(stats)
   log.debug(
     `[layout] elements=${view.elementsScanned}`

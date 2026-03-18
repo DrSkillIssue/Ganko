@@ -1,18 +1,40 @@
-/** Canonical list of log levels, most verbose to least verbose. */
+/** Canonical list of log level names, most verbose to least verbose. */
 export const LOG_LEVELS = ["trace", "debug", "info", "warning", "error", "critical", "off"] as const;
 
-/** Log severity levels matching VS Code's LogLevel enum. */
+/** String log level name — used for configuration, parsing, and display. */
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
+/**
+ * Numeric log level constants for hot-path level checks.
+ *
+ * Lower numbers are more verbose. Use with `isLevelEnabled`:
+ *
+ * ```ts
+ * if (log.isLevelEnabled(Level.Debug)) log.debug(`rebuilt ${count} graphs`);
+ * ```
+ */
+export const Level = {
+  Trace: 0,
+  Debug: 1,
+  Info: 2,
+  Warning: 3,
+  Error: 4,
+  Critical: 5,
+  Off: 6,
+} as const;
+
+/** Numeric log level value (0–6). */
+export type LevelValue = (typeof Level)[keyof typeof Level];
+
 /** Numeric ordering for log levels — lower numbers are more verbose. */
-export const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
-  trace: 0,
-  debug: 1,
-  info: 2,
-  warning: 3,
-  error: 4,
-  critical: 5,
-  off: 6,
+export const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, LevelValue>> = {
+  trace: Level.Trace,
+  debug: Level.Debug,
+  info: Level.Info,
+  warning: Level.Warning,
+  error: Level.Error,
+  critical: Level.Critical,
+  off: Level.Off,
 };
 
 /**
@@ -24,20 +46,21 @@ export const LOG_LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
  * The interface lives here so ganko and @drskillissue/ganko-shared consumers can log
  * without depending on ganko.
  *
- * Use the `enabled` flag to guard expensive log argument computation:
+ * Use `isLevelEnabled` to guard expensive log argument computation:
  *
  * ```ts
- * if (log.enabled) log.debug(`rebuilt ${count} graphs in ${elapsed}ms`);
+ * if (log.isLevelEnabled(Level.Debug)) log.debug(`rebuilt ${count} graphs in ${elapsed}ms`);
  * ```
  *
- * When the logger is a noop, `enabled` is `false` and the entire template
- * literal + any function calls inside it are never evaluated — true zero-cost.
+ * This checks against the actual log level threshold — a single integer
+ * comparison with no lookup table. Template literals and function calls
+ * inside the guard are never evaluated when the level is disabled.
  */
 export interface Logger {
-  /** Whether this logger actually writes output. Guard expensive calls with this. */
-  readonly enabled: boolean
   /** The active log level threshold. Messages below this level are suppressed. */
   readonly level: LogLevel
+  /** Check whether a specific level would produce output at the current threshold. */
+  isLevelEnabled(level: LevelValue): boolean
   trace(message: string): void
   debug(message: string): void
   info(message: string): void
@@ -54,8 +77,8 @@ export interface LeveledLogger extends Logger {
 
 /** Silent logger for tests and contexts where logging is unwanted. */
 export const noopLogger: LeveledLogger = {
-  enabled: false,
   level: "off",
+  isLevelEnabled() { return false; },
   trace() {},
   debug() {},
   info() {},
@@ -104,9 +127,9 @@ export function formatError(err: Error | undefined): string {
 /**
  * Create a read-only Logger that prepends a tag to every message.
  *
- * Delegates all calls to the underlying logger — `enabled` and `level`
- * reflect the underlying logger's state, so `setLevel()` on the root
- * propagates automatically.
+ * Delegates all calls to the underlying logger — `isLevelEnabled` and
+ * `level` reflect the underlying logger's state, so `setLevel()` on
+ * the root propagates automatically.
  *
  * @param logger - Underlying logger to delegate to
  * @param prefix - Component name (e.g. "analyzer", "gc", "memory")
@@ -115,8 +138,8 @@ export function formatError(err: Error | undefined): string {
 export function prefixLogger(logger: Logger, prefix: string): Logger {
   const tag = `[${prefix}] `;
   return {
-    get enabled() { return logger.enabled; },
     get level() { return logger.level; },
+    isLevelEnabled(level: LevelValue) { return logger.isLevelEnabled(level); },
     trace(message: string) { logger.trace(tag + message); },
     debug(message: string) { logger.debug(tag + message); },
     info(message: string) { logger.info(tag + message); },
@@ -147,20 +170,20 @@ export function createLogger(writer: LogWriter, level: LogLevel = "info"): Level
   let threshold = LOG_LEVEL_ORDER[level];
   let currentLevel = level;
   return {
-    get enabled() { return threshold < LOG_LEVEL_ORDER.off; },
     get level() { return currentLevel; },
+    isLevelEnabled(target: LevelValue) { return threshold <= target; },
     setLevel(next: LogLevel) { threshold = LOG_LEVEL_ORDER[next]; currentLevel = next; },
-    trace(message: string) { if (threshold <= LOG_LEVEL_ORDER.trace) writer.trace(message); },
-    debug(message: string) { if (threshold <= LOG_LEVEL_ORDER.debug) writer.debug(message); },
-    info(message: string) { if (threshold <= LOG_LEVEL_ORDER.info) writer.info(message); },
-    warning(message: string) { if (threshold <= LOG_LEVEL_ORDER.warning) writer.warning(message); },
+    trace(message: string) { if (threshold <= Level.Trace) writer.trace(message); },
+    debug(message: string) { if (threshold <= Level.Debug) writer.debug(message); },
+    info(message: string) { if (threshold <= Level.Info) writer.info(message); },
+    warning(message: string) { if (threshold <= Level.Warning) writer.warning(message); },
     error(message: string, err?: Error) {
-      if (threshold <= LOG_LEVEL_ORDER.error) {
+      if (threshold <= Level.Error) {
         writer.error(err !== undefined ? `${message}: ${formatError(err)}` : message);
       }
     },
     critical(message: string, err?: Error) {
-      if (threshold <= LOG_LEVEL_ORDER.critical) {
+      if (threshold <= Level.Critical) {
         writer.critical(err !== undefined ? `${message}: ${formatError(err)}` : message);
       }
     },
