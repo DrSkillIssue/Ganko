@@ -18,6 +18,8 @@ import { formatRounded, normalizeStylePropertyKey } from "./rule-runtime"
 import { getJSXAttributeEntity } from "../../solid/queries/jsx"
 import type { SolidGraph } from "../../solid/impl"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
+import { readHostElementRef } from "../layout"
+import type { LayoutGraph, LayoutElementRef } from "../layout"
 
 const messages = {
   fontTooSmall: "Inline style `{{prop}}: {{value}}` ({{resolved}}px) is below the minimum `{{min}}px` for policy `{{policy}}`.",
@@ -46,14 +48,30 @@ const INTERACTIVE_ARIA_ROLES = new Set([
   "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "tab",
 ])
 
-function isInteractiveElement(solid: SolidGraph, element: JSXElementEntity): boolean {
+function isInteractiveElement(
+  solid: SolidGraph,
+  element: JSXElementEntity,
+  hostElementRef: LayoutElementRef | null,
+): boolean {
+  // Native DOM element — check tagName directly.
   if (element.tagName !== null && INTERACTIVE_HTML_TAGS.has(element.tagName)) return true
+  // Explicit role attribute on the call site overrides default semantics.
   const roleAttr = getJSXAttributeEntity(solid, element, "role")
   if (roleAttr !== null && roleAttr.valueNode !== null) {
     const role = getStaticStringFromJSXValue(roleAttr.valueNode)
     if (role !== null && INTERACTIVE_ARIA_ROLES.has(role)) return true
   }
+  // Component call site that resolves to a native interactive DOM element.
+  // e.g. `<MyButton style={{ height: "12px" }}>` → host is `<button>` → interactive.
+  if (hostElementRef !== null && hostElementRef.element.tagName !== null) {
+    if (INTERACTIVE_HTML_TAGS.has(hostElementRef.element.tagName)) return true
+  }
   return false
+}
+
+function readNodeHostElementRef(layout: LayoutGraph, solid: SolidGraph, element: JSXElementEntity): LayoutElementRef | null {
+  const node = layout.elementBySolidFileAndId.get(solid.file)?.get(element.id) ?? null
+  return node !== null ? readHostElementRef(layout, node) : null
 }
 
 export const jsxStylePolicy = defineCrossRule({
@@ -66,7 +84,7 @@ export const jsxStylePolicy = defineCrossRule({
     category: "css-jsx",
   },
   check(context, emit) {
-    const { solids } = context
+    const { solids, layout } = context
     const policy = getActivePolicy()
     if (policy === null) return
     const name = getActivePolicyName() ?? ""
@@ -107,7 +125,8 @@ export const jsxStylePolicy = defineCrossRule({
       }
 
       if (INLINE_TOUCH_TARGET_KEYS.has(normalizedKey)) {
-        if (!isInteractiveElement(solid, element)) return
+        const hostRef = readNodeHostElementRef(layout, solid, element)
+        if (!isInteractiveElement(solid, element, hostRef)) return
         const strVal = getStaticStringValue(p.initializer)
         if (!strVal) return
         const px = parsePxValue(strVal)
