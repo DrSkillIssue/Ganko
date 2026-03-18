@@ -88,7 +88,6 @@
   },
   "devDependencies": {
     "@drskillissue/ganko-shared": "workspace:^",
-    "@typescript-eslint/rule-tester": "^8.57.0",
     "@typescript-eslint/utils": "^8.57.0"
   },
   "author": "DrSkillIssue",
