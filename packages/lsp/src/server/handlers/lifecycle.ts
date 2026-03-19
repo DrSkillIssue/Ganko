@@ -285,8 +285,11 @@ async function enrichWorkspace(
   /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    context.tailwindValidator = await resolveTailwindValidator(cssFiles)
-      .catch(() => null);
+    context.tailwindValidator = await resolveTailwindValidator(cssFiles, log)
+      .catch((err) => {
+        if (log.isLevelEnabled(Level.Warning)) log.warning(`tailwind validator: uncaught error: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
     if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
   }
 

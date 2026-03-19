@@ -184,8 +184,11 @@ export function publishFileDiagnostics(
     if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);
   }
 
+  /* diagCache already holds singleFile-only (set by runDiagnostics above).
+     Merge cross-file for publication but do NOT write merged back to diagCache —
+     that would violate the single-file-only invariant and cause double-counting
+     in republishMergedDiagnostics and the pull diagnostic handler. */
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-  context.diagCache.set(key, rawDiagnostics);
   const diagnostics = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
 
   if (context.serverState.enableTsDiagnostics && context.watchProgramReady && kind === "solid") {
@@ -250,8 +253,9 @@ export function republishMergedDiagnostics(
   const singleFile = context.diagCache.get(key);
   if (singleFile === undefined) return;
 
+  /* Merge for publication only — do NOT write back to diagCache.
+     diagCache must remain single-file-only (see runDiagnostics doc comment). */
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-  context.diagCache.set(key, rawDiagnostics);
   const diagnostics = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
 
   if (hasTsDiags) {

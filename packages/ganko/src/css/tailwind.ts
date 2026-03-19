@@ -15,6 +15,7 @@
 import { dirname, join } from "node:path"
 import { createRequire } from "node:module"
 import { existsSync } from "node:fs"
+import type { Logger } from "@drskillissue/ganko-shared"
 
 /**
  * Validates whether a CSS class name is a known Tailwind utility.
@@ -246,25 +247,41 @@ export function detectTailwindEntry(
  */
 export async function resolveTailwindValidator(
   files: readonly { path: string; content: string }[],
+  logger?: Logger,
 ): Promise<TailwindValidator | null> {
   const entry = detectTailwindEntry(files)
-  if (!entry) return null
+  if (!entry) {
+    logger?.info("tailwind: no entry file detected (no @import \"tailwindcss\" or @theme block found in CSS files)")
+    return null
+  }
+
+  logger?.info(`tailwind: entry file detected: ${entry.path}`)
 
   try {
     const base = dirname(entry.path)
     const resolved = resolveTailwindNodePath(base)
-    if (resolved === null) return null
+    if (resolved === null) {
+      logger?.warning(`tailwind: @tailwindcss/node not resolvable walking up from ${base}`)
+      return null
+    }
+
+    logger?.info(`tailwind: @tailwindcss/node resolved to ${resolved}`)
 
     const mod: TailwindNodeModule = await import(resolved)
-    if (typeof mod.__unstable__loadDesignSystem !== "function") return null
+    if (typeof mod.__unstable__loadDesignSystem !== "function") {
+      logger?.warning("tailwind: @tailwindcss/node module missing __unstable__loadDesignSystem export")
+      return null
+    }
 
     const design = await mod.__unstable__loadDesignSystem(
       entry.content,
       { base },
     )
 
+    logger?.info("tailwind: design system loaded successfully")
     return createLiveValidator(design)
-  } catch {
+  } catch (err) {
+    logger?.warning(`tailwind: failed to load design system: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }

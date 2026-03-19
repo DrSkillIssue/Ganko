@@ -526,7 +526,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
 
-  const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
+  const tailwind = await resolveTailwindValidator(allCSSFiles, log).catch(() => null);
   if (log.isLevelEnabled(Level.Info)) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
 
   const tLib = performance.now();
