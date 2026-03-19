@@ -183,12 +183,14 @@ export function setupFeatureHandlers(context: ServerContext): void {
        messages. Return empty; the client will retry once we push results via
        the normal Tier 2 startup path. */
     if (!project || !isServerReady(context.serverState) || !context.watchProgramReady) {
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] EARLY EXIT: project=${!!project} serverReady=${isServerReady(context.serverState)} watchReady=${context.watchProgramReady}`);
       return { kind: DocumentDiagnosticReportKind.Full, items: [] };
     }
 
     const key = canonicalPath(uriToPath(params.textDocument.uri));
     const kind = classifyFile(key);
     if (kind === "unknown") {
+      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] UNKNOWN FILE: ${key}`);
       return { kind: DocumentDiagnosticReportKind.Full, items: [] };
     }
 
@@ -225,6 +227,14 @@ export function setupFeatureHandlers(context: ServerContext): void {
     const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
     const items = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
 
+    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | fileIndex=${!!context.fileIndex} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
+    if (context.log.isLevelEnabled(Level.Debug)) {
+      for (let d = 0; d < rawDiagnostics.length; d++) {
+        const rd = rawDiagnostics[d];
+        if (rd) context.log.debug(`[PULL-DIAG]   raw[${d}] rule=${rd.rule} sev=${rd.severity} msg=${rd.message.slice(0, 80)}`);
+      }
+    }
+
     if (context.serverState.enableTsDiagnostics && kind === "solid") {
       const ls = project.getLanguageService();
       const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
@@ -237,6 +247,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
         const td = tsDiags[i];
         if (td) items.push(td);
       }
+      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG]   +${tsDiags.length} TS diags → total ${items.length}`);
     }
 
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics (contentUnchanged=${contentUnchanged})`);

@@ -28,6 +28,7 @@ import { jsxLayoutUnstableStyleToggle } from "./jsx-layout-unstable-style-toggle
 import { jsxLayoutClasslistGeometryToggle } from "./jsx-layout-classlist-geometry-toggle"
 import { jsxLayoutPictureSourceRatioConsistency } from "./jsx-layout-picture-source-ratio-consistency"
 import { jsxLayoutFillImageParentMustBeSized } from "./jsx-layout-fill-image-parent-must-be-sized"
+import { jsxLayoutPolicyTouchTarget } from "./jsx-layout-policy-touch-target"
 
 export const rules = [
   jsxNoUndefinedCssClass,
@@ -60,4 +61,5 @@ export const rules = [
   cssLayoutBoxSizingToggleWithChrome,
   cssLayoutContentVisibilityNoIntrinsicSize,
   cssLayoutConditionalOffsetShift,
+  jsxLayoutPolicyTouchTarget,
 ] as const

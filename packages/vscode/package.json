@@ -3,7 +3,7 @@
   "private": true,
   "displayName": "Ganko — Solid.js & CSS Linter",
   "description": "Static analysis for Solid.js and CSS",
-  "version": "0.2.71",
+  "version": "0.2.72",
   "license": "MIT",
   "publisher": "ganko",
   "icon": "icon.png",
@@ -430,7 +430,7 @@
             "Use default severity (warn)"
           ]
         },
-        "solid.rules.css-policy-touch-target": {
+        "solid.rules.jsx-layout-policy-touch-target": {
           "type": "string",
           "enum": [
             "error",
@@ -439,7 +439,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Enforce minimum interactive element sizes per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Enforce minimum interactive element sizes per accessibility policy via resolved layout signals.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",

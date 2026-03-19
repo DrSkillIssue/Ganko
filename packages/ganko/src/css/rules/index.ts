@@ -2,7 +2,7 @@ import { declarationNoOverriddenWithinRule, mediaQueryOverlapConflict, noDescend
 import { cssNoDiscreteTransition, cssNoEmptyKeyframes, noLayoutPropertyAnimation, noTransitionAll, noUnknownAnimationName, noUnusedKeyframes } from "./animation"
 import { noComplexSelectors, noDuplicateSelectors, noIdSelectors, selectorMaxAttributeAndUniversal, selectorMaxSpecificity } from "./selector"
 import { cssNoCustomPropertyCycle, cssNoHardcodedZIndex, cssNoLegacyVh100, cssZIndexRequiresPositionedContext, noImportant, noUnresolvedCustomProperties, noUnusedCustomProperties } from "./property"
-import { cssNoOutlineNoneWithoutFocusVisible, cssPolicyContrast, cssPolicySpacing, cssPolicyTouchTarget, cssPolicyTypography, cssRequireReducedMotionOverride } from "./a11y"
+import { cssNoOutlineNoneWithoutFocusVisible, cssPolicyContrast, cssPolicySpacing, cssPolicyTypography, cssRequireReducedMotionOverride } from "./a11y"
 import { cssNoEmptyRule, cssNoUnknownContainerName, cssNoUnusedContainerName, layerRequirementForComponentRules } from "./structure"
 
 export const rules = [
@@ -36,7 +36,6 @@ export const rules = [
   selectorMaxAttributeAndUniversal,
   selectorMaxSpecificity,
   cssPolicyTypography,
-  cssPolicyTouchTarget,
   cssPolicySpacing,
   cssPolicyContrast,
 ] as const

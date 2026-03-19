@@ -139,9 +139,9 @@ The tables below are synced with the current generated manifest and include Soli
 | `solid/css-no-outline-none-without-focus-visible` | Disallow removing outline without explicit focus-visible replacement. | error |
 | `solid/css-policy-contrast` | Enforce minimum contrast ratio between foreground and background colors per accessibility policy. | warn |
 | `solid/css-policy-spacing` | Enforce minimum letter-spacing, word-spacing, and paragraph spacing per accessibility policy. | warn |
-| `solid/css-policy-touch-target` | Enforce minimum interactive element sizes per accessibility policy. | warn |
 | `solid/css-policy-typography` | Enforce minimum font sizes and line heights per accessibility policy. | warn |
 | `solid/css-require-reduced-motion-override` | Require reduced-motion override for animated selectors. | warn |
+| `solid/jsx-layout-policy-touch-target` | Enforce minimum interactive element sizes per accessibility policy via resolved layout signals. | warn |
 
 
 ### CSS Animation Rules (6)

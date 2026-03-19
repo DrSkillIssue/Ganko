@@ -304,7 +304,7 @@ async function handleLintRequest(
         }
       }
 
-      state.tailwind = await resolveTailwindValidator(allCSSFiles).catch((err) => {
+      state.tailwind = await resolveTailwindValidator(allCSSFiles, log).catch((err) => {
         log.warning(`failed to resolve Tailwind validator: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
