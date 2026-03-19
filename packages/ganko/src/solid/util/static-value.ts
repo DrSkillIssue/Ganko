@@ -199,6 +199,7 @@ export function getStaticStringFromJSXValue(node: ts.Node | null): string | null
     const expression = node.expression;
     if (!expression) return null;
     if (ts.isStringLiteral(expression)) return expression.text;
+    if (ts.isNumericLiteral(expression)) return expression.text;
     if (ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
     if (ts.isTemplateExpression(expression) && expression.templateSpans.length === 0) {
       return expression.head.text;
