@@ -7,7 +7,7 @@ import type { CSSInput, CSSOptions } from "./input";
 import type { TailwindValidator } from "./tailwind";
 import type { Logger } from "@drskillissue/ganko-shared";
 import { noopLogger } from "@drskillissue/ganko-shared";
-import { extractKeyframeNames, CHAR_HYPHEN, CHAR_R, CHAR_H, HEADING_ELEMENTS } from "@drskillissue/ganko-shared";
+import { extractKeyframeNames, HEADING_ELEMENTS } from "@drskillissue/ganko-shared";
 import type { StringInterner } from "@drskillissue/ganko-shared";
 import { createCSSInterner } from "./intern";
 import {
@@ -237,7 +237,19 @@ export class CSSGraph {
   readonly failedFilePaths: string[] = [];
   readonly tokenCategories: TokenCategory[] = [];
 
-  readonly filesWithLayers = new Set<string>();
+  private _filesWithLayers: Set<string> | null = null;
+  get filesWithLayers(): ReadonlySet<string> {
+    if (this._filesWithLayers === null) {
+      const result = new Set<string>();
+      for (let i = 0; i < this.layers.length; i++) {
+        const layer = this.layers[i];
+        if (!layer) continue;
+        result.add(layer.file.path);
+      }
+      this._filesWithLayers = result;
+    }
+    return this._filesWithLayers;
+  }
   readonly selectorsByPseudoClass = new Map<string, SelectorEntity[]>();
   readonly knownKeyframeNames = new Set<string>();
   readonly unresolvedAnimationRefs: UnresolvedAnimationRef[] = [];
@@ -250,19 +262,66 @@ export class CSSGraph {
   readonly multiDeclarationProperties = new Map<string, readonly DeclarationEntity[]>();
   /** Declarations whose parent rule is inside a @keyframes block. */
   readonly keyframeDeclarations: DeclarationEntity[] = [];
-  /** Rules with zero declarations and zero nested rules. */
-  readonly emptyRules: RuleEntity[] = [];
+  /** Rules with zero declarations, zero nested rules, and zero nested at-rules. */
+  private _emptyRules: RuleEntity[] | null = null;
+  get emptyRules(): readonly RuleEntity[] {
+    if (this._emptyRules === null) {
+      this._emptyRules = this.rules.filter(r => r.declarations.length === 0 && r.nestedRules.length === 0 && r.nestedAtRules.length === 0);
+    }
+    return this._emptyRules;
+  }
   /** @keyframes at-rules with no effective keyframe declarations. */
-  readonly emptyKeyframes: AtRuleEntity[] = [];
+  private _emptyKeyframes: AtRuleEntity[] | null = null;
+  get emptyKeyframes(): readonly AtRuleEntity[] {
+    if (this._emptyKeyframes === null) {
+      const result: AtRuleEntity[] = [];
+      for (let i = 0; i < this.keyframes.length; i++) {
+        const kf = this.keyframes[i];
+        if (!kf) continue;
+        if (!kf.parsedParams.animationName) continue;
+        if (kf.rules.length === 0) {
+          result.push(kf);
+          continue;
+        }
+        let hasDeclaration = false;
+        for (let j = 0; j < kf.rules.length; j++) {
+          const kfRule = kf.rules[j];
+          if (!kfRule) continue;
+          if (kfRule.declarations.length > 0) {
+            hasDeclaration = true;
+            break;
+          }
+        }
+        if (!hasDeclaration) result.push(kf);
+      }
+      this._emptyKeyframes = result;
+    }
+    return this._emptyKeyframes;
+  }
 
-  readonly colorDeclarations: DeclarationEntity[] = [];
-  readonly calcDeclarations: DeclarationEntity[] = [];
-  readonly varDeclarations: DeclarationEntity[] = [];
-  readonly urlDeclarations: DeclarationEntity[] = [];
-  readonly vendorPrefixedDeclarations: DeclarationEntity[] = [];
-  readonly hardcodedColorDeclarations: DeclarationEntity[] = [];
 
-  readonly overqualifiedSelectors: SelectorEntity[] = [];
+  private _overqualifiedSelectors: SelectorEntity[] | null = null;
+  get overqualifiedSelectors(): readonly SelectorEntity[] {
+    if (this._overqualifiedSelectors === null) {
+      const result: SelectorEntity[] = [];
+      for (let i = 0, len = this.idSelectors.length; i < len; i++) {
+        const sel = this.idSelectors[i];
+        if (!sel) continue;
+        const parts = sel.parts;
+        for (let j = 0, plen = parts.length; j < plen; j++) {
+          const p = parts[j];
+          if (!p) continue;
+          const t = p.type;
+          if (t === "element" || t === "class" || t === "attribute") {
+            result.push(sel);
+            break;
+          }
+        }
+      }
+      this._overqualifiedSelectors = result;
+    }
+    return this._overqualifiedSelectors;
+  }
   readonly idSelectors: SelectorEntity[] = [];
   readonly attributeSelectors: SelectorEntity[] = [];
   readonly universalSelectors: SelectorEntity[] = [];
@@ -280,7 +339,13 @@ export class CSSGraph {
   /** Tailwind validator for utility class lookup (null if not a Tailwind project). */
   readonly tailwind: TailwindValidator | null;
 
-  readonly deepNestedRules: RuleEntity[] = [];
+  private _deepNestedRules: RuleEntity[] | null = null;
+  get deepNestedRules(): readonly RuleEntity[] {
+    if (this._deepNestedRules === null) {
+      this._deepNestedRules = this.rules.filter(r => r.depth > 3);
+    }
+    return this._deepNestedRules;
+  }
 
   constructor(input: CSSInput) {
     this.options = input.options ?? {};
@@ -487,19 +552,14 @@ export class CSSGraph {
     this.buildKeyframeIndex();
     this.buildContainerNameIndexes();
     this.buildElementKinds();
-    this.buildFilesWithLayers();
     this.buildSelectorPseudoClassIndex();
     this.buildMultiDeclarationProperties();
     this.buildKeyframeDeclarations();
     this.buildKeyframeLayoutMutationsByName();
-    this.buildEmptyRules();
-    this.buildEmptyKeyframes();
-    this.buildDeclarationDerivedIndexes();
     this.buildSelectorDerivedIndexes();
     this.buildLayoutPropertiesByClassToken();
     this.buildFontFamilyUsageByRule();
     this.buildFontFaceDescriptorsByFamily();
-    this.buildRuleDerivedIndexes();
   }
 
   private buildRuleDeclarationIndexes(): void {
@@ -612,14 +672,6 @@ export class CSSGraph {
     }
   }
 
-  private buildFilesWithLayers(): void {
-    for (let i = 0; i < this.layers.length; i++) {
-      const layer = this.layers[i];
-      if (!layer) continue;
-      this.filesWithLayers.add(layer.file.path);
-    }
-  }
-
   private buildSelectorPseudoClassIndex(): void {
     for (let i = 0; i < this.selectors.length; i++) {
       const sel = this.selectors[i];
@@ -713,70 +765,6 @@ export class CSSGraph {
     }
   }
 
-  /**
-   * Collect rules with no declarations and no nested rules.
-   */
-  private buildEmptyRules(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      if (rule.declarations.length === 0 && rule.nestedRules.length === 0) {
-        this.emptyRules.push(rule);
-      }
-    }
-  }
-
-  /**
-   * Collect @keyframes with no effective keyframe declarations.
-   */
-  private buildEmptyKeyframes(): void {
-    for (let i = 0; i < this.keyframes.length; i++) {
-      const kf = this.keyframes[i];
-      if (!kf) continue;
-      if (!kf.parsedParams.animationName) continue;
-      if (kf.rules.length === 0) {
-        this.emptyKeyframes.push(kf);
-        continue;
-      }
-      let hasDeclaration = false;
-      for (let j = 0; j < kf.rules.length; j++) {
-        const kfRule = kf.rules[j];
-        if (!kfRule) continue;
-        if (kfRule.declarations.length > 0) {
-          hasDeclaration = true;
-          break;
-        }
-      }
-      if (!hasDeclaration) this.emptyKeyframes.push(kf);
-    }
-  }
-
-  private buildDeclarationDerivedIndexes(): void {
-    const HARDCODED_HEX = /^#[0-9a-f]{3,8}$/i;
-    for (let i = 0, len = this.declarations.length; i < len; i++) {
-      const d = this.declarations[i];
-      if (!d) continue;
-      const pv = d.parsedValue;
-      if (pv.colors.length > 0) this.colorDeclarations.push(d);
-      if (pv.hasCalc) this.calcDeclarations.push(d);
-      if (pv.hasVar) this.varDeclarations.push(d);
-      if (pv.hasUrl) this.urlDeclarations.push(d);
-      if (d.property.charCodeAt(0) === CHAR_HYPHEN && d.property.charCodeAt(1) !== CHAR_HYPHEN) {
-        this.vendorPrefixedDeclarations.push(d);
-      }
-      if (!pv.hasVar && pv.colors.length > 0) {
-        for (let j = 0, clen = pv.colors.length; j < clen; j++) {
-          const c = pv.colors[j];
-          if (!c) continue;
-          if (HARDCODED_HEX.test(c) || c.charCodeAt(0) === CHAR_R || c.charCodeAt(0) === CHAR_H) {
-            this.hardcodedColorDeclarations.push(d);
-            break;
-          }
-        }
-      }
-    }
-  }
-
   private buildSelectorDerivedIndexes(): void {
     for (let i = 0, len = this.selectors.length; i < len; i++) {
       const sel = this.selectors[i];
@@ -806,18 +794,7 @@ export class CSSGraph {
       }
 
       const flags = sel.complexity._flags;
-      if (hasFlag(flags, SEL_HAS_ID)) {
-        this.idSelectors.push(sel);
-        for (let j = 0, plen = parts.length; j < plen; j++) {
-          const p = parts[j];
-          if (!p) continue;
-          const t = p.type;
-          if (t === "element" || t === "class" || t === "attribute") {
-            this.overqualifiedSelectors.push(sel);
-            break;
-          }
-        }
-      }
+      if (hasFlag(flags, SEL_HAS_ID)) this.idSelectors.push(sel);
       if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) this.attributeSelectors.push(sel);
       if (hasFlag(flags, SEL_HAS_UNIVERSAL)) this.universalSelectors.push(sel);
     }
@@ -927,14 +904,6 @@ export class CSSGraph {
 
     for (const [family, descriptors] of byFamily) {
       this.fontFaceDescriptorsByFamily.set(family, descriptors);
-    }
-  }
-
-  private buildRuleDerivedIndexes(): void {
-    for (let i = 0, len = this.rules.length; i < len; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      if (rule.depth > 3) this.deepNestedRules.push(rule);
     }
   }
 
