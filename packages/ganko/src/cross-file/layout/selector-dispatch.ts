@@ -183,12 +183,14 @@ export function buildSelectorDispatchKeys(
   attributes: ReadonlyMap<string, string | null>,
   classTokens: readonly string[],
 ): readonly string[] {
+  const out: string[] = []
   const idValue = attributes.get("id")
-  return buildDispatchKeys(
-    idValue !== null && idValue !== undefined ? idValue : null,
-    classTokens,
-    [...attributes.keys()],
-  )
+  if (idValue !== null && idValue !== undefined) out.push(`id:${idValue}`)
+  for (let i = 0; i < classTokens.length; i++) out.push(`class:${classTokens[i]}`)
+  for (const attributeName of attributes.keys()) out.push(`attr:${attributeName}`)
+  if (out.length <= 1) return out
+  out.sort()
+  return dedupeSorted(out)
 }
 
 function mergeSelectorCandidateIds(

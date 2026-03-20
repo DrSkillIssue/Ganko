@@ -699,9 +699,8 @@ function hasDeclaredDimension(
   if (!signal) return false
   if (signal.kind === SignalValueKind.Known) {
     if (signal.px !== null) return signal.px > 0
-    const normalized = signal.normalized.trim().toLowerCase()
-    if (normalized.length === 0) return false
-    return !isNonReservingDimension(normalized)
+    if (signal.normalized.length === 0) return false
+    return !isNonReservingDimension(signal.normalized)
   }
   if (signal.kind === SignalValueKind.Unknown) {
     return signal.source !== null
@@ -724,13 +723,9 @@ function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
     return false
   }
 
-  let normalized = ""
-  if (signal.kind === SignalValueKind.Known) {
-    normalized = signal.normalized.trim().toLowerCase()
-  }
-
-  if (normalized.length === 0) return false
-  return normalized !== "auto"
+  if (signal.kind !== SignalValueKind.Known) return false
+  if (signal.normalized.length === 0) return false
+  return signal.normalized !== "auto"
 }
 
 function isNonReservingDimension(value: string): boolean {
