@@ -36,7 +36,7 @@ import {
   type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { isControlTag, isReplacedTag } from "./signal-normalization"
-import { compileSelectorMatcher } from "./selector-match"
+import { compileSelectorMatcher, type FileElementIndex } from "./selector-match"
 import { resolveRuleGuard } from "./guard-model"
 import { buildSignalSnapshotIndex } from "./signal-collection"
 import { createAlignmentContextForParent, finalizeTableCellBaselineRelevance } from "./context-classification"
@@ -72,6 +72,7 @@ import {
 
 const EMPTY_NUMBER_LIST: readonly number[] = []
 const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch"])
+const BLOCK_LEVEL_DISPLAY_VALUES = new Set(["block", "flex", "grid", "table", "list-item", "flow-root", "table-row", "table-cell", "table-caption", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"])
 
 export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, logger: Logger = noopLogger): LayoutGraph {
   const perf = createLayoutPerfStats()
@@ -256,6 +257,8 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 
   }
 
+  const fileElementIndexByFile = buildFileElementIndexByFile(elements)
+
   if (logger.isLevelEnabled(Level.Debug)) {
     for (const [file, roots] of rootElementsByFile) {
       const descs = roots.map(r => `${r.key}(tag=${r.tagName}, attrs=[${[...r.attributes.entries()].map(([k, v]) => `${k}=${v}`).join(",")}])`)
@@ -269,6 +272,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     selectorMetadataById,
     selectorsById,
     rootElementsByFile,
+    fileElementIndexByFile,
     perf,
     logger,
   }
@@ -405,6 +409,61 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     contextByParentNode,
     perf,
   }
+}
+
+function buildFileElementIndexByFile(
+  elements: readonly LayoutElementNode[],
+): ReadonlyMap<string, FileElementIndex> {
+  const byFileDispatch = new Map<string, Map<string, LayoutElementNode[]>>()
+  const byFileTag = new Map<string, Map<string, LayoutElementNode[]>>()
+
+  for (let i = 0; i < elements.length; i++) {
+    const node = elements[i]
+    if (!node) continue
+    if (node.parentElementNode === null) continue
+
+    const file = node.solidFile
+    let dispatchMap = byFileDispatch.get(file)
+    if (!dispatchMap) {
+      dispatchMap = new Map()
+      byFileDispatch.set(file, dispatchMap)
+    }
+
+    const keys = node.selectorDispatchKeys
+    for (let j = 0; j < keys.length; j++) {
+      const key = keys[j]
+      if (!key) continue
+      const existing = dispatchMap.get(key)
+      if (existing) {
+        existing.push(node)
+      } else {
+        dispatchMap.set(key, [node])
+      }
+    }
+
+    if (node.tagName !== null) {
+      let tagMap = byFileTag.get(file)
+      if (!tagMap) {
+        tagMap = new Map()
+        byFileTag.set(file, tagMap)
+      }
+      const existing = tagMap.get(node.tagName)
+      if (existing) {
+        existing.push(node)
+      } else {
+        tagMap.set(node.tagName, [node])
+      }
+    }
+  }
+
+  const out = new Map<string, FileElementIndex>()
+  for (const [file, dispatchMap] of byFileDispatch) {
+    out.set(file, {
+      byDispatchKey: dispatchMap,
+      byTagName: byFileTag.get(file) ?? new Map(),
+    })
+  }
+  return out
 }
 
 interface ElementFactIndex {
@@ -626,26 +685,26 @@ function computeHotSignals(snapshot: LayoutSignalSnapshot): LayoutSnapshotHotSig
 function computeReservedSpaceFact(snapshot: LayoutSignalSnapshot): LayoutReservedSpaceFact {
   const reasons: LayoutReservedSpaceReason[] = []
 
-  const hasHeight = hasPositiveOrDeclaredDimension(snapshot, "height")
+  const hasHeight = hasDeclaredDimension(snapshot, "height")
   if (hasHeight) reasons.push("height")
 
-  const hasBlockSize = hasPositiveOrDeclaredDimension(snapshot, "block-size")
+  const hasBlockSize = hasDeclaredDimension(snapshot, "block-size")
   if (hasBlockSize) reasons.push("block-size")
 
-  const hasMinHeight = hasPositiveOrDeclaredDimension(snapshot, "min-height")
+  const hasMinHeight = hasDeclaredDimension(snapshot, "min-height")
   if (hasMinHeight) reasons.push("min-height")
 
-  const hasMinBlockSize = hasPositiveOrDeclaredDimension(snapshot, "min-block-size")
+  const hasMinBlockSize = hasDeclaredDimension(snapshot, "min-block-size")
   if (hasMinBlockSize) reasons.push("min-block-size")
 
-  const hasContainIntrinsic = hasPositiveOrDeclaredDimension(snapshot, "contain-intrinsic-size")
+  const hasContainIntrinsic = hasDeclaredDimension(snapshot, "contain-intrinsic-size")
   if (hasContainIntrinsic) reasons.push("contain-intrinsic-size")
 
   const hasAspectRatio = hasUsableAspectRatio(snapshot)
   if (hasAspectRatio) {
-    if (hasPositiveOrDeclaredDimension(snapshot, "width")) reasons.push("aspect-ratio+width")
-    if (hasPositiveOrDeclaredDimension(snapshot, "inline-size")) reasons.push("aspect-ratio+inline-size")
-    if (hasPositiveOrDeclaredDimension(snapshot, "min-width")) reasons.push("aspect-ratio+min-width")
+    if (hasDeclaredDimension(snapshot, "width")) reasons.push("aspect-ratio+width")
+    if (hasDeclaredDimension(snapshot, "inline-size")) reasons.push("aspect-ratio+inline-size")
+    if (hasDeclaredDimension(snapshot, "min-width")) reasons.push("aspect-ratio+min-width")
     if (hasMinBlockSize) reasons.push("aspect-ratio+min-block-size")
     if (hasMinHeight) reasons.push("aspect-ratio+min-height")
   }
@@ -653,16 +712,17 @@ function computeReservedSpaceFact(snapshot: LayoutSignalSnapshot): LayoutReserve
   return {
     hasReservedSpace: reasons.length > 0,
     reasons,
-    hasUsableInlineDimension: hasPositiveOrDeclaredDimension(snapshot, "width")
-      || hasPositiveOrDeclaredDimension(snapshot, "inline-size")
-      || hasPositiveOrDeclaredDimension(snapshot, "min-width"),
-    hasUsableBlockDimension: hasHeight || hasBlockSize || hasMinHeight || hasMinBlockSize,
     hasContainIntrinsicSize: hasContainIntrinsic,
     hasUsableAspectRatio: hasAspectRatio,
+    hasDeclaredBlockDimension: hasHeight || hasBlockSize || hasMinHeight || hasMinBlockSize,
+    hasDeclaredInlineDimension: hasDeclaredDimension(snapshot, "width")
+      || hasDeclaredDimension(snapshot, "inline-size")
+      || hasDeclaredDimension(snapshot, "min-width")
+      || isBlockLevelDisplay(snapshot),
   }
 }
 
-function hasPositiveOrDeclaredDimension(
+function hasDeclaredDimension(
   snapshot: LayoutSignalSnapshot,
   property:
     | "width"
@@ -676,21 +736,22 @@ function hasPositiveOrDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
-
-  let normalized = ""
   if (signal.kind === "known") {
     if (signal.px !== null) return signal.px > 0
-    normalized = signal.normalized.trim().toLowerCase()
+    const normalized = signal.normalized.trim().toLowerCase()
+    if (normalized.length === 0) return false
+    return !isNonReservingDimension(normalized)
   }
-
   if (signal.kind === "unknown") {
     return signal.source !== null
   }
+  return false
+}
 
-  if (normalized.length === 0) return false
-  if (isNonReservingDimension(normalized)) return false
-  return true
+function isBlockLevelDisplay(snapshot: LayoutSignalSnapshot): boolean {
+  const signal = snapshot.signals.get("display")
+  if (!signal || signal.kind !== "known") return false
+  return BLOCK_LEVEL_DISPLAY_VALUES.has(signal.normalized)
 }
 
 function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {

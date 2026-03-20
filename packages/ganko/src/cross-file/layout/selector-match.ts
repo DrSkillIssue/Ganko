@@ -241,21 +241,26 @@ function compoundGroupNeedsAttributes(groups: readonly (readonly CompiledSelecto
 /** Three-valued selector match result. */
 export type SelectorMatchResult = "match" | "no-match" | "conditional"
 
+export interface FileElementIndex {
+  readonly byDispatchKey: ReadonlyMap<string, readonly LayoutElementNode[]>
+  readonly byTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
+}
+
 export function selectorMatchesLayoutElement(
   matcher: CompiledSelectorMatcher,
   node: LayoutElementNode,
   perf: LayoutPerfStatsMutable,
   fileRootElements: readonly LayoutElementNode[] | null = null,
   logger: Logger = noopLogger,
+  fileElementIndex: FileElementIndex | null = null,
 ): SelectorMatchResult {
   const firstCompound = matcher.compoundsRightToLeft[0]
   if (firstCompound === undefined) return "no-match"
   const subjectResult = matchesCompound(node, firstCompound)
   if (subjectResult === "no-match") return "no-match"
   if (matcher.compoundsRightToLeft.length === 1) return subjectResult
-  const chainResult = matchesChain(matcher, node, 0, perf, fileRootElements, logger)
+  const chainResult = matchesChain(matcher, node, 0, perf, fileRootElements, logger, fileElementIndex)
   if (chainResult === "no-match") return "no-match"
-  // If either the subject or chain match is conditional, the whole match is conditional
   if (subjectResult === "conditional" || chainResult === "conditional") return "conditional"
   return "match"
 }
@@ -267,6 +272,7 @@ function matchesChain(
   perf: LayoutPerfStatsMutable,
   fileRootElements: readonly LayoutElementNode[] | null,
   logger: Logger,
+  fileElementIndex: FileElementIndex | null = null,
 ): SelectorMatchResult {
   const combinator = matcher.combinatorsRightToLeft[index]
   if (combinator === undefined) return "no-match"
@@ -282,7 +288,7 @@ function matchesChain(
     const compoundResult = matchesCompound(parent, targetCompound)
     if (compoundResult === "no-match") return "no-match"
     if (isFinal) return compoundResult
-    const chainResult = matchesChain(matcher, parent, nextIndex, perf, fileRootElements, logger)
+    const chainResult = matchesChain(matcher, parent, nextIndex, perf, fileRootElements, logger, fileElementIndex)
     return mergeMatchResults(compoundResult, chainResult)
   }
 
@@ -293,7 +299,7 @@ function matchesChain(
     const compoundResult = matchesCompound(sibling, targetCompound)
     if (compoundResult === "no-match") return "no-match"
     if (isFinal) return compoundResult
-    const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger)
+    const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger, fileElementIndex)
     return mergeMatchResults(compoundResult, chainResult)
   }
 
@@ -304,7 +310,7 @@ function matchesChain(
       const compoundResult = matchesCompound(sibling, targetCompound)
       if (compoundResult !== "no-match") {
         if (isFinal) return compoundResult
-        const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger)
+        const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger, fileElementIndex)
         if (chainResult !== "no-match") return mergeMatchResults(compoundResult, chainResult)
       }
       sibling = sibling.previousSiblingNode
@@ -320,7 +326,7 @@ function matchesChain(
     const compoundResult = matchesCompound(ancestor, targetCompound)
     if (compoundResult !== "no-match") {
       if (isFinal) return compoundResult
-      const chainResult = matchesChain(matcher, ancestor, nextIndex, perf, fileRootElements, logger)
+      const chainResult = matchesChain(matcher, ancestor, nextIndex, perf, fileRootElements, logger, fileElementIndex)
       if (chainResult !== "no-match") {
         const merged = mergeMatchResults(compoundResult, chainResult)
         if (merged === "match") return "match"
@@ -352,11 +358,40 @@ function matchesChain(
           logger.debug(`[selector-match] fallback HIT: node=${node.key} tag=${node.tagName} matched root=${root.key} tag=${root.tagName} compound=${compoundDesc} isFinal=${isFinal}`)
         }
         if (isFinal) return compoundResult
-        const chainResult = matchesChain(matcher, root, nextIndex, perf, fileRootElements, logger)
+        const chainResult = matchesChain(matcher, root, nextIndex, perf, fileRootElements, logger, fileElementIndex)
         if (chainResult !== "no-match") {
           const merged = mergeMatchResults(compoundResult, chainResult)
           if (merged === "match") return "match"
           bestResult = merged
+        }
+      }
+    }
+  }
+
+  // Dispatch-key-indexed fallback for descendant combinators.
+  //
+  // When the ancestor compound is unreachable via the JSX ancestor chain or
+  // file-root elements (e.g. it lives inside a non-transparent wrapper like
+  // createContext().Provider), use the per-file dispatch key index for O(1)
+  // lookup of candidate elements that could match the ancestor compound.
+  // A match on a non-root element returns "conditional": the ancestor compound
+  // exists in the same file but static descent cannot be confirmed.
+  if (fileElementIndex !== null && bestResult === "no-match") {
+    const candidates = resolveCompoundCandidates(fileElementIndex, targetCompound)
+    if (candidates !== null) {
+      for (let r = 0; r < candidates.length; r++) {
+        const elem = candidates[r]
+        if (elem === undefined) continue
+        if (elem === node) continue
+        perf.ancestryChecks++
+        const compoundResult = matchesCompound(elem, targetCompound)
+        if (compoundResult !== "no-match") {
+          if (logger.isLevelEnabled(Level.Debug)) {
+            const compoundDesc = describeCompound(targetCompound)
+            logger.debug(`[selector-match] indexed fallback HIT: node=${node.key} tag=${node.tagName} matched elem=${elem.key} tag=${elem.tagName} compound=${compoundDesc}`)
+          }
+          bestResult = "conditional"
+          break
         }
       }
     }
@@ -388,6 +423,25 @@ function describeCompound(compound: CompiledSelectorCompound): string {
   }
   if (compound.idValue !== null) parts.push(`#${compound.idValue}`)
   return parts.join("") || "*"
+}
+
+function resolveCompoundCandidates(
+  index: FileElementIndex,
+  compound: CompiledSelectorCompound,
+): readonly LayoutElementNode[] | null {
+  if (compound.idValue !== null) {
+    return index.byDispatchKey.get(`id:${compound.idValue}`) ?? null
+  }
+  if (compound.classes.length > 0 && compound.classes[0] !== undefined) {
+    return index.byDispatchKey.get(`class:${compound.classes[0]}`) ?? null
+  }
+  if (compound.attributes.length > 0 && compound.attributes[0] !== undefined) {
+    return index.byDispatchKey.get(`attr:${compound.attributes[0].name}`) ?? null
+  }
+  if (compound.tagName !== null) {
+    return index.byTagName.get(compound.tagName) ?? null
+  }
+  return null
 }
 
 function matchesCompound(node: LayoutElementNode, compound: CompiledSelectorCompound): SelectorMatchResult {

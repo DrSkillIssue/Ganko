@@ -16,7 +16,7 @@ import type {
 import type { LayoutPerfStatsMutable } from "./perf"
 import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
-import { selectorMatchesLayoutElement } from "./selector-match"
+import { selectorMatchesLayoutElement, type FileElementIndex } from "./selector-match"
 import type { LayoutRuleGuard, LayoutGuardConditionProvenance } from "./guard-model"
 import type { SelectorBuildMetadata } from "./selector-dispatch"
 import { layoutOffsetSignals, parseOffsetPx } from "./offset-baseline"
@@ -125,6 +125,7 @@ export interface SelectorMatchContext {
   readonly selectorMetadataById: ReadonlyMap<number, SelectorBuildMetadata>
   readonly selectorsById: ReadonlyMap<number, SelectorEntity>
   readonly rootElementsByFile: ReadonlyMap<string, readonly LayoutElementNode[]>
+  readonly fileElementIndexByFile: ReadonlyMap<string, FileElementIndex>
   readonly perf: LayoutPerfStatsMutable
   readonly logger: Logger
 }
@@ -137,6 +138,7 @@ export function appendMatchingEdgesFromSelectorIds(
   appliesByElementNodeMutable: Map<LayoutElementNode, LayoutMatchEdge[]>,
 ): void {
   const fileRoots = ctx.rootElementsByFile.get(node.solidFile) ?? null
+  const fileElementIndex = ctx.fileElementIndexByFile.get(node.solidFile) ?? null
   for (let i = 0; i < selectorIds.length; i++) {
     const selectorId = selectorIds[i]
     if (selectorId === undefined) continue
@@ -149,7 +151,7 @@ export function appendMatchingEdgesFromSelectorIds(
       throw new Error(`missing selector ${selectorId}`)
     }
 
-    const matchResult = selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger)
+    const matchResult = selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger, fileElementIndex)
     if (matchResult === "no-match") continue
 
     const edge: LayoutMatchEdge = {

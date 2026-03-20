@@ -31,10 +31,10 @@ const EMPTY_STATEFUL_BASE_VALUE_INDEX = new Map<string, ReadonlyMap<string, Read
 const EMPTY_LAYOUT_RESERVED_SPACE_FACT: LayoutReservedSpaceFact = Object.freeze({
   hasReservedSpace: false,
   reasons: EMPTY_RESERVED_SPACE_REASONS,
-  hasUsableInlineDimension: false,
-  hasUsableBlockDimension: false,
   hasContainIntrinsicSize: false,
   hasUsableAspectRatio: false,
+  hasDeclaredInlineDimension: false,
+  hasDeclaredBlockDimension: false,
 })
 const EMPTY_LAYOUT_SCROLL_CONTAINER_FACT: LayoutScrollContainerFact = Object.freeze({
   isScrollContainer: false,

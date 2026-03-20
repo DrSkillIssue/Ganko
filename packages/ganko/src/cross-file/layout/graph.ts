@@ -76,10 +76,10 @@ export type LayoutReservedSpaceReason =
 export interface LayoutReservedSpaceFact {
   readonly hasReservedSpace: boolean
   readonly reasons: readonly LayoutReservedSpaceReason[]
-  readonly hasUsableInlineDimension: boolean
-  readonly hasUsableBlockDimension: boolean
   readonly hasContainIntrinsicSize: boolean
   readonly hasUsableAspectRatio: boolean
+  readonly hasDeclaredInlineDimension: boolean
+  readonly hasDeclaredBlockDimension: boolean
 }
 
 export const enum LayoutScrollAxis { None = 0, X = 1, Y = 2, Both = 3 }
