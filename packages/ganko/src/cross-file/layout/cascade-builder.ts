@@ -382,7 +382,7 @@ export interface ConditionalDeltaIndex {
 
 export function buildConditionalDeltaIndex(
   elements: readonly LayoutElementNode[],
-  appliesByNode: ReadonlyMap<LayoutElementNode, readonly LayoutMatchEdge[]>,
+  records: ReadonlyMap<LayoutElementNode, { readonly edges: readonly LayoutMatchEdge[] }>,
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
   selectorsById: ReadonlyMap<number, SelectorEntity>,
 ): ConditionalDeltaIndex {
@@ -394,7 +394,7 @@ export function buildConditionalDeltaIndex(
     const node = elements[i]
     if (!node) continue
 
-    const edges = appliesByNode.get(node)
+    const edges = records.get(node)?.edges
     let factByProperty: ReadonlyMap<LayoutSignalName, LayoutConditionalSignalDeltaFact> | null = null
 
     if (edges !== undefined && edges.length > 0) {

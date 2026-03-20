@@ -44,24 +44,17 @@ Merge into a single per-element loop that produces the `LayoutElementRecord` dir
 
 **Files**: `build.ts`, `cascade-builder.ts`, `signal-collection.ts`
 
-- [ ] Inline selector candidate lookup + matching + cascade + snapshot + facts into one loop
-- [ ] Compute conditional delta facts during cascade building (edges are right there)
-- [ ] Remove `buildElementFactIndex` as separate function
-- [ ] Remove `buildConditionalDeltaIndex` as separate function
-- [ ] Remove `buildSignalSnapshotIndex` as separate function
-- [ ] Produce `Map<LayoutElementNode, LayoutElementRecord>` directly
+- [x] Unified loop: selector matching → cascade → snapshot → indexes → facts → record in single pass
+- [x] Forward-pass snapshots: parent record always available (depth-first order), no recursion
+- [x] Removed `buildElementFactIndex` (inlined into unified loop)
+- [x] Removed `buildSignalSnapshotIndex` (replaced by inline `buildSnapshotFromCascade`)
+- [x] `buildConditionalDeltaIndex` kept as post-pass (needs all edges finalized), reads from records
+- [x] Records constructed directly in the unified loop, conditional delta patched after
+- [x] 327/327 tests pass
 
 ---
 
-## Phase 4: Forward-Pass Signal Snapshots (eliminate recursion)
-Replace recursive parent-walking snapshot builder with a single forward pass over elements in tree order.
-
-**Files**: `signal-collection.ts`, `build.ts`
-
-- [ ] Elements are already collected depth-first — parent always precedes child
-- [ ] Each element's snapshot = parent's snapshot signals + own cascade overlay
-- [ ] Replace `buildSnapshotForNode` recursion with iterative lookup from already-built parent record
-- [ ] Remove snapshot cache (no longer needed — each snapshot built exactly once)
+## Phase 4: ~~Forward-Pass Signal Snapshots~~ (merged into Phase 3)
 
 ---
 

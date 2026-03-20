@@ -32,6 +32,22 @@ export function collectSignalSnapshot(
   throw new Error(`missing precomputed layout record for ${node.key}`)
 }
 
+export function buildSnapshotFromCascade(
+  node: LayoutElementNode,
+  cascade: ReadonlyMap<string, LayoutCascadedDeclaration>,
+  parentSnapshot: LayoutSignalSnapshot | null,
+): LayoutSignalSnapshot {
+  const normalized = normalizeSignalMapWithCounts(cascade)
+  const inherited = inheritSignalsFromParent(parentSnapshot, normalized.signals)
+  return {
+    node,
+    signals: inherited.signals,
+    knownSignalCount: normalized.knownSignalCount + inherited.knownDelta,
+    unknownSignalCount: normalized.unknownSignalCount + inherited.unknownDelta,
+    conditionalSignalCount: normalized.conditionalSignalCount + inherited.conditionalDelta,
+  }
+}
+
 export function buildSignalSnapshotIndex(
   elements: readonly LayoutElementNode[],
   cascadeByElementNode: WeakMap<LayoutElementNode, ReadonlyMap<string, LayoutCascadedDeclaration>>,

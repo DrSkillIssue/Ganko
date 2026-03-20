@@ -113,7 +113,6 @@ describe("layout performance instrumentation", () => {
     expect(stats.ancestryChecks).toBeLessThanOrEqual(stats.selectorCandidatesChecked * 3);
     expect(stats.casesCollected).toBeLessThanOrEqual(stats.elementsScanned * 4);
     expect(stats.signalSnapshotsBuilt).toBeGreaterThanOrEqual(stats.elementsScanned);
-    expect(stats.signalSnapshotCacheHits).toBeGreaterThan(0);
     expect(stats.selectorIndexMs).toBeGreaterThanOrEqual(0);
     expect(stats.selectorMatchMs).toBeGreaterThanOrEqual(0);
     expect(stats.cascadeBuildMs).toBeGreaterThanOrEqual(0);
@@ -168,7 +167,6 @@ describe("layout performance instrumentation", () => {
     expect(stats.casesCollected).toBeGreaterThan(800);
     expect(stats.measurementIndexHits).toBe(stats.casesCollected);
     expect(stats.signalSnapshotsBuilt).toBeGreaterThanOrEqual(stats.elementsScanned);
-    expect(stats.signalSnapshotCacheHits).toBeGreaterThan(0);
     // Timing: only enforce locally — CI runners have unbounded scheduling jitter
     if (!IS_CI) {
       expect(stats.caseBuildMs).toBeLessThanOrEqual(PERF_BASELINE_MS.deepCaseBuild);
