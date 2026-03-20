@@ -7,9 +7,9 @@ import type { Logger } from "@drskillissue/ganko-shared"
 
 import {
   LayoutScrollAxis,
-  type LayoutCascadedDeclaration,
   type LayoutContainingBlockFact,
   type LayoutElementNode,
+  type LayoutElementRecord,
   type LayoutElementRef,
   type LayoutFlowParticipationFact,
   type LayoutGraph,
@@ -28,6 +28,8 @@ import {
   EvidenceValueKind,
   LayoutSignalGuard,
   LayoutTextualContentState,
+  SignalQuality,
+  SignalValueKind,
   type HotNormalizedSignalEvidence,
   type HotNumericSignalEvidence,
   type LayoutSignalName,
@@ -36,9 +38,9 @@ import {
   type LayoutSnapshotHotSignals,
 } from "./signal-model"
 import { isControlTag, isReplacedTag } from "./signal-normalization"
-import { compileSelectorMatcher } from "./selector-match"
+import { compileSelectorMatcher, type FileElementIndex } from "./selector-match"
 import { resolveRuleGuard } from "./guard-model"
-import { buildSignalSnapshotIndex } from "./signal-collection"
+import { buildSnapshotFromCascade } from "./signal-collection"
 import { createAlignmentContextForParent, finalizeTableCellBaselineRelevance } from "./context-classification"
 import { buildCohortIndex } from "./cohort-index"
 import { buildMeasurementNodeIndex } from "./measurement-node"
@@ -71,7 +73,9 @@ import {
 } from "./element-record"
 
 const EMPTY_NUMBER_LIST: readonly number[] = []
+const EMPTY_EDGE_LIST: readonly LayoutMatchEdge[] = Object.freeze([])
 const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch"])
+const BLOCK_LEVEL_DISPLAY_VALUES = new Set(["block", "flex", "grid", "table", "list-item", "flow-root", "table-row", "table-cell", "table-caption", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"])
 
 export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, logger: Logger = noopLogger): LayoutGraph {
   const perf = createLayoutPerfStats()
@@ -88,7 +92,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
   const selectorsById = new Map<number, SelectorEntity>()
   const monitoredDeclarationsBySelectorId = new Map<number, readonly MonitoredDeclaration[]>()
   const selectorMetadataById = new Map<number, SelectorBuildMetadata>()
-  const cascadeByElementNode = new WeakMap<LayoutElementNode, ReadonlyMap<string, LayoutCascadedDeclaration>>()
+
 
   for (let i = 0; i < css.selectors.length; i++) {
     const selector = css.selectors[i]
@@ -256,6 +260,8 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 
   }
 
+  const fileElementIndexByFile = buildFileElementIndexByFile(elements)
+
   if (logger.isLevelEnabled(Level.Debug)) {
     for (const [file, roots] of rootElementsByFile) {
       const descs = roots.map(r => `${r.key}(tag=${r.tagName}, attrs=[${[...r.attributes.entries()].map(([k, v]) => `${k}=${v}`).join(",")}])`)
@@ -269,75 +275,163 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     selectorMetadataById,
     selectorsById,
     rootElementsByFile,
+    fileElementIndexByFile,
     perf,
     logger,
   }
 
+  const tailwind = css.tailwind
+  const records = new Map<LayoutElementNode, LayoutElementRecord>()
+  const snapshotByElementNode = new WeakMap<LayoutElementNode, LayoutSignalSnapshot>()
+  const snapshotHotSignalsByNode = new Map<LayoutElementNode, LayoutSnapshotHotSignals>()
+  const elementsByTagName = new Map<string, LayoutElementNode[]>()
+  const elementsByKnownSignalValue = new Map<LayoutSignalName, Map<string, LayoutElementNode[]>>()
+  const dynamicSlotCandidateElements: LayoutElementNode[] = []
+  const scrollContainerElements: LayoutElementNode[] = []
+  const positionedAncestorByKey = new Map<string, { key: string; hasReservedSpace: boolean }>()
+  const trace = logger.isLevelEnabled(Level.Trace)
+
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
+
+    // --- Step 1: Selector matching ---
     const selectorIds = selectorCandidatesByNode.get(node) ?? EMPTY_NUMBER_LIST
-    if (selectorIds.length === 0) continue
-    appendMatchingEdgesFromSelectorIds(
-      selectorMatchCtx,
-      selectorIds,
-      node,
-      applies,
-      appliesByElementNodeMutable,
-    )
+    if (selectorIds.length > 0) {
+      appendMatchingEdgesFromSelectorIds(
+        selectorMatchCtx, selectorIds, node, applies, appliesByElementNodeMutable,
+      )
+    }
+
+    // --- Step 2: Cascade ---
+    const mutableEdges = appliesByElementNodeMutable.get(node)
+    if (mutableEdges) mutableEdges.sort(compareLayoutEdge)
+    const edges: readonly LayoutMatchEdge[] = mutableEdges ?? EMPTY_EDGE_LIST
+    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
+
+    if (trace && cascade.size > 0) {
+      const displayDecl = cascade.get("display")
+      const flexDirDecl = cascade.get("flex-direction")
+      if (displayDecl || flexDirDecl) {
+        const displayGuard = displayDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
+        const flexDirGuard = flexDirDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
+        logger.trace(
+          `[cascade] node=${node.key} tag=${node.tagName ?? "null"}`
+          + ` display=${displayDecl ? `${displayDecl.value}(${displayGuard})` : "absent"}`
+          + ` flex-direction=${flexDirDecl ? `${flexDirDecl.value}(${flexDirGuard})` : "absent"}`
+          + ` edges=${edges.length} attrs=[${[...node.attributes.keys()].join(",")}]`,
+        )
+      }
+    }
+
+    // --- Step 3: Signal snapshot (forward pass — parent already in records) ---
+    const parentSnapshot = node.parentElementNode
+      ? (records.get(node.parentElementNode)?.snapshot ?? null)
+      : null
+    const snapshot = buildSnapshotFromCascade(node, cascade, parentSnapshot)
+    snapshotByElementNode.set(node, snapshot)
+    perf.signalSnapshotsBuilt++
+
+    // --- Step 4: Secondary indexes ---
+    if (node.textualContent === LayoutTextualContentState.Unknown && node.siblingCount >= 2) {
+      dynamicSlotCandidateElements.push(node)
+    }
+    if (node.tagName) {
+      const existing = elementsByTagName.get(node.tagName)
+      if (existing) existing.push(node)
+      else elementsByTagName.set(node.tagName, [node])
+    }
+    for (const [signal, value] of snapshot.signals) {
+      if (value.kind !== SignalValueKind.Known) continue
+      let byValue = elementsByKnownSignalValue.get(signal)
+      if (!byValue) {
+        byValue = new Map<string, LayoutElementNode[]>()
+        elementsByKnownSignalValue.set(signal, byValue)
+      }
+      const existingNodes = byValue.get(value.normalized)
+      if (existingNodes) existingNodes.push(node)
+      else byValue.set(value.normalized, [node])
+    }
+
+    // --- Step 5: Facts ---
+    const parentKey = node.parentElementNode?.key ?? null
+    let nearestPositionedAncestorKey: string | null = null
+    let nearestPositionedAncestorHasReservedSpace = false
+    if (parentKey !== null) {
+      const parentPositioned = positionedAncestorByKey.get(parentKey)
+      if (parentPositioned !== undefined) {
+        nearestPositionedAncestorKey = parentPositioned.key
+        nearestPositionedAncestorHasReservedSpace = parentPositioned.hasReservedSpace
+      }
+    }
+    const containingBlock: LayoutContainingBlockFact = {
+      nearestPositionedAncestorKey,
+      nearestPositionedAncestorHasReservedSpace,
+    }
+
+    const reservedSpace = computeReservedSpaceFact(snapshot)
+    const scrollContainer = computeScrollContainerFact(snapshot)
+    if (scrollContainer.isScrollContainer) scrollContainerElements.push(node)
+    const flowParticipation = computeFlowParticipationFact(snapshot)
+    const hotSignals = computeHotSignals(snapshot)
+    snapshotHotSignalsByNode.set(node, hotSignals)
+
+    const positionSignal = snapshot.signals.get("position")
+    const isPositioned = positionSignal !== undefined
+      && positionSignal.kind === SignalValueKind.Known
+      && positionSignal.normalized !== "static"
+    if (isPositioned) {
+      positionedAncestorByKey.set(node.key, { key: node.key, hasReservedSpace: reservedSpace.hasReservedSpace })
+    } else if (parentKey !== null) {
+      const inherited = positionedAncestorByKey.get(parentKey)
+      if (inherited !== undefined) positionedAncestorByKey.set(node.key, inherited)
+    }
+
+    // --- Step 6: Record ---
+    records.set(node, {
+      ref: elementRefsBySolidFileAndIdMutable.get(node.solidFile)?.get(node.elementId) ?? null,
+      edges,
+      cascade,
+      snapshot,
+      hotSignals,
+      reservedSpace,
+      scrollContainer,
+      flowParticipation,
+      containingBlock,
+      conditionalDelta: null,
+      baselineOffsets: null,
+    })
   }
 
   perf.selectorMatchMs = performance.now() - selectorMatchStartedAt
 
-  const cascadeStartedAt = performance.now()
-  for (const edges of appliesByElementNodeMutable.values()) {
-    edges.sort(compareLayoutEdge)
-  }
-
-  const appliesByNode = new Map<LayoutElementNode, readonly LayoutMatchEdge[]>()
-
-  const tailwind = css.tailwind
-  for (let i = 0; i < elements.length; i++) {
-    const node = elements[i]
-    if (!node) continue
-    const edges = appliesByElementNodeMutable.get(node) ?? []
-    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
-    cascadeByElementNode.set(node, cascade)
-    appliesByNode.set(node, edges)
-  }
-  perf.cascadeBuildMs = performance.now() - cascadeStartedAt
-
-  if (logger.isLevelEnabled(Level.Trace)) {
-    for (let i = 0; i < elements.length; i++) {
-      const node = elements[i]
-      if (!node) continue
-      const cascade = cascadeByElementNode.get(node)
-      if (!cascade || cascade.size === 0) continue
-      const displayDecl = cascade.get("display")
-      const flexDirDecl = cascade.get("flex-direction")
-      if (!displayDecl && !flexDirDecl) continue
-      const displayGuard = displayDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
-      const flexDirGuard = flexDirDecl?.guardProvenance.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"
-      logger.trace(
-        `[cascade] node=${node.key} tag=${node.tagName ?? "null"}`
-        + ` display=${displayDecl ? `${displayDecl.value}(${displayGuard})` : "absent"}`
-        + ` flex-direction=${flexDirDecl ? `${flexDirDecl.value}(${flexDirGuard})` : "absent"}`
-        + ` edges=${(appliesByNode.get(node) ?? []).length}`
-        + ` attrs=[${[...node.attributes.keys()].join(",")}]`,
-      )
-    }
-  }
-
-  const snapshotByElementNode = buildSignalSnapshotIndex(elements, cascadeByElementNode, perf)
-  const measurementNodeByRootKey = buildMeasurementNodeIndex(elements, childrenByParentNodeMutable, snapshotByElementNode)
-
-  const factIndex = buildElementFactIndex(elements, snapshotByElementNode)
+  // Conditional delta analysis — requires all edges to be finalized
   const conditionalDeltaIndex = buildConditionalDeltaIndex(
     elements,
-    appliesByNode,
+    records,
     monitoredDeclarationsBySelectorId,
     selectorsById,
   )
+  // Patch conditional delta and baseline offsets into records
+  for (const [node, deltaByProperty] of conditionalDeltaIndex.conditionalSignalDeltaFactsByNode) {
+    const record = records.get(node)
+    if (!record) continue
+    const baselineOffsets = conditionalDeltaIndex.baselineOffsetFactsByNode.get(node) ?? null
+    records.set(node, {
+      ref: record.ref,
+      edges: record.edges,
+      cascade: record.cascade,
+      snapshot: record.snapshot,
+      hotSignals: record.hotSignals,
+      reservedSpace: record.reservedSpace,
+      scrollContainer: record.scrollContainer,
+      flowParticipation: record.flowParticipation,
+      containingBlock: record.containingBlock,
+      conditionalDelta: deltaByProperty,
+      baselineOffsets,
+    })
+  }
+
   const elementsWithConditionalOverflowDelta = buildConditionalDeltaSignalGroupElements(
     conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     ["overflow", "overflow-y"],
@@ -346,6 +440,8 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     layoutOffsetSignals,
   )
+
+  const measurementNodeByRootKey = buildMeasurementNodeIndex(elements, childrenByParentNodeMutable, snapshotByElementNode)
   const statefulRuleIndexes = buildStatefulRuleIndexes(css.rules)
   const contextByParentNode = buildContextIndex(childrenByParentNodeMutable, snapshotByElementNode, perf, logger)
   const cohortIndex = buildCohortIndex({
@@ -353,13 +449,9 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     contextByParentNode,
     measurementNodeByRootKey,
     snapshotByElementNode,
-    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
+    snapshotHotSignalsByNode,
   })
 
-  // Finalize table-cell baselineRelevance now that cohort vertical-align
-  // consensus is available. This is a two-phase construction: contexts are
-  // built before cohort indexing (cohort needs axis data), then table-cell
-  // contexts are refined with cohort-level vertical-align consensus.
   finalizeTableCellBaselineRelevance(contextByParentNode, cohortIndex.verticalAlignConsensusByParent)
 
   perf.conditionalSignals = cohortIndex.conditionalSignals
@@ -378,151 +470,79 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elementBySolidFileAndId: elementBySolidFileAndIdMutable,
     elementRefsBySolidFileAndId: elementRefsBySolidFileAndIdMutable,
     hostElementRefsByNode: hostElementRefsByNodeMutable,
-    appliesByNode,
     selectorCandidatesByNode,
     selectorsById,
     measurementNodeByRootKey,
-    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
-    elementsByTagName: factIndex.elementsByTagName,
+    records,
+    elementsByTagName,
     elementsWithConditionalDeltaBySignal: conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     elementsWithConditionalOverflowDelta,
     elementsWithConditionalOffsetDelta,
-    elementsByKnownSignalValue: factIndex.elementsByKnownSignalValue,
-    dynamicSlotCandidateElements: factIndex.dynamicSlotCandidateElements,
-    scrollContainerElements: factIndex.scrollContainerElements,
-    reservedSpaceFactsByNode: factIndex.reservedSpaceFactsByNode,
-    scrollContainerFactsByNode: factIndex.scrollContainerFactsByNode,
-    flowParticipationFactsByNode: factIndex.flowParticipationFactsByNode,
-    containingBlockFactsByNode: factIndex.containingBlockFactsByNode,
-    conditionalSignalDeltaFactsByNode: conditionalDeltaIndex.conditionalSignalDeltaFactsByNode,
-    baselineOffsetFactsByNode: conditionalDeltaIndex.baselineOffsetFactsByNode,
+    elementsByKnownSignalValue,
+    dynamicSlotCandidateElements,
+    scrollContainerElements,
     statefulSelectorEntriesByRuleId: statefulRuleIndexes.selectorEntriesByRuleId,
     statefulNormalizedDeclarationsByRuleId: statefulRuleIndexes.normalizedDeclarationsByRuleId,
     statefulBaseValueIndex: statefulRuleIndexes.baseValueIndex,
     cohortStatsByParentNode: cohortIndex.statsByParentNode,
-    cascadeByElementNode,
-    snapshotByElementNode,
     contextByParentNode,
     perf,
   }
 }
 
-interface ElementFactIndex {
-  readonly reservedSpaceFactsByNode: ReadonlyMap<LayoutElementNode, LayoutReservedSpaceFact>
-  readonly scrollContainerFactsByNode: ReadonlyMap<LayoutElementNode, LayoutScrollContainerFact>
-  readonly scrollContainerElements: readonly LayoutElementNode[]
-  readonly flowParticipationFactsByNode: ReadonlyMap<LayoutElementNode, LayoutFlowParticipationFact>
-  readonly containingBlockFactsByNode: ReadonlyMap<LayoutElementNode, LayoutContainingBlockFact>
-  readonly snapshotHotSignalsByNode: ReadonlyMap<LayoutElementNode, LayoutSnapshotHotSignals>
-  readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
-  readonly elementsByKnownSignalValue: ReadonlyMap<LayoutSignalName, ReadonlyMap<string, readonly LayoutElementNode[]>>
-  readonly dynamicSlotCandidateElements: readonly LayoutElementNode[]
-}
-
-function buildElementFactIndex(
+function buildFileElementIndexByFile(
   elements: readonly LayoutElementNode[],
-  snapshotByElementNode: WeakMap<LayoutElementNode, LayoutSignalSnapshot>,
-): ElementFactIndex {
-  const reservedSpaceFactsByNode = new Map<LayoutElementNode, LayoutReservedSpaceFact>()
-  const scrollContainerFactsByNode = new Map<LayoutElementNode, LayoutScrollContainerFact>()
-  const flowParticipationFactsByNode = new Map<LayoutElementNode, LayoutFlowParticipationFact>()
-  const containingBlockFactsByNode = new Map<LayoutElementNode, LayoutContainingBlockFact>()
-  const snapshotHotSignalsByNode = new Map<LayoutElementNode, LayoutSnapshotHotSignals>()
-  const elementsByTagName = new Map<string, LayoutElementNode[]>()
-  const elementsByKnownSignalValue = new Map<LayoutSignalName, Map<string, LayoutElementNode[]>>()
-  const dynamicSlotCandidateElements: LayoutElementNode[] = []
-  const scrollContainerElements: LayoutElementNode[] = []
-  const positionedAncestorByKey = new Map<string, { key: string; hasReservedSpace: boolean }>()
+): ReadonlyMap<string, FileElementIndex> {
+  const byFileDispatch = new Map<string, Map<string, LayoutElementNode[]>>()
+  const byFileTag = new Map<string, Map<string, LayoutElementNode[]>>()
 
   for (let i = 0; i < elements.length; i++) {
     const node = elements[i]
     if (!node) continue
-    const snapshot = snapshotByElementNode.get(node)
+    if (node.parentElementNode === null) continue
 
-    if (node.textualContent === LayoutTextualContentState.Unknown && node.siblingCount >= 2) {
-      dynamicSlotCandidateElements.push(node)
+    const file = node.solidFile
+    let dispatchMap = byFileDispatch.get(file)
+    if (!dispatchMap) {
+      dispatchMap = new Map()
+      byFileDispatch.set(file, dispatchMap)
     }
 
-    if (node.tagName) {
-      const existing = elementsByTagName.get(node.tagName)
+    const keys = node.selectorDispatchKeys
+    for (let j = 0; j < keys.length; j++) {
+      const key = keys[j]
+      if (!key) continue
+      const existing = dispatchMap.get(key)
       if (existing) {
         existing.push(node)
       } else {
-        elementsByTagName.set(node.tagName, [node])
+        dispatchMap.set(key, [node])
       }
     }
 
-    const parentKey = node.parentElementNode?.key ?? null
-    let nearestPositionedAncestorKey: string | null = null
-    let nearestPositionedAncestorHasReservedSpace = false
-
-    if (parentKey !== null) {
-      const parentPositioned = positionedAncestorByKey.get(parentKey)
-      if (parentPositioned !== undefined) {
-        nearestPositionedAncestorKey = parentPositioned.key
-        nearestPositionedAncestorHasReservedSpace = parentPositioned.hasReservedSpace
+    if (node.tagName !== null) {
+      let tagMap = byFileTag.get(file)
+      if (!tagMap) {
+        tagMap = new Map()
+        byFileTag.set(file, tagMap)
       }
-    }
-
-    containingBlockFactsByNode.set(node, {
-      nearestPositionedAncestorKey,
-      nearestPositionedAncestorHasReservedSpace,
-    })
-
-    if (!snapshot) continue
-
-    const reservedSpaceFact = computeReservedSpaceFact(snapshot)
-    reservedSpaceFactsByNode.set(node, reservedSpaceFact)
-    const scrollFact = computeScrollContainerFact(snapshot)
-    scrollContainerFactsByNode.set(node, scrollFact)
-    if (scrollFact.isScrollContainer) scrollContainerElements.push(node)
-    flowParticipationFactsByNode.set(node, computeFlowParticipationFact(snapshot))
-    snapshotHotSignalsByNode.set(node, computeHotSignals(snapshot))
-
-    const positionSignal = snapshot.signals.get("position")
-    const isPositioned = positionSignal !== undefined
-      && positionSignal.kind === "known"
-      && positionSignal.normalized !== "static"
-    if (isPositioned) {
-      positionedAncestorByKey.set(node.key, {
-        key: node.key,
-        hasReservedSpace: reservedSpaceFact.hasReservedSpace,
-      })
-    } else if (parentKey !== null) {
-      const inherited = positionedAncestorByKey.get(parentKey)
-      if (inherited !== undefined) {
-        positionedAncestorByKey.set(node.key, inherited)
-      }
-    }
-
-    for (const [signal, value] of snapshot.signals) {
-      if (value.kind !== "known") continue
-      const normalized = value.normalized
-      let byValue = elementsByKnownSignalValue.get(signal)
-      if (!byValue) {
-        byValue = new Map<string, LayoutElementNode[]>()
-        elementsByKnownSignalValue.set(signal, byValue)
-      }
-      const existingNodes = byValue.get(normalized)
-      if (existingNodes) {
-        existingNodes.push(node)
+      const existing = tagMap.get(node.tagName)
+      if (existing) {
+        existing.push(node)
       } else {
-        byValue.set(normalized, [node])
+        tagMap.set(node.tagName, [node])
       }
     }
   }
 
-  return {
-    reservedSpaceFactsByNode,
-    scrollContainerFactsByNode,
-    scrollContainerElements,
-    flowParticipationFactsByNode,
-    containingBlockFactsByNode,
-    snapshotHotSignalsByNode,
-    elementsByTagName,
-    elementsByKnownSignalValue,
-    dynamicSlotCandidateElements,
+  const out = new Map<string, FileElementIndex>()
+  for (const [file, dispatchMap] of byFileDispatch) {
+    out.set(file, {
+      byDispatchKey: dispatchMap,
+      byTagName: byFileTag.get(file) ?? new Map(),
+    })
   }
+  return out
 }
 
 const ABSENT_NUMERIC: HotNumericSignalEvidence = Object.freeze({
@@ -533,7 +553,7 @@ const ABSENT_NORMALIZED: HotNormalizedSignalEvidence = Object.freeze({
 })
 
 function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
-  if (signal.kind !== "known") {
+  if (signal.kind !== SignalValueKind.Known) {
     return {
       present: true,
       value: null,
@@ -545,12 +565,12 @@ function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
     value: signal.px,
     kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
-      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+      : signal.quality === SignalQuality.Estimated ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
 }
 
 function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence {
-  if (signal.kind !== "known") {
+  if (signal.kind !== SignalValueKind.Known) {
     return {
       present: true,
       value: null,
@@ -562,7 +582,7 @@ function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence
     value: signal.normalized,
     kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
-      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+      : signal.quality === SignalQuality.Estimated ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
 }
 
@@ -626,26 +646,26 @@ function computeHotSignals(snapshot: LayoutSignalSnapshot): LayoutSnapshotHotSig
 function computeReservedSpaceFact(snapshot: LayoutSignalSnapshot): LayoutReservedSpaceFact {
   const reasons: LayoutReservedSpaceReason[] = []
 
-  const hasHeight = hasPositiveOrDeclaredDimension(snapshot, "height")
+  const hasHeight = hasDeclaredDimension(snapshot, "height")
   if (hasHeight) reasons.push("height")
 
-  const hasBlockSize = hasPositiveOrDeclaredDimension(snapshot, "block-size")
+  const hasBlockSize = hasDeclaredDimension(snapshot, "block-size")
   if (hasBlockSize) reasons.push("block-size")
 
-  const hasMinHeight = hasPositiveOrDeclaredDimension(snapshot, "min-height")
+  const hasMinHeight = hasDeclaredDimension(snapshot, "min-height")
   if (hasMinHeight) reasons.push("min-height")
 
-  const hasMinBlockSize = hasPositiveOrDeclaredDimension(snapshot, "min-block-size")
+  const hasMinBlockSize = hasDeclaredDimension(snapshot, "min-block-size")
   if (hasMinBlockSize) reasons.push("min-block-size")
 
-  const hasContainIntrinsic = hasPositiveOrDeclaredDimension(snapshot, "contain-intrinsic-size")
+  const hasContainIntrinsic = hasDeclaredDimension(snapshot, "contain-intrinsic-size")
   if (hasContainIntrinsic) reasons.push("contain-intrinsic-size")
 
   const hasAspectRatio = hasUsableAspectRatio(snapshot)
   if (hasAspectRatio) {
-    if (hasPositiveOrDeclaredDimension(snapshot, "width")) reasons.push("aspect-ratio+width")
-    if (hasPositiveOrDeclaredDimension(snapshot, "inline-size")) reasons.push("aspect-ratio+inline-size")
-    if (hasPositiveOrDeclaredDimension(snapshot, "min-width")) reasons.push("aspect-ratio+min-width")
+    if (hasDeclaredDimension(snapshot, "width")) reasons.push("aspect-ratio+width")
+    if (hasDeclaredDimension(snapshot, "inline-size")) reasons.push("aspect-ratio+inline-size")
+    if (hasDeclaredDimension(snapshot, "min-width")) reasons.push("aspect-ratio+min-width")
     if (hasMinBlockSize) reasons.push("aspect-ratio+min-block-size")
     if (hasMinHeight) reasons.push("aspect-ratio+min-height")
   }
@@ -653,16 +673,17 @@ function computeReservedSpaceFact(snapshot: LayoutSignalSnapshot): LayoutReserve
   return {
     hasReservedSpace: reasons.length > 0,
     reasons,
-    hasUsableInlineDimension: hasPositiveOrDeclaredDimension(snapshot, "width")
-      || hasPositiveOrDeclaredDimension(snapshot, "inline-size")
-      || hasPositiveOrDeclaredDimension(snapshot, "min-width"),
-    hasUsableBlockDimension: hasHeight || hasBlockSize || hasMinHeight || hasMinBlockSize,
     hasContainIntrinsicSize: hasContainIntrinsic,
     hasUsableAspectRatio: hasAspectRatio,
+    hasDeclaredBlockDimension: hasHeight || hasBlockSize || hasMinHeight || hasMinBlockSize,
+    hasDeclaredInlineDimension: hasDeclaredDimension(snapshot, "width")
+      || hasDeclaredDimension(snapshot, "inline-size")
+      || hasDeclaredDimension(snapshot, "min-width")
+      || isBlockLevelDisplay(snapshot),
   }
 }
 
-function hasPositiveOrDeclaredDimension(
+function hasDeclaredDimension(
   snapshot: LayoutSignalSnapshot,
   property:
     | "width"
@@ -676,21 +697,21 @@ function hasPositiveOrDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
-
-  let normalized = ""
-  if (signal.kind === "known") {
+  if (signal.kind === SignalValueKind.Known) {
     if (signal.px !== null) return signal.px > 0
-    normalized = signal.normalized.trim().toLowerCase()
+    if (signal.normalized.length === 0) return false
+    return !isNonReservingDimension(signal.normalized)
   }
-
-  if (signal.kind === "unknown") {
+  if (signal.kind === SignalValueKind.Unknown) {
     return signal.source !== null
   }
+  return false
+}
 
-  if (normalized.length === 0) return false
-  if (isNonReservingDimension(normalized)) return false
-  return true
+function isBlockLevelDisplay(snapshot: LayoutSignalSnapshot): boolean {
+  const signal = snapshot.signals.get("display")
+  if (!signal || signal.kind !== SignalValueKind.Known) return false
+  return BLOCK_LEVEL_DISPLAY_VALUES.has(signal.normalized)
 }
 
 function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
@@ -698,17 +719,13 @@ function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
   if (!signal) return false
   if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
 
-  if (signal.kind === "unknown") {
+  if (signal.kind === SignalValueKind.Unknown) {
     return false
   }
 
-  let normalized = ""
-  if (signal.kind === "known") {
-    normalized = signal.normalized.trim().toLowerCase()
-  }
-
-  if (normalized.length === 0) return false
-  return normalized !== "auto"
+  if (signal.kind !== SignalValueKind.Known) return false
+  if (signal.normalized.length === 0) return false
+  return signal.normalized !== "auto"
 }
 
 function isNonReservingDimension(value: string): boolean {
@@ -721,10 +738,10 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   const overflowSignal = snapshot.signals.get("overflow")
   const overflowYSignal = snapshot.signals.get("overflow-y")
 
-  const overflow = overflowSignal && overflowSignal.kind === "known"
+  const overflow = overflowSignal && overflowSignal.kind === SignalValueKind.Known
     ? overflowSignal.normalized
     : null
-  const overflowY = overflowYSignal && overflowYSignal.kind === "known"
+  const overflowY = overflowYSignal && overflowYSignal.kind === SignalValueKind.Known
     ? overflowYSignal.normalized
     : null
 
@@ -785,7 +802,7 @@ function toScrollAxis(x: boolean, y: boolean): LayoutScrollAxis {
 
 function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlowParticipationFact {
   const signal = snapshot.signals.get("position")
-  if (!signal || signal.kind !== "known") {
+  if (!signal || signal.kind !== SignalValueKind.Known) {
     return {
       inFlow: true,
       position: null,
@@ -829,10 +846,10 @@ function buildContextIndex(
       const displaySignal = snapshot.signals.get("display")
       const flexDirSignal = snapshot.signals.get("flex-direction")
       const displayDesc = displaySignal
-        ? `${displaySignal.kind}:${displaySignal.kind === "known" ? displaySignal.normalized : "?"}(guard=${displaySignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        ? `${displaySignal.kind}:${displaySignal.kind === SignalValueKind.Known ? displaySignal.normalized : "?"}(guard=${displaySignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
         : "absent"
       const flexDirDesc = flexDirSignal
-        ? `${flexDirSignal.kind}:${flexDirSignal.kind === "known" ? flexDirSignal.normalized : "?"}(guard=${flexDirSignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        ? `${flexDirSignal.kind}:${flexDirSignal.kind === SignalValueKind.Known ? flexDirSignal.normalized : "?"}(guard=${flexDirSignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
         : "absent"
       logger.trace(
         `[context] parent=${parent.key} tag=${parent.tagName ?? "null"} children=${children.length}`

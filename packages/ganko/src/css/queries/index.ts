@@ -2,57 +2,8 @@
  * Query functions for CSSGraph
  *
  * Flat re-exports of all query modules.
- * Usage: import { getFiles, getVariablesByName } from 'ganko/css/queries'
+ * Usage: import { findRule, filterSelectors } from 'ganko/css/queries'
  */
-
-export {
-  getFiles,
-  getFileByPath,
-  getRules,
-  getSelectors,
-  getDeclarations,
-  getVariables,
-  getVariablesByName,
-  getAtRules,
-  getTokens,
-  getMixins,
-  getFunctions,
-  getPlaceholders,
-  getParseErrors,
-  hasParseErrors,
-  getMediaQueries,
-  getKeyframes,
-  getLayers,
-  getImportantDeclarations,
-  getGlobalVariables,
-  getUnusedVariables,
-  getUnresolvedRefs,
-  hasScss,
-  getRuleByNode,
-  getAtRuleByNode,
-  getRulesBySelector,
-  getDeclarationsByProperty,
-  getAtRulesByName,
-  getAtRulesByKind,
-  getTokensByCategory,
-  getDuplicateSelectors,
-  getLayerOrder,
-  getLayerOrderFor,
-  getVariableRefs,
-  getMixinIncludes,
-  getFunctionCalls,
-  getExtends,
-  getFontFaces,
-  getSupportsRules,
-  getScssVariables,
-  getCssCustomProperties,
-  getFailedFilePaths,
-  getTokenCategories,
-  getLayoutPropertiesByClassToken,
-  getKeyframeLayoutMutationsByName,
-  getFontFaceDescriptorsByFamily,
-  getUsedFontFamiliesByRule,
-} from "./get";
 
 export {
   countRules,

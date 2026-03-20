@@ -1,5 +1,5 @@
 import type { LayoutElementNode } from "./graph"
-import { LayoutTextualContentState, type LayoutSignalSnapshot } from "./signal-model"
+import { LayoutTextualContentState, SignalValueKind, type LayoutSignalSnapshot } from "./signal-model"
 import { isLayoutHidden } from "./signal-access"
 
 interface MeasurementCandidateSet {
@@ -59,18 +59,18 @@ function establishesFormattingContext(
   const snapshot = snapshotByElementNode.get(node)
   if (snapshot) {
     const displaySignal = snapshot.signals.get("display")
-    if (displaySignal && displaySignal.kind === "known") {
+    if (displaySignal && displaySignal.kind === SignalValueKind.Known) {
       return !isInlineLevelDisplay(displaySignal.normalized)
     }
 
     const overflowSignal = snapshot.signals.get("overflow")
-    if (overflowSignal && overflowSignal.kind === "known") {
+    if (overflowSignal && overflowSignal.kind === SignalValueKind.Known) {
       const ov = overflowSignal.normalized
       if (ov !== "visible" && ov !== "clip") return true
     }
 
     const overflowYSignal = snapshot.signals.get("overflow-y")
-    if (overflowYSignal && overflowYSignal.kind === "known") {
+    if (overflowYSignal && overflowYSignal.kind === SignalValueKind.Known) {
       const ov = overflowYSignal.normalized
       if (ov !== "visible" && ov !== "clip") return true
     }

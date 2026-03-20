@@ -7,7 +7,7 @@ import type { CSSInput, CSSOptions } from "./input";
 import type { TailwindValidator } from "./tailwind";
 import type { Logger } from "@drskillissue/ganko-shared";
 import { noopLogger } from "@drskillissue/ganko-shared";
-import { extractKeyframeNames, CHAR_HYPHEN, CHAR_R, CHAR_H, HEADING_ELEMENTS } from "@drskillissue/ganko-shared";
+import { extractKeyframeNames, HEADING_ELEMENTS } from "@drskillissue/ganko-shared";
 import type { StringInterner } from "@drskillissue/ganko-shared";
 import { createCSSInterner } from "./intern";
 import {
@@ -81,25 +81,7 @@ const FONT_GENERIC_FAMILY_SET = new Set([
 const FONT_LAYOUT_PROPERTIES = new Set(["font-family"]);
 const WHITESPACE_RE = /\s+/;
 
-/**
- * Classify a rule's semantic element kinds from its selectors' parts.
- * Populates the rule's elementKinds set.
- */
-function classifyRuleElementKinds(rule: RuleEntity): void {
-  const kinds = rule.elementKinds;
-  for (let i = 0; i < rule.selectors.length; i++) {
-    const sel = rule.selectors[i];
-    if (!sel) continue;
-    const parts = sel.parts;
-    for (let j = 0; j < parts.length; j++) {
-      const part = parts[j];
-      if (!part) continue;
-      classifyPart(part, kinds);
-    }
-  }
-}
-
-function classifyPart(part: SelectorPart, kinds: Set<RuleElementKind>): void {
+export function classifyPart(part: SelectorPart, kinds: Set<RuleElementKind>): void {
   if (part.type === "element") {
     const lower = part.value.toLowerCase();
     if (HEADING_ELEMENTS.has(lower)) { kinds.add("heading"); return; }
@@ -237,7 +219,19 @@ export class CSSGraph {
   readonly failedFilePaths: string[] = [];
   readonly tokenCategories: TokenCategory[] = [];
 
-  readonly filesWithLayers = new Set<string>();
+  private _filesWithLayers: Set<string> | null = null;
+  get filesWithLayers(): ReadonlySet<string> {
+    if (this._filesWithLayers === null) {
+      const result = new Set<string>();
+      for (let i = 0; i < this.layers.length; i++) {
+        const layer = this.layers[i];
+        if (!layer) continue;
+        result.add(layer.file.path);
+      }
+      this._filesWithLayers = result;
+    }
+    return this._filesWithLayers;
+  }
   readonly selectorsByPseudoClass = new Map<string, SelectorEntity[]>();
   readonly knownKeyframeNames = new Set<string>();
   readonly unresolvedAnimationRefs: UnresolvedAnimationRef[] = [];
@@ -250,19 +244,63 @@ export class CSSGraph {
   readonly multiDeclarationProperties = new Map<string, readonly DeclarationEntity[]>();
   /** Declarations whose parent rule is inside a @keyframes block. */
   readonly keyframeDeclarations: DeclarationEntity[] = [];
-  /** Rules with zero declarations and zero nested rules. */
-  readonly emptyRules: RuleEntity[] = [];
+  /** Rules with zero declarations, zero nested rules, and zero nested at-rules. */
+  private _emptyRules: RuleEntity[] | null = null;
+  get emptyRules(): readonly RuleEntity[] {
+    if (this._emptyRules === null) {
+      this._emptyRules = this.rules.filter(r => r.declarations.length === 0 && r.nestedRules.length === 0 && r.nestedAtRules.length === 0);
+    }
+    return this._emptyRules;
+  }
   /** @keyframes at-rules with no effective keyframe declarations. */
-  readonly emptyKeyframes: AtRuleEntity[] = [];
+  private _emptyKeyframes: AtRuleEntity[] | null = null;
+  get emptyKeyframes(): readonly AtRuleEntity[] {
+    if (this._emptyKeyframes === null) {
+      const result: AtRuleEntity[] = [];
+      for (let i = 0; i < this.keyframes.length; i++) {
+        const kf = this.keyframes[i];
+        if (!kf) continue;
+        if (!kf.parsedParams.animationName) continue;
+        if (kf.rules.length === 0) {
+          result.push(kf);
+          continue;
+        }
+        let hasDeclaration = false;
+        for (let j = 0; j < kf.rules.length; j++) {
+          const kfRule = kf.rules[j];
+          if (!kfRule) continue;
+          if (kfRule.declarations.length > 0) {
+            hasDeclaration = true;
+            break;
+          }
+        }
+        if (!hasDeclaration) result.push(kf);
+      }
+      this._emptyKeyframes = result;
+    }
+    return this._emptyKeyframes;
+  }
 
-  readonly colorDeclarations: DeclarationEntity[] = [];
-  readonly calcDeclarations: DeclarationEntity[] = [];
-  readonly varDeclarations: DeclarationEntity[] = [];
-  readonly urlDeclarations: DeclarationEntity[] = [];
-  readonly vendorPrefixedDeclarations: DeclarationEntity[] = [];
-  readonly hardcodedColorDeclarations: DeclarationEntity[] = [];
 
-  readonly overqualifiedSelectors: SelectorEntity[] = [];
+  private _overqualifiedSelectors: SelectorEntity[] | null = null;
+  get overqualifiedSelectors(): readonly SelectorEntity[] {
+    if (this._overqualifiedSelectors === null) {
+      const result: SelectorEntity[] = [];
+      for (let i = 0, len = this.idSelectors.length; i < len; i++) {
+        const sel = this.idSelectors[i];
+        if (!sel) continue;
+        const compounds = sel.compounds;
+        if (compounds.length === 0) continue;
+        const subject = compounds[compounds.length - 1];
+        if (!subject) continue;
+        if (subject.idValue !== null && (subject.tagName !== null || subject.classes.length > 0 || subject.attributes.length > 0)) {
+          result.push(sel);
+        }
+      }
+      this._overqualifiedSelectors = result;
+    }
+    return this._overqualifiedSelectors;
+  }
   readonly idSelectors: SelectorEntity[] = [];
   readonly attributeSelectors: SelectorEntity[] = [];
   readonly universalSelectors: SelectorEntity[] = [];
@@ -280,7 +318,13 @@ export class CSSGraph {
   /** Tailwind validator for utility class lookup (null if not a Tailwind project). */
   readonly tailwind: TailwindValidator | null;
 
-  readonly deepNestedRules: RuleEntity[] = [];
+  private _deepNestedRules: RuleEntity[] | null = null;
+  get deepNestedRules(): readonly RuleEntity[] {
+    if (this._deepNestedRules === null) {
+      this._deepNestedRules = this.rules.filter(r => r.depth > 3);
+    }
+    return this._deepNestedRules;
+  }
 
   constructor(input: CSSInput) {
     this.options = input.options ?? {};
@@ -321,14 +365,63 @@ export class CSSGraph {
 
   addSelector(selector: SelectorEntity): void {
     this.selectors.push(selector);
+
+    const anchor = selector.anchor;
+    if (anchor.subjectTag === null) {
+      this.selectorsWithoutSubjectTag.push(selector);
+    } else {
+      const existingByTag = this.selectorsBySubjectTag.get(anchor.subjectTag);
+      if (existingByTag) existingByTag.push(selector);
+      else this.selectorsBySubjectTag.set(anchor.subjectTag, [selector]);
+    }
+
+    if (anchor.targetsCheckbox) this.selectorsTargetingCheckbox.push(selector);
+    if (anchor.targetsTableCell) this.selectorsTargetingTableCell.push(selector);
+
+    const compounds = selector.compounds;
+    for (let ci = 0; ci < compounds.length; ci++) {
+      const compound = compounds[ci];
+      if (!compound) continue;
+      const cls = compound.classes;
+      for (let j = 0; j < cls.length; j++) {
+        const className = cls[j];
+        if (!className) continue;
+        const existing = this.classNameIndex.get(className);
+        if (existing) existing.push(selector);
+        else this.classNameIndex.set(className, [selector]);
+      }
+    }
+
+    const complexity = selector.complexity;
+    const flags = complexity._flags;
+    if (hasFlag(flags, SEL_HAS_ID)) this.idSelectors.push(selector);
+    if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) this.attributeSelectors.push(selector);
+    if (hasFlag(flags, SEL_HAS_UNIVERSAL)) this.universalSelectors.push(selector);
+
+    const pseudoClasses = complexity.pseudoClasses;
+    for (let j = 0; j < pseudoClasses.length; j++) {
+      const pc = pseudoClasses[j];
+      if (!pc) continue;
+      const pcExisting = this.selectorsByPseudoClass.get(pc);
+      if (pcExisting) pcExisting.push(selector);
+      else this.selectorsByPseudoClass.set(pc, [selector]);
+    }
   }
 
   addDeclaration(decl: DeclarationEntity): void {
     this.declarations.push(decl);
-    const existing = this.declarationsByProperty.get(decl.property);
+    const property = decl.property;
+    const existing = this.declarationsByProperty.get(property);
     if (existing) existing.push(decl);
-    else this.declarationsByProperty.set(decl.property, [decl]);
+    else this.declarationsByProperty.set(property, [decl]);
     if (hasFlag(decl._flags, DECL_IS_IMPORTANT) || decl.node.important) this.importantDeclarations.push(decl);
+    if (decl.rule !== null) {
+      const p = property.toLowerCase();
+      const ruleIndex = decl.rule.declarationIndex;
+      const ruleExisting = ruleIndex.get(p);
+      if (ruleExisting) ruleExisting.push(decl);
+      else ruleIndex.set(p, [decl]);
+    }
   }
 
   addVariable(variable: VariableEntity): void {
@@ -482,40 +575,12 @@ export class CSSGraph {
    * Called after all phases complete.
    */
   buildDerivedIndexes(): void {
-    this.buildRuleDeclarationIndexes();
     this.buildContainingMediaStacks();
-    this.buildKeyframeIndex();
+    this.buildKeyframeIndexes();
     this.buildContainerNameIndexes();
-    this.buildElementKinds();
-    this.buildFilesWithLayers();
-    this.buildSelectorPseudoClassIndex();
     this.buildMultiDeclarationProperties();
-    this.buildKeyframeDeclarations();
-    this.buildKeyframeLayoutMutationsByName();
-    this.buildEmptyRules();
-    this.buildEmptyKeyframes();
-    this.buildDeclarationDerivedIndexes();
-    this.buildSelectorDerivedIndexes();
     this.buildLayoutPropertiesByClassToken();
-    this.buildFontFamilyUsageByRule();
-    this.buildFontFaceDescriptorsByFamily();
-    this.buildRuleDerivedIndexes();
-  }
-
-  private buildRuleDeclarationIndexes(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      const index = rule.declarationIndex;
-      for (let j = 0; j < rule.declarations.length; j++) {
-        const d = rule.declarations[j];
-        if (!d) continue;
-        const p = d.property.toLowerCase();
-        const existing = index.get(p);
-        if (existing) existing.push(d);
-        else index.set(p, [d]);
-      }
-    }
+    this.buildFontIndexes();
   }
 
   private buildContainingMediaStacks(): void {
@@ -532,7 +597,7 @@ export class CSSGraph {
     }
   }
 
-  private buildKeyframeIndex(): void {
+  private buildKeyframeIndexes(): void {
     const IGNORED = new Set([...CSS_WIDE_KEYWORDS, "none"]);
 
     for (let i = 0; i < this.keyframes.length; i++) {
@@ -555,6 +620,57 @@ export class CSSGraph {
         if (this.knownKeyframeNames.has(name)) continue;
         this.unresolvedAnimationRefs.push({ declaration: d, name });
       }
+    }
+
+    const byAnimationByProperty = new Map<string, Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>>();
+
+    for (let i = 0; i < this.declarations.length; i++) {
+      const d = this.declarations[i];
+      if (!d) continue;
+      const rule = d.rule;
+      if (!rule) continue;
+      const parent = rule.parent;
+      if (!parent) continue;
+      if (parent.kind === "rule") continue;
+      if (parent.kind !== "keyframes") continue;
+      this.keyframeDeclarations.push(d);
+
+      const property = d.property.toLowerCase();
+      if (!LAYOUT_ANIMATION_MUTATION_PROPERTIES.has(property)) continue;
+
+      const animationName = normalizeAnimationName(parent.params);
+      if (!animationName) continue;
+
+      let byProperty = byAnimationByProperty.get(animationName);
+      if (!byProperty) {
+        byProperty = new Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>();
+        byAnimationByProperty.set(animationName, byProperty);
+      }
+
+      let bucket = byProperty.get(property);
+      if (!bucket) {
+        bucket = { values: new Set<string>(), declarations: [] };
+        byProperty.set(property, bucket);
+      }
+
+      bucket.values.add(normalizeCssValue(d.value));
+      bucket.declarations.push(d);
+    }
+
+    for (const [animationName, byProperty] of byAnimationByProperty) {
+      const mutations: KeyframeLayoutMutation[] = [];
+
+      for (const [property, bucket] of byProperty) {
+        if (bucket.values.size <= 1) continue;
+        mutations.push({
+          property,
+          values: [...bucket.values],
+          declarations: bucket.declarations,
+        });
+      }
+
+      if (mutations.length === 0) continue;
+      this.keyframeLayoutMutationsByName.set(animationName, mutations);
     }
   }
 
@@ -604,37 +720,6 @@ export class CSSGraph {
     }
   }
 
-  private buildElementKinds(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      classifyRuleElementKinds(rule);
-    }
-  }
-
-  private buildFilesWithLayers(): void {
-    for (let i = 0; i < this.layers.length; i++) {
-      const layer = this.layers[i];
-      if (!layer) continue;
-      this.filesWithLayers.add(layer.file.path);
-    }
-  }
-
-  private buildSelectorPseudoClassIndex(): void {
-    for (let i = 0; i < this.selectors.length; i++) {
-      const sel = this.selectors[i];
-      if (!sel) continue;
-      const pseudoClasses = sel.complexity.pseudoClasses;
-      for (let j = 0; j < pseudoClasses.length; j++) {
-        const pc = pseudoClasses[j];
-        if (!pc) continue;
-        const existing = this.selectorsByPseudoClass.get(pc);
-        if (existing) existing.push(sel);
-        else this.selectorsByPseudoClass.set(pc, [sel]);
-      }
-    }
-  }
-
   /**
    * Sort each declarationsByProperty list by sourceOrder and populate
    * multiDeclarationProperties with only those having 2+ entries.
@@ -648,180 +733,6 @@ export class CSSGraph {
     }
   }
 
-  /**
-   * Collect declarations whose parent rule is inside a @keyframes block.
-   */
-  private buildKeyframeDeclarations(): void {
-    for (let i = 0; i < this.declarations.length; i++) {
-      const d = this.declarations[i];
-      if (!d) continue;
-      const rule = d.rule;
-      if (!rule) continue;
-      const parent = rule.parent;
-      if (!parent) continue;
-      if (parent.kind === "rule") continue;
-      if (parent.kind !== "keyframes") continue;
-      this.keyframeDeclarations.push(d);
-    }
-  }
-
-  private buildKeyframeLayoutMutationsByName(): void {
-    const byAnimationByProperty = new Map<string, Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>>();
-
-    for (let i = 0; i < this.keyframeDeclarations.length; i++) {
-      const declaration = this.keyframeDeclarations[i];
-      if (!declaration) continue;
-      const rule = declaration.rule;
-      if (!rule || rule.parent === null || rule.parent.kind !== "keyframes") continue;
-
-      const property = declaration.property.toLowerCase();
-      if (!LAYOUT_ANIMATION_MUTATION_PROPERTIES.has(property)) continue;
-
-      const animationName = normalizeAnimationName(rule.parent.params);
-      if (!animationName) continue;
-
-      let byProperty = byAnimationByProperty.get(animationName);
-      if (!byProperty) {
-        byProperty = new Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>();
-        byAnimationByProperty.set(animationName, byProperty);
-      }
-
-      let bucket = byProperty.get(property);
-      if (!bucket) {
-        bucket = { values: new Set<string>(), declarations: [] };
-        byProperty.set(property, bucket);
-      }
-
-      bucket.values.add(normalizeCssValue(declaration.value));
-      bucket.declarations.push(declaration);
-    }
-
-    for (const [animationName, byProperty] of byAnimationByProperty) {
-      const mutations: KeyframeLayoutMutation[] = [];
-
-      for (const [property, bucket] of byProperty) {
-        if (bucket.values.size <= 1) continue;
-        mutations.push({
-          property,
-          values: [...bucket.values],
-          declarations: bucket.declarations,
-        });
-      }
-
-      if (mutations.length === 0) continue;
-      this.keyframeLayoutMutationsByName.set(animationName, mutations);
-    }
-  }
-
-  /**
-   * Collect rules with no declarations and no nested rules.
-   */
-  private buildEmptyRules(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      if (rule.declarations.length === 0 && rule.nestedRules.length === 0) {
-        this.emptyRules.push(rule);
-      }
-    }
-  }
-
-  /**
-   * Collect @keyframes with no effective keyframe declarations.
-   */
-  private buildEmptyKeyframes(): void {
-    for (let i = 0; i < this.keyframes.length; i++) {
-      const kf = this.keyframes[i];
-      if (!kf) continue;
-      if (!kf.parsedParams.animationName) continue;
-      if (kf.rules.length === 0) {
-        this.emptyKeyframes.push(kf);
-        continue;
-      }
-      let hasDeclaration = false;
-      for (let j = 0; j < kf.rules.length; j++) {
-        const kfRule = kf.rules[j];
-        if (!kfRule) continue;
-        if (kfRule.declarations.length > 0) {
-          hasDeclaration = true;
-          break;
-        }
-      }
-      if (!hasDeclaration) this.emptyKeyframes.push(kf);
-    }
-  }
-
-  private buildDeclarationDerivedIndexes(): void {
-    const HARDCODED_HEX = /^#[0-9a-f]{3,8}$/i;
-    for (let i = 0, len = this.declarations.length; i < len; i++) {
-      const d = this.declarations[i];
-      if (!d) continue;
-      const pv = d.parsedValue;
-      if (pv.colors.length > 0) this.colorDeclarations.push(d);
-      if (pv.hasCalc) this.calcDeclarations.push(d);
-      if (pv.hasVar) this.varDeclarations.push(d);
-      if (pv.hasUrl) this.urlDeclarations.push(d);
-      if (d.property.charCodeAt(0) === CHAR_HYPHEN && d.property.charCodeAt(1) !== CHAR_HYPHEN) {
-        this.vendorPrefixedDeclarations.push(d);
-      }
-      if (!pv.hasVar && pv.colors.length > 0) {
-        for (let j = 0, clen = pv.colors.length; j < clen; j++) {
-          const c = pv.colors[j];
-          if (!c) continue;
-          if (HARDCODED_HEX.test(c) || c.charCodeAt(0) === CHAR_R || c.charCodeAt(0) === CHAR_H) {
-            this.hardcodedColorDeclarations.push(d);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  private buildSelectorDerivedIndexes(): void {
-    for (let i = 0, len = this.selectors.length; i < len; i++) {
-      const sel = this.selectors[i];
-      if (!sel) continue;
-      const parts = sel.parts;
-      const anchor = sel.anchor;
-
-      if (anchor.subjectTag === null) {
-        this.selectorsWithoutSubjectTag.push(sel);
-      } else {
-        const existingByTag = this.selectorsBySubjectTag.get(anchor.subjectTag);
-        if (existingByTag) existingByTag.push(sel);
-        else this.selectorsBySubjectTag.set(anchor.subjectTag, [sel]);
-      }
-
-      if (anchor.targetsCheckbox) this.selectorsTargetingCheckbox.push(sel);
-      if (anchor.targetsTableCell) this.selectorsTargetingTableCell.push(sel);
-
-      for (let j = 0, plen = parts.length; j < plen; j++) {
-        const part = parts[j];
-        if (!part) continue;
-        if (part.type === "class") {
-          const existing = this.classNameIndex.get(part.value);
-          if (existing) existing.push(sel);
-          else this.classNameIndex.set(part.value, [sel]);
-        }
-      }
-
-      const flags = sel.complexity._flags;
-      if (hasFlag(flags, SEL_HAS_ID)) {
-        this.idSelectors.push(sel);
-        for (let j = 0, plen = parts.length; j < plen; j++) {
-          const p = parts[j];
-          if (!p) continue;
-          const t = p.type;
-          if (t === "element" || t === "class" || t === "attribute") {
-            this.overqualifiedSelectors.push(sel);
-            break;
-          }
-        }
-      }
-      if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) this.attributeSelectors.push(sel);
-      if (hasFlag(flags, SEL_HAS_UNIVERSAL)) this.universalSelectors.push(sel);
-    }
-  }
 
   private buildLayoutPropertiesByClassToken(): void {
     const byClass = new Map<string, Set<string>>();
@@ -858,7 +769,7 @@ export class CSSGraph {
     }
   }
 
-  private buildFontFamilyUsageByRule(): void {
+  private buildFontIndexes(): void {
     const declarations = this.declarationsForProperties(...FONT_LAYOUT_PROPERTIES);
 
     for (let i = 0; i < declarations.length; i++) {
@@ -890,9 +801,7 @@ export class CSSGraph {
       }
       this.usedFontFamiliesByRule.set(rule.id, [...merged]);
     }
-  }
 
-  private buildFontFaceDescriptorsByFamily(): void {
     const byFamily = new Map<string, FontFaceDescriptor[]>();
 
     for (let i = 0; i < this.fontFaces.length; i++) {
@@ -927,14 +836,6 @@ export class CSSGraph {
 
     for (const [family, descriptors] of byFamily) {
       this.fontFaceDescriptorsByFamily.set(family, descriptors);
-    }
-  }
-
-  private buildRuleDerivedIndexes(): void {
-    for (let i = 0, len = this.rules.length; i < len; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      if (rule.depth > 3) this.deepNestedRules.push(rule);
     }
   }
 

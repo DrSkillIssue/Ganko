@@ -86,8 +86,8 @@ function hasReservedSize(
   // aspect-ratio and contain-intrinsic-size branches benefit from them too.
   // e.g. `<svg width={props.size ?? 24} style={{ aspectRatio: "1" }}>` has a
   // usable inline dimension via the host even though no static `width` string exists.
-  const hasAnyWidth = attrWidth || jsxAttrWidth || hostJsxWidth || reservedSpaceFact.hasUsableInlineDimension
-  const hasAnyHeight = attrHeight || jsxAttrHeight || hostJsxHeight || reservedSpaceFact.hasUsableBlockDimension || reservedSpaceFact.hasContainIntrinsicSize
+  const hasAnyWidth = attrWidth || jsxAttrWidth || hostJsxWidth || reservedSpaceFact.hasDeclaredInlineDimension
+  const hasAnyHeight = attrHeight || jsxAttrHeight || hostJsxHeight || reservedSpaceFact.hasDeclaredBlockDimension || reservedSpaceFact.hasContainIntrinsicSize
 
   if (reservedSpaceFact.hasUsableAspectRatio && (hasAnyWidth || hasAnyHeight)) return true
   if (reservedSpaceFact.hasContainIntrinsicSize && (hasAnyWidth || hasAnyHeight)) return true

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeSignalMap, LayoutSignalSource, LayoutSignalGuard } from "../../src/cross-file/layout";
+import { normalizeSignalMap, LayoutSignalSource, LayoutSignalGuard, SignalValueKind, SignalQuality } from "../../src/cross-file/layout";
 import type { LayoutCascadedDeclaration } from "../../src/cross-file/layout/graph";
 
 function makeMap(entries: readonly [string, string][]) {
@@ -28,13 +28,13 @@ describe("layout signal normalization", () => {
     const translate = translateSignals.get("transform");
     const translate3d = translate3dSignals.get("transform");
 
-    expect(translateY?.kind).toBe("known");
-    expect(translate?.kind).toBe("known");
-    expect(translate3d?.kind).toBe("known");
+    expect(translateY?.kind).toBe(SignalValueKind.Known);
+    expect(translate?.kind).toBe(SignalValueKind.Known);
+    expect(translate3d?.kind).toBe(SignalValueKind.Known);
 
-    if (!translateY || translateY.kind !== "known") throw new Error("expected translateY known signal");
-    if (!translate || translate.kind !== "known") throw new Error("expected translate known signal");
-    if (!translate3d || translate3d.kind !== "known") throw new Error("expected translate3d known signal");
+    if (!translateY || translateY.kind !== SignalValueKind.Known) throw new Error("expected translateY known signal");
+    if (!translate || translate.kind !== SignalValueKind.Known) throw new Error("expected translate known signal");
+    if (!translate3d || translate3d.kind !== SignalValueKind.Known) throw new Error("expected translate3d known signal");
 
     expect(translateY.px).toBe(-2);
     expect(translate.px).toBe(-3);
@@ -45,8 +45,8 @@ describe("layout signal normalization", () => {
     const signals = normalizeSignalMap(makeMap([["translate", "2px -5px"]]));
     const translate = signals.get("translate");
 
-    expect(translate?.kind).toBe("known");
-    if (!translate || translate.kind !== "known") throw new Error("expected translate known signal");
+    expect(translate?.kind).toBe(SignalValueKind.Known);
+    if (!translate || translate.kind !== SignalValueKind.Known) throw new Error("expected translate known signal");
     expect(translate.px).toBe(-5);
   });
 
@@ -54,7 +54,7 @@ describe("layout signal normalization", () => {
     const signals = normalizeSignalMap(makeMap([["transform", "translateY(-10%)"]]));
     const transform = signals.get("transform");
 
-    expect(transform?.kind).toBe("unknown");
+    expect(transform?.kind).toBe(SignalValueKind.Unknown);
   });
 
   it("treats runtime-dependent transform and keyword values as unknown", () => {
@@ -64,8 +64,8 @@ describe("layout signal normalization", () => {
     const transform = transformSignals.get("transform");
     const alignSelf = keywordSignals.get("align-self");
 
-    expect(transform?.kind).toBe("unknown");
-    expect(alignSelf?.kind).toBe("unknown");
+    expect(transform?.kind).toBe(SignalValueKind.Unknown);
+    expect(alignSelf?.kind).toBe(SignalValueKind.Unknown);
   });
 
   it("parses top/margin/inset block offsets", () => {
@@ -83,15 +83,15 @@ describe("layout signal normalization", () => {
     const insetBlockStart = signals.get("inset-block-start");
     const insetBlockEnd = signals.get("inset-block-end");
 
-    expect(top?.kind).toBe("known");
-    expect(marginTop?.kind).toBe("known");
-    expect(insetBlockStart?.kind).toBe("known");
-    expect(insetBlockEnd?.kind).toBe("known");
+    expect(top?.kind).toBe(SignalValueKind.Known);
+    expect(marginTop?.kind).toBe(SignalValueKind.Known);
+    expect(insetBlockStart?.kind).toBe(SignalValueKind.Known);
+    expect(insetBlockEnd?.kind).toBe(SignalValueKind.Known);
 
-    if (!top || top.kind !== "known") throw new Error("expected top known signal");
-    if (!marginTop || marginTop.kind !== "known") throw new Error("expected margin-top known signal");
-    if (!insetBlockStart || insetBlockStart.kind !== "known") throw new Error("expected inset-block-start known signal");
-    if (!insetBlockEnd || insetBlockEnd.kind !== "known") throw new Error("expected inset-block-end known signal");
+    if (!top || top.kind !== SignalValueKind.Known) throw new Error("expected top known signal");
+    if (!marginTop || marginTop.kind !== SignalValueKind.Known) throw new Error("expected margin-top known signal");
+    if (!insetBlockStart || insetBlockStart.kind !== SignalValueKind.Known) throw new Error("expected inset-block-start known signal");
+    if (!insetBlockEnd || insetBlockEnd.kind !== SignalValueKind.Known) throw new Error("expected inset-block-end known signal");
 
     expect(top.px).toBe(2);
     expect(marginTop.px).toBe(-1);
@@ -108,18 +108,21 @@ describe("layout signal normalization", () => {
     );
 
     const lineHeight = signals.get("line-height");
-    expect(lineHeight?.kind).toBe("known");
-    if (!lineHeight || lineHeight.kind !== "known") throw new Error("expected line-height known signal");
+    expect(lineHeight?.kind).toBe(SignalValueKind.Known);
+    if (!lineHeight || lineHeight.kind !== SignalValueKind.Known) throw new Error("expected line-height known signal");
     expect(lineHeight.px).toBe(24);
-    expect(lineHeight.quality).toBe("estimated");
+    expect(lineHeight.quality).toBe(SignalQuality.Estimated);
   });
 
   it("expands block-axis shorthands into monitored longhands", () => {
     const signals = normalizeSignalMap(
       makeMap([
-        ["margin-block", "2px 4px"],
-        ["padding-block", "1px"],
-        ["inset-block", "3px 5px"],
+        ["margin-top", "2px"],
+        ["margin-bottom", "4px"],
+        ["padding-top", "1px"],
+        ["padding-bottom", "1px"],
+        ["inset-block-start", "3px"],
+        ["inset-block-end", "5px"],
       ]),
     );
 
@@ -130,19 +133,19 @@ describe("layout signal normalization", () => {
     const insetStart = signals.get("inset-block-start");
     const insetEnd = signals.get("inset-block-end");
 
-    expect(marginTop?.kind).toBe("known");
-    expect(marginBottom?.kind).toBe("known");
-    expect(paddingTop?.kind).toBe("known");
-    expect(paddingBottom?.kind).toBe("known");
-    expect(insetStart?.kind).toBe("known");
-    expect(insetEnd?.kind).toBe("known");
+    expect(marginTop?.kind).toBe(SignalValueKind.Known);
+    expect(marginBottom?.kind).toBe(SignalValueKind.Known);
+    expect(paddingTop?.kind).toBe(SignalValueKind.Known);
+    expect(paddingBottom?.kind).toBe(SignalValueKind.Known);
+    expect(insetStart?.kind).toBe(SignalValueKind.Known);
+    expect(insetEnd?.kind).toBe(SignalValueKind.Known);
 
-    if (!marginTop || marginTop.kind !== "known") throw new Error("expected margin-top known signal");
-    if (!marginBottom || marginBottom.kind !== "known") throw new Error("expected margin-bottom known signal");
-    if (!paddingTop || paddingTop.kind !== "known") throw new Error("expected padding-top known signal");
-    if (!paddingBottom || paddingBottom.kind !== "known") throw new Error("expected padding-bottom known signal");
-    if (!insetStart || insetStart.kind !== "known") throw new Error("expected inset-block-start known signal");
-    if (!insetEnd || insetEnd.kind !== "known") throw new Error("expected inset-block-end known signal");
+    if (!marginTop || marginTop.kind !== SignalValueKind.Known) throw new Error("expected margin-top known signal");
+    if (!marginBottom || marginBottom.kind !== SignalValueKind.Known) throw new Error("expected margin-bottom known signal");
+    if (!paddingTop || paddingTop.kind !== SignalValueKind.Known) throw new Error("expected padding-top known signal");
+    if (!paddingBottom || paddingBottom.kind !== SignalValueKind.Known) throw new Error("expected padding-bottom known signal");
+    if (!insetStart || insetStart.kind !== SignalValueKind.Known) throw new Error("expected inset-block-start known signal");
+    if (!insetEnd || insetEnd.kind !== SignalValueKind.Known) throw new Error("expected inset-block-end known signal");
 
     expect(marginTop.px).toBe(2);
     expect(marginBottom.px).toBe(4);

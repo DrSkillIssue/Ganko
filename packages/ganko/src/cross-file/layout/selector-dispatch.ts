@@ -165,25 +165,29 @@ export function buildSelectorCandidatesByNode(
   return out
 }
 
+function buildDispatchKeys(
+  idValue: string | null,
+  classTokens: readonly string[],
+  attributeNames: readonly string[],
+): readonly string[] {
+  const out: string[] = []
+  if (idValue !== null) out.push(`id:${idValue}`)
+  for (let i = 0; i < classTokens.length; i++) out.push(`class:${classTokens[i]}`)
+  for (let i = 0; i < attributeNames.length; i++) out.push(`attr:${attributeNames[i]}`)
+  if (out.length <= 1) return out
+  out.sort()
+  return dedupeSorted(out)
+}
+
 export function buildSelectorDispatchKeys(
   attributes: ReadonlyMap<string, string | null>,
   classTokens: readonly string[],
 ): readonly string[] {
   const out: string[] = []
-
   const idValue = attributes.get("id")
-  if (idValue !== null && idValue !== undefined) {
-    out.push(`id:${idValue}`)
-  }
-
-  for (let i = 0; i < classTokens.length; i++) {
-    out.push(`class:${classTokens[i]}`)
-  }
-
-  for (const attributeName of attributes.keys()) {
-    out.push(`attr:${attributeName}`)
-  }
-
+  if (idValue !== null && idValue !== undefined) out.push(`id:${idValue}`)
+  for (let i = 0; i < classTokens.length; i++) out.push(`class:${classTokens[i]}`)
+  for (const attributeName of attributes.keys()) out.push(`attr:${attributeName}`)
   if (out.length <= 1) return out
   out.sort()
   return dedupeSorted(out)
@@ -374,24 +378,11 @@ function selectorMatchesDispatchKeys(
 }
 
 function resolveSubjectDispatchKeys(matcher: CompiledSelectorMatcher): readonly string[] {
-  const out: string[] = []
-
-  if (matcher.subject.idValue !== null) {
-    out.push(`id:${matcher.subject.idValue}`)
-  }
-
-  for (let i = 0; i < matcher.subject.classes.length; i++) {
-    out.push(`class:${matcher.subject.classes[i]}`)
-  }
-
-  for (let i = 0; i < matcher.subject.attributeNames.length; i++) {
-    out.push(`attr:${matcher.subject.attributeNames[i]}`)
-  }
-
-  if (out.length <= 1) return out
-
-  out.sort()
-  return dedupeSorted(out)
+  return buildDispatchKeys(
+    matcher.subject.idValue,
+    matcher.subject.classes,
+    matcher.subject.attributeNames,
+  )
 }
 
 function dedupeSorted(values: readonly string[]): readonly string[] {

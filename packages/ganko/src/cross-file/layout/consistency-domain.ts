@@ -1,5 +1,7 @@
 import {
   LayoutSignalGuard,
+  SignalQuality,
+  SignalValueKind,
   type AlignmentCohortFactSummary,
   type LayoutKnownSignalValue,
   type LayoutSignalName,
@@ -124,12 +126,12 @@ function accumulateSnapshotFacts(
       continue
     }
 
-    if (value.kind === "unknown") {
+    if (value.kind === SignalValueKind.Unknown) {
       sink.addUnknown()
       continue
     }
 
-    if (value.quality === "estimated" && value.px !== null) {
+    if (value.quality === SignalQuality.Estimated && value.px !== null) {
       sink.addInterval()
       continue
     }
@@ -140,7 +142,7 @@ function accumulateSnapshotFacts(
 
 function toFact(value: LayoutSignalValue): LayoutSignalFact {
   if (value.guard.kind === LayoutSignalGuard.Conditional) {
-    if (value.kind === "known") return toConditionalFactFromKnown(value)
+    if (value.kind === SignalValueKind.Known) return toConditionalFactFromKnown(value)
     const reason = `${value.reason} [${value.guard.key}]`
     return {
       kind: "conditional",
@@ -151,7 +153,7 @@ function toFact(value: LayoutSignalValue): LayoutSignalFact {
     }
   }
 
-  if (value.kind === "unknown") {
+  if (value.kind === SignalValueKind.Unknown) {
     return {
       kind: "unknown",
       signal: value.name,
@@ -159,7 +161,7 @@ function toFact(value: LayoutSignalValue): LayoutSignalFact {
     }
   }
 
-  if (value.quality === "estimated" && value.px !== null) {
+  if (value.quality === SignalQuality.Estimated && value.px !== null) {
     const spread = resolveEstimatedSpread(value)
     return {
       kind: "interval",
@@ -189,7 +191,7 @@ function toConditionalFactFromKnown(value: LayoutKnownSignalValue): LayoutSignal
     }
   }
 
-  if (value.quality === "exact") {
+  if (value.quality === SignalQuality.Exact) {
     return {
       kind: "conditional",
       signal: value.name,
@@ -210,7 +212,7 @@ function toConditionalFactFromKnown(value: LayoutKnownSignalValue): LayoutSignal
 }
 
 function resolveEstimatedSpread(value: LayoutKnownSignalValue | LayoutUnknownSignalValue): number {
-  if (value.kind !== "known") return ESTIMATED_SPREAD_FLOOR_PX
+  if (value.kind !== SignalValueKind.Known) return ESTIMATED_SPREAD_FLOOR_PX
   if (value.px === null) return ESTIMATED_SPREAD_FLOOR_PX
 
   const scaled = Math.abs(value.px) * ESTIMATED_SPREAD_SCALE

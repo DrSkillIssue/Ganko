@@ -22,6 +22,8 @@ import {
   isCombinator,
   isAlpha,
   isPseudoNameChar,
+  isIdentChar,
+  isHexDigit,
   ID_STICKY,
   CLASS_STICKY,
   ATTRIBUTE_STICKY,
@@ -33,8 +35,8 @@ import {
   HAS_ATTRIBUTE_RE,
 } from "@drskillissue/ganko-shared";
 
-import type { CombinatorType, SelectorComplexity, SelectorPart } from "../entities";
-import { MINIMAL_COMPLEXITY } from "../entities";
+import type { CombinatorType, SelectorComplexity, SelectorPart, SelectorCompound, SelectorAttributeConstraint, ParsedPseudoConstraint, NthPattern } from "../entities";
+import { MINIMAL_COMPLEXITY, PseudoConstraintKind } from "../entities";
 import { buildComplexity } from "../analysis/complexity";
 
 export type { SelectorPart };
@@ -504,61 +506,127 @@ export function extractPseudoElements(selector: string): string[] {
 
 import type { Specificity } from "../entities";
 
+const CHAR_BACKSLASH = 92
+
+function readCssIdentifier(input: string, start: number): { value: string; end: number } | null {
+  const length = input.length
+  let i = start
+  let hasEscape = false
+
+  while (i < length) {
+    const code = input.charCodeAt(i)
+    if (code === CHAR_BACKSLASH) {
+      if (i + 1 >= length) break
+      hasEscape = true
+      i = skipCssEscape(input, i + 1)
+      continue
+    }
+    if (!isIdentChar(code)) break
+    i++
+  }
+
+  if (i === start) return null
+
+  if (!hasEscape) {
+    return { value: input.slice(start, i), end: i }
+  }
+
+  const parts: string[] = []
+  let j = start
+  while (j < i) {
+    const code = input.charCodeAt(j)
+    if (code !== CHAR_BACKSLASH) {
+      parts.push(String.fromCharCode(code))
+      j++
+      continue
+    }
+    j++
+    if (j >= i) break
+    const first = input.charCodeAt(j)
+    if (!isHexDigit(first)) {
+      parts.push(String.fromCharCode(first))
+      j++
+      continue
+    }
+    const hexStart = j
+    const maxHex = Math.min(j + 6, i)
+    while (j < maxHex && isHexDigit(input.charCodeAt(j))) j++
+    const codePoint = Number.parseInt(input.slice(hexStart, j), 16)
+    if (codePoint > 0 && codePoint <= 0x10FFFF) parts.push(String.fromCodePoint(codePoint))
+    if (j < i && isWhitespace(input.charCodeAt(j))) j++
+  }
+
+  return { value: parts.join(""), end: i }
+}
+
+function skipCssEscape(input: string, afterBackslash: number): number {
+  const length = input.length
+  if (afterBackslash >= length) return afterBackslash
+  const first = input.charCodeAt(afterBackslash)
+  if (!isHexDigit(first)) return afterBackslash + 1
+  let end = afterBackslash + 1
+  const maxHex = Math.min(afterBackslash + 6, length)
+  while (end < maxHex && isHexDigit(input.charCodeAt(end))) end++
+  if (end < length && isWhitespace(input.charCodeAt(end))) end++
+  return end
+}
+
+const ATTRIBUTE_EXISTS_RE = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/
+const ATTRIBUTE_CONSTRAINT_RE = /^([-_a-zA-Z][-_a-zA-Z0-9]*)\s*(=|~=|\|=|\^=|\$=|\*=)\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))(?:\s+([iIsS]))?$/
+const MAX_PSEUDO_PARSE_DEPTH = 4
+
 /**
  * Result of complete selector parsing with specificity and complexity.
  */
 export interface ParseSelectorCompleteResult {
   parts: SelectorPart[];
+  compounds: readonly SelectorCompound[];
   combinators: CombinatorType[];
   specificity: Specificity;
   complexity: SelectorComplexity;
 }
 
 /**
- * Parse a selector to extract parts, combinators, and specificity.
- *
- * @param raw - The selector string to parse
- * @returns Object containing parts, combinators, and specificity
+ * Parse a selector to extract parts, compounds, combinators, and specificity.
  */
-export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult {
+export function parseSelectorComplete(raw: string, _depth?: number): ParseSelectorCompleteResult {
   let start = 0;
   let end = raw.length;
   while (start < end && isWhitespace(raw.charCodeAt(start))) start++;
   while (end > start && isWhitespace(raw.charCodeAt(end - 1))) end--;
 
   if (start === end) {
-    return { parts: [], combinators: [], specificity: [0, 0, 0, 0] as const, complexity: MINIMAL_COMPLEXITY };
+    return { parts: [], compounds: [], combinators: [], specificity: [0, 0, 0, 0] as const, complexity: MINIMAL_COMPLEXITY };
   }
 
-  // Only create substring if we actually trimmed
   const input = (start === 0 && end === raw.length) ? raw : raw.substring(start, end);
   const len = input.length;
 
-  const parts: SelectorPart[] = [];
+  const allParts: SelectorPart[] = [];
+  let currentCompoundParts: SelectorPart[] = [];
   const combinators: CombinatorType[] = [];
+  const compounds: SelectorCompound[] = [];
 
-  // Specificity counters
   let ids = 0;
   let classes = 0;
   let elements = 0;
 
-  // Complexity tracking
   let hasId = false;
   let hasUniversal = false;
   let hasAttribute = false;
   let hasPseudoClassFlag = false;
   let hasPseudoElementFlag = false;
   let hasNesting = false;
-  const pseudoClasses: string[] = [];
-  const pseudoElements: string[] = [];
+  const pseudoClassNames: string[] = [];
+  const pseudoElementNames: string[] = [];
 
   let pos = 0;
   let inCompound = false;
+  const depth = _depth ?? 0;
 
   while (pos < len) {
     const char = input.charCodeAt(pos);
 
-    // Handle whitespace and combinators
     if (isWhitespace(char) || isCombinator(char)) {
       if (inCompound) {
         let sawCombinator: CombinatorType | null = null;
@@ -566,23 +634,16 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
 
         while (scanPos < len) {
           const c = input.charCodeAt(scanPos);
-          if (c === CHAR_GT) {
-            sawCombinator = "child";
-            scanPos++;
-          } else if (c === CHAR_PLUS) {
-            sawCombinator = "adjacent";
-            scanPos++;
-          } else if (c === CHAR_TILDE) {
-            sawCombinator = "sibling";
-            scanPos++;
-          } else if (isWhitespace(c)) {
-            scanPos++;
-          } else {
-            break;
-          }
+          if (c === CHAR_GT) { sawCombinator = "child"; scanPos++; }
+          else if (c === CHAR_PLUS) { sawCombinator = "adjacent"; scanPos++; }
+          else if (c === CHAR_TILDE) { sawCombinator = "sibling"; scanPos++; }
+          else if (isWhitespace(c)) { scanPos++; }
+          else { break; }
         }
 
         if (scanPos < len) {
+          compounds.push(finalizeCompound(currentCompoundParts, depth));
+          currentCompoundParts = [];
           combinators.push(sawCombinator ?? "descendant");
           inCompound = false;
         }
@@ -595,89 +656,117 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
 
     inCompound = true;
 
-    // Nesting selector (&)
     if (char === CHAR_AMPERSAND) {
-      parts.push({ type: "nesting", value: "&", raw: "&" });
+      const part: SelectorPart = { type: "nesting", value: "&", raw: "&" };
+      allParts.push(part);
+      currentCompoundParts.push(part);
       hasNesting = true;
       pos++;
       continue;
     }
 
-    // Universal selector (*) - no specificity contribution
     if (char === CHAR_ASTERISK) {
-      parts.push({ type: "universal", value: "*", raw: "*" });
+      const part: SelectorPart = { type: "universal", value: "*", raw: "*" };
+      allParts.push(part);
+      currentCompoundParts.push(part);
       hasUniversal = true;
       pos++;
       continue;
     }
 
-    // ID selector (#id)
     if (char === CHAR_HASH) {
       ID_STICKY.lastIndex = pos;
       const match = ID_STICKY.exec(input);
       if (match) {
         const val = match[1]
         if (!val) break
-        parts.push({ type: "id", value: val, raw: match[0] });
+        const ident = readCssIdentifier(input, pos + 1)
+        const idVal = ident ? ident.value : val
+        const idRaw = ident ? input.slice(pos, ident.end) : match[0]
+        const idEnd = ident ? ident.end : ID_STICKY.lastIndex
+        const part: SelectorPart = { type: "id", value: idVal, raw: idRaw };
+        allParts.push(part);
+        currentCompoundParts.push(part);
         ids++;
         hasId = true;
-        pos = ID_STICKY.lastIndex;
+        pos = idEnd;
+        continue;
+      }
+      const ident = readCssIdentifier(input, pos + 1)
+      if (ident) {
+        const part: SelectorPart = { type: "id", value: ident.value, raw: input.slice(pos, ident.end) };
+        allParts.push(part);
+        currentCompoundParts.push(part);
+        ids++;
+        hasId = true;
+        pos = ident.end;
         continue;
       }
     }
 
-    // Class selector (.class)
     if (char === CHAR_DOT) {
       CLASS_STICKY.lastIndex = pos;
       const match = CLASS_STICKY.exec(input);
       if (match) {
         const val = match[1]
         if (!val) break
-        parts.push({ type: "class", value: val, raw: match[0] });
+        const ident = readCssIdentifier(input, pos + 1)
+        const clsVal = ident ? ident.value : val
+        const clsRaw = ident ? input.slice(pos, ident.end) : match[0]
+        const clsEnd = ident ? ident.end : CLASS_STICKY.lastIndex
+        const part: SelectorPart = { type: "class", value: clsVal, raw: clsRaw };
+        allParts.push(part);
+        currentCompoundParts.push(part);
         classes++;
-        pos = CLASS_STICKY.lastIndex;
+        pos = clsEnd;
+        continue;
+      }
+      const ident = readCssIdentifier(input, pos + 1)
+      if (ident) {
+        const part: SelectorPart = { type: "class", value: ident.value, raw: input.slice(pos, ident.end) };
+        allParts.push(part);
+        currentCompoundParts.push(part);
+        classes++;
+        pos = ident.end;
         continue;
       }
     }
 
-    // Attribute selector ([attr])
     if (char === CHAR_OPEN_BRACKET) {
       ATTRIBUTE_STICKY.lastIndex = pos;
       const match = ATTRIBUTE_STICKY.exec(input);
       if (match) {
         const val = match[1]
         if (!val) break
-        parts.push({ type: "attribute", value: val, raw: match[0] });
-        classes++; // Attributes count as class-level specificity
+        const part: SelectorPart = { type: "attribute", value: val, raw: match[0] };
+        allParts.push(part);
+        currentCompoundParts.push(part);
+        classes++;
         hasAttribute = true;
         pos = ATTRIBUTE_STICKY.lastIndex;
         continue;
       }
     }
 
-    // Pseudo-element (::before) or Pseudo-class (:hover)
     if (char === CHAR_COLON) {
-      // Check for pseudo-element first (::)
       if (pos + 1 < len && input.charCodeAt(pos + 1) === CHAR_COLON) {
         PSEUDO_ELEMENT_STICKY.lastIndex = pos;
         const match = PSEUDO_ELEMENT_STICKY.exec(input);
         if (match) {
           const val = match[1]
           if (!val) break
-          parts.push({ type: "pseudo-element", value: val, raw: match[0] });
-          elements++; // Pseudo-elements count as element-level
+          const part: SelectorPart = { type: "pseudo-element", value: val, raw: match[0] };
+          allParts.push(part);
+          currentCompoundParts.push(part);
+          elements++;
           hasPseudoElementFlag = true;
-          pseudoElements.push(val);
+          pseudoElementNames.push(val);
           pos = PSEUDO_ELEMENT_STICKY.lastIndex;
           continue;
         }
       }
 
-      // Pseudo-class - need to handle :is/:not/:has specially for specificity
-      // Also need to handle functional pseudo-classes with parentheses
       const pseudoStart = pos;
-
-      // Extract the pseudo-class name first
       let nameEnd = pos + 1;
       while (nameEnd < len) {
         const c = input.charCodeAt(nameEnd);
@@ -688,9 +777,7 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
       if (nameEnd > pos + 1) {
         const pseudoName = input.substring(pos + 1, nameEnd).toLowerCase();
 
-        // Check if this is a functional pseudo-class with parentheses
         if (nameEnd < len && input.charCodeAt(nameEnd) === CHAR_OPEN_PAREN) {
-          // Find matching closing paren
           let parenDepth = 1;
           let argEnd = nameEnd + 1;
           while (argEnd < len && parenDepth > 0) {
@@ -703,25 +790,28 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
           const fullMatch = input.substring(pseudoStart, argEnd);
           const argContent = input.substring(nameEnd + 1, argEnd - 1);
 
-          // Handle :where() - 0 specificity
           if (pseudoName === "where") {
-            parts.push({ type: "pseudo-class", value: pseudoName, raw: fullMatch });
+            const part: SelectorPart = { type: "pseudo-class", value: pseudoName, raw: fullMatch };
+            allParts.push(part);
+            currentCompoundParts.push(part);
             hasPseudoClassFlag = true;
-            pseudoClasses.push(pseudoName);
+            pseudoClassNames.push(pseudoName);
           } else if (pseudoName === "is" || pseudoName === "not" || pseudoName === "has") {
-            // Handle :is(), :not(), :has() - takes highest specificity of arguments
-            parts.push({ type: "pseudo-class", value: pseudoName, raw: fullMatch });
+            const part: SelectorPart = { type: "pseudo-class", value: pseudoName, raw: fullMatch };
+            allParts.push(part);
+            currentCompoundParts.push(part);
             hasPseudoClassFlag = true;
-            pseudoClasses.push(pseudoName);
+            pseudoClassNames.push(pseudoName);
 
-            // Split arguments by comma (respecting nesting) and find highest specificity
             const args = splitPseudoArgs(argContent);
             let maxIds = 0, maxClasses = 0, maxElements = 0;
 
-            for (const arg of args) {
+            for (let ai = 0; ai < args.length; ai++) {
+              const arg = args[ai];
+              if (!arg) continue;
               const trimmed = arg.trim();
               if (trimmed) {
-                const { specificity: argSpec } = parseSelectorComplete(trimmed);
+                const { specificity: argSpec } = parseSelectorComplete(trimmed, depth + 1);
                 if (argSpec[1] > maxIds ||
                     (argSpec[1] === maxIds && argSpec[2] > maxClasses) ||
                     (argSpec[1] === maxIds && argSpec[2] === maxClasses && argSpec[3] > maxElements)) {
@@ -736,10 +826,11 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
             classes += maxClasses;
             elements += maxElements;
           } else {
-            // Other functional pseudo-classes (e.g., :nth-child) count as class-level
-            parts.push({ type: "pseudo-class", value: pseudoName, raw: fullMatch });
+            const part: SelectorPart = { type: "pseudo-class", value: pseudoName, raw: fullMatch };
+            allParts.push(part);
+            currentCompoundParts.push(part);
             hasPseudoClassFlag = true;
-            pseudoClasses.push(pseudoName);
+            pseudoClassNames.push(pseudoName);
             classes++;
           }
 
@@ -747,25 +838,27 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
           continue;
         }
 
-        // Non-functional pseudo-class
         const rawMatch = input.substring(pseudoStart, nameEnd);
-        parts.push({ type: "pseudo-class", value: pseudoName, raw: rawMatch });
+        const part: SelectorPart = { type: "pseudo-class", value: pseudoName, raw: rawMatch };
+        allParts.push(part);
+        currentCompoundParts.push(part);
         hasPseudoClassFlag = true;
-        pseudoClasses.push(pseudoName);
-        classes++; // Regular pseudo-classes count as class-level
+        pseudoClassNames.push(pseudoName);
+        classes++;
         pos = nameEnd;
         continue;
       }
     }
 
-    // Element selector (div, span)
     if (isAlpha(char)) {
       ELEMENT_STICKY.lastIndex = pos;
       const match = ELEMENT_STICKY.exec(input);
       if (match) {
         const val = match[1]
         if (!val) break
-        parts.push({ type: "element", value: val, raw: match[0] });
+        const part: SelectorPart = { type: "element", value: val, raw: match[0] };
+        allParts.push(part);
+        currentCompoundParts.push(part);
         elements++;
         pos = ELEMENT_STICKY.lastIndex;
         continue;
@@ -773,6 +866,10 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
     }
 
     pos++;
+  }
+
+  if (currentCompoundParts.length > 0) {
+    compounds.push(finalizeCompound(currentCompoundParts, depth));
   }
 
   const complexity = buildComplexity(
@@ -783,29 +880,185 @@ export function parseSelectorComplete(raw: string): ParseSelectorCompleteResult 
     hasPseudoClassFlag,
     hasPseudoElementFlag,
     hasNesting,
-    pseudoClasses,
-    pseudoElements,
+    pseudoClassNames,
+    pseudoElementNames,
   );
 
   return {
-    parts,
+    parts: allParts,
+    compounds,
     combinators,
     specificity: [0, ids, classes, elements] as const,
     complexity,
   };
 }
 
-/**
- * Split pseudo-class arguments by comma, respecting nesting.
- * Handles nested parentheses and brackets within arguments.
- *
- * @param content - The argument content to split
- * @returns Array of individual arguments
- *
- * @example
- * splitPseudoArgs(".a, .b")  // Returns: [".a", ".b"]
- * splitPseudoArgs(":is(.a, .b), .c")  // Returns: [":is(.a, .b)", ".c"]
- */
+function finalizeCompound(parts: readonly SelectorPart[], depth: number): SelectorCompound {
+  let tagName: string | null = null;
+  let idValue: string | null = null;
+  const classes: string[] = [];
+  const seenClasses = new Set<string>();
+  const attributes: SelectorAttributeConstraint[] = [];
+  const pseudoClasses: ParsedPseudoConstraint[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+
+    if (part.type === "element") {
+      tagName = part.value.toLowerCase();
+    } else if (part.type === "id") {
+      idValue = part.value;
+    } else if (part.type === "class") {
+      if (!seenClasses.has(part.value)) {
+        seenClasses.add(part.value);
+        classes.push(part.value);
+      }
+    } else if (part.type === "attribute") {
+      const constraint = parseAttributeConstraintFromRaw(part.value);
+      if (constraint) attributes.push(constraint);
+    } else if (part.type === "pseudo-class") {
+      const parsed = parsePseudoToParsedConstraint(part.value, part.raw, depth);
+      if (parsed) pseudoClasses.push(parsed);
+    }
+  }
+
+  return { parts, tagName, idValue, classes, attributes, pseudoClasses };
+}
+
+function parseAttributeConstraintFromRaw(raw: string): SelectorAttributeConstraint | null {
+  const trimmed = raw.trim();
+  const constrained = ATTRIBUTE_CONSTRAINT_RE.exec(trimmed);
+
+  if (constrained) {
+    const operatorToken = constrained[2];
+    if (!operatorToken) return null;
+    const operator = mapAttrOperator(operatorToken);
+    if (operator === null) return null;
+    const value = constrained[3] ?? constrained[4] ?? constrained[5] ?? null;
+    if (value === null) return null;
+    const nameToken = constrained[1];
+    if (!nameToken) return null;
+    return {
+      name: nameToken.toLowerCase(),
+      operator,
+      value,
+      caseInsensitive: (constrained[6] ?? "").toLowerCase() === "i",
+    };
+  }
+
+  if (!ATTRIBUTE_EXISTS_RE.test(trimmed)) return null;
+  return { name: trimmed.toLowerCase(), operator: "exists", value: null, caseInsensitive: false };
+}
+
+function mapAttrOperator(op: string): SelectorAttributeConstraint["operator"] | null {
+  if (op === "=") return "equals";
+  if (op === "~=") return "includes-word";
+  if (op === "|=") return "dash-prefix";
+  if (op === "^=") return "prefix";
+  if (op === "$=") return "suffix";
+  if (op === "*=") return "contains";
+  return null;
+}
+
+function parsePseudoToParsedConstraint(name: string, raw: string, depth: number): ParsedPseudoConstraint | null {
+  const lowerName = name.toLowerCase();
+
+  if (lowerName === "first-child") return { name: lowerName, raw, kind: PseudoConstraintKind.FirstChild, nthPattern: null, nestedCompounds: null };
+  if (lowerName === "last-child") return { name: lowerName, raw, kind: PseudoConstraintKind.LastChild, nthPattern: null, nestedCompounds: null };
+  if (lowerName === "only-child") return { name: lowerName, raw, kind: PseudoConstraintKind.OnlyChild, nthPattern: null, nestedCompounds: null };
+
+  const parenIdx = raw.indexOf("(");
+  if (parenIdx === -1) {
+    return { name: lowerName, raw, kind: PseudoConstraintKind.Simple, nthPattern: null, nestedCompounds: null };
+  }
+
+  const argContent = raw.substring(parenIdx + 1, raw.length - 1);
+
+  if (lowerName === "nth-child") {
+    const pattern = parseNthPatternFromArg(argContent);
+    return pattern ? { name: lowerName, raw, kind: PseudoConstraintKind.NthChild, nthPattern: pattern, nestedCompounds: null } : null;
+  }
+  if (lowerName === "nth-last-child") {
+    const pattern = parseNthPatternFromArg(argContent);
+    return pattern ? { name: lowerName, raw, kind: PseudoConstraintKind.NthLastChild, nthPattern: pattern, nestedCompounds: null } : null;
+  }
+  if (lowerName === "nth-of-type") {
+    const pattern = parseNthPatternFromArg(argContent);
+    return pattern ? { name: lowerName, raw, kind: PseudoConstraintKind.NthOfType, nthPattern: pattern, nestedCompounds: null } : null;
+  }
+  if (lowerName === "nth-last-of-type") {
+    const pattern = parseNthPatternFromArg(argContent);
+    return pattern ? { name: lowerName, raw, kind: PseudoConstraintKind.NthLastOfType, nthPattern: pattern, nestedCompounds: null } : null;
+  }
+
+  if (lowerName === "is" || lowerName === "where") {
+    if (depth >= MAX_PSEUDO_PARSE_DEPTH) return { name: lowerName, raw, kind: PseudoConstraintKind.MatchesAny, nthPattern: null, nestedCompounds: null };
+    const nested = parseNestedCompoundGroups(argContent, depth + 1);
+    return { name: lowerName, raw, kind: PseudoConstraintKind.MatchesAny, nthPattern: null, nestedCompounds: nested };
+  }
+
+  if (lowerName === "not") {
+    if (depth >= MAX_PSEUDO_PARSE_DEPTH) return { name: lowerName, raw, kind: PseudoConstraintKind.NoneOf, nthPattern: null, nestedCompounds: null };
+    const nested = parseNestedCompoundGroups(argContent, depth + 1);
+    return { name: lowerName, raw, kind: PseudoConstraintKind.NoneOf, nthPattern: null, nestedCompounds: nested };
+  }
+
+  return { name: lowerName, raw, kind: PseudoConstraintKind.Simple, nthPattern: null, nestedCompounds: null };
+}
+
+function parseNestedCompoundGroups(argContent: string, depth: number): SelectorCompound[][] {
+  const args = splitPseudoArgs(argContent);
+  const groups: SelectorCompound[][] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) continue;
+    const trimmed = arg.trim();
+    if (!trimmed) continue;
+    const result = parseSelectorComplete(trimmed, depth);
+    if (result.compounds.length > 0) {
+      groups.push(result.compounds.slice());
+    }
+  }
+
+  return groups;
+}
+
+export function parseNthPatternFromArg(raw: string): NthPattern | null {
+  const normalized = raw.trim().toLowerCase().replaceAll(" ", "");
+  if (normalized.length === 0) return null;
+
+  if (normalized === "odd") return { step: 2, offset: 1 };
+  if (normalized === "even") return { step: 2, offset: 0 };
+
+  const nIndex = normalized.indexOf("n");
+  if (nIndex === -1) {
+    const value = Number.parseInt(normalized, 10);
+    if (Number.isNaN(value)) return null;
+    return { step: 0, offset: value };
+  }
+
+  const stepPart = normalized.slice(0, nIndex);
+  const offsetPart = normalized.slice(nIndex + 1);
+
+  let step: number;
+  if (stepPart.length === 0 || stepPart === "+") step = 1;
+  else if (stepPart === "-") step = -1;
+  else {
+    step = Number.parseInt(stepPart, 10);
+    if (Number.isNaN(step)) return null;
+  }
+
+  let offset = 0;
+  if (offsetPart.length > 0) {
+    offset = Number.parseInt(offsetPart, 10);
+    if (Number.isNaN(offset)) return null;
+  }
+
+  return { step, offset };
+}
+
 function splitPseudoArgs(content: string): string[] {
   const result: string[] = [];
   let start = 0;

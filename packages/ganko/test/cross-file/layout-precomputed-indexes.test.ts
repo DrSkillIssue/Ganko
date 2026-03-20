@@ -15,7 +15,7 @@ function assertSorted(values: readonly number[]): void {
 
 function assertPrecomputedIndexes(layout: ReturnType<typeof buildLayoutGraph>): void {
   for (const element of layout.elements) {
-    expect(layout.snapshotHotSignalsByNode.has(element)).toBe(true);
+    expect(layout.records.has(element)).toBe(true);
 
     const scope = layout.cssScopeBySolidFile.get(element.solidFile) ?? [];
     if (scope.length === 0 || element.tagName === null) continue;

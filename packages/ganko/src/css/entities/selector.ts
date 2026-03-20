@@ -26,8 +26,44 @@ export interface SelectorAttributeConstraint {
   caseInsensitive: boolean;
 }
 
+export interface NthPattern {
+  readonly step: number
+  readonly offset: number
+}
+
+export const enum PseudoConstraintKind {
+  Simple = 0,
+  FirstChild = 1,
+  LastChild = 2,
+  OnlyChild = 3,
+  NthChild = 4,
+  NthLastChild = 5,
+  NthOfType = 6,
+  NthLastOfType = 7,
+  MatchesAny = 8,
+  NoneOf = 9,
+}
+
+export interface ParsedPseudoConstraint {
+  readonly name: string
+  readonly raw: string
+  readonly kind: PseudoConstraintKind
+  readonly nthPattern: NthPattern | null
+  readonly nestedCompounds: readonly SelectorCompound[][] | null
+}
+
+export interface SelectorCompound {
+  readonly parts: readonly SelectorPart[]
+  readonly tagName: string | null
+  readonly idValue: string | null
+  readonly classes: readonly string[]
+  readonly attributes: readonly SelectorAttributeConstraint[]
+  readonly pseudoClasses: readonly ParsedPseudoConstraint[]
+}
+
 export interface SelectorAnchor {
   subjectTag: string | null;
+  idValue: string | null;
   classes: readonly string[];
   attributes: readonly SelectorAttributeConstraint[];
   includesDescendantCombinator: boolean;
@@ -59,6 +95,8 @@ export interface SelectorEntity {
   specificity: Specificity;
   specificityScore: number;
   complexity: SelectorComplexity;
+  compounds: readonly SelectorCompound[];
+  combinators: readonly CombinatorType[];
   parts: SelectorPart[];
   anchor: SelectorAnchor;
   overrides: SelectorEntity[];

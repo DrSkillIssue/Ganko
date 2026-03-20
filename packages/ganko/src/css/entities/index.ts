@@ -12,11 +12,15 @@ export type { Specificity, SpecificityObject, SelectorInfo } from "./specificity
 export type {
   CombinatorType,
   SelectorAttributeConstraint,
+  NthPattern,
+  ParsedPseudoConstraint,
+  SelectorCompound,
   SelectorAnchor,
   SelectorPart,
   SelectorComplexity,
   SelectorEntity,
 } from "./selector";
+export { PseudoConstraintKind } from "./selector";
 
 // At-Rule
 export type {

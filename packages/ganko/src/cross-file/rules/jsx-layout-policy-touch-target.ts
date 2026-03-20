@@ -181,7 +181,7 @@ export const jsxLayoutPolicyTouchTarget = defineCrossRule({
       const minBlock = kind === "button" ? policy.minButtonHeight : policy.minInputHeight
       const minInline = kind === "button" ? policy.minButtonWidth : policy.minTouchTarget
 
-      if (!reservedSpace.hasUsableBlockDimension) {
+      if (!reservedSpace.hasDeclaredBlockDimension) {
         emitLayoutDiagnostic(
           layout, node, emit,
           jsxLayoutPolicyTouchTarget.id, "noReservedBlockSize", messages.noReservedBlockSize,
@@ -190,7 +190,7 @@ export const jsxLayoutPolicyTouchTarget = defineCrossRule({
         )
       }
 
-      if (!reservedSpace.hasUsableInlineDimension) {
+      if (!reservedSpace.hasDeclaredInlineDimension) {
         emitLayoutDiagnostic(
           layout, node, emit,
           jsxLayoutPolicyTouchTarget.id, "noReservedInlineSize", messages.noReservedInlineSize,

@@ -3,7 +3,7 @@ import { buildCSSGraph } from "../../src/css/plugin";
 import { buildLayoutGraph } from "../../src/cross-file";
 import type { LayoutGraph } from "../../src/cross-file/layout";
 import { createLayoutPerfStats } from "../../src/cross-file/layout/perf";
-import { compileSelectorMatcher, selectorMatchesLayoutElement } from "../../src/cross-file/layout/selector-match";
+import { compileSelectorMatcher, selectorMatchesLayoutElement, SelectorMatchResult } from "../../src/cross-file/layout/selector-match";
 import { canonicalPath } from "@drskillissue/ganko-shared";
 import { buildSolidGraph } from "../../src/solid/plugin";
 import { parseCode } from "../solid/test-utils";
@@ -26,7 +26,7 @@ function collectExpectedSelectorIdsByElement(
 
       const matcher = compileSelectorMatcher(selector);
       if (matcher === null) continue;
-      if (selectorMatchesLayoutElement(matcher, element, perf) === "no-match") continue;
+      if (selectorMatchesLayoutElement(matcher, element, perf) === SelectorMatchResult.NoMatch) continue;
 
       const ids = out.get(element.key);
       if (ids) {
@@ -52,7 +52,7 @@ function collectActualSelectorIdsByElement(layout: LayoutGraph, solidFile: strin
   for (const element of layout.elements) {
     if (element.solidFile !== solidFile) continue;
 
-    const edges = layout.appliesByNode.get(element) ?? [];
+    const edges = layout.records.get(element)?.edges ?? [];
     const ids: number[] = [];
     for (const edge of edges) {
       ids.push(edge.selectorId);

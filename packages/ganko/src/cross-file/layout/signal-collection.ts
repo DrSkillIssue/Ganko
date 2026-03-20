@@ -2,7 +2,7 @@ import type { CrossRuleContext } from "../rule"
 import type { LayoutCascadedDeclaration } from "./graph"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
-import { LayoutSignalGuard, type LayoutSignalName, type LayoutSignalSnapshot, type LayoutSignalValue } from "./signal-model"
+import { LayoutSignalGuard, SignalValueKind, type LayoutSignalName, type LayoutSignalSnapshot, type LayoutSignalValue } from "./signal-model"
 import { normalizeSignalMapWithCounts } from "./signal-normalization"
 
 const INHERITED_SIGNAL_NAMES: readonly LayoutSignalName[] = [
@@ -23,13 +23,29 @@ export function collectSignalSnapshot(
   context: CrossRuleContext,
   node: LayoutElementNode,
 ): LayoutSignalSnapshot {
-  const existing = context.layout.snapshotByElementNode.get(node)
-  if (existing) {
+  const record = context.layout.records.get(node)
+  if (record) {
     context.layout.perf.signalSnapshotCacheHits++
-    return existing
+    return record.snapshot
   }
 
-  throw new Error(`missing precomputed layout snapshot for ${node.key}`)
+  throw new Error(`missing precomputed layout record for ${node.key}`)
+}
+
+export function buildSnapshotFromCascade(
+  node: LayoutElementNode,
+  cascade: ReadonlyMap<string, LayoutCascadedDeclaration>,
+  parentSnapshot: LayoutSignalSnapshot | null,
+): LayoutSignalSnapshot {
+  const normalized = normalizeSignalMapWithCounts(cascade)
+  const inherited = inheritSignalsFromParent(parentSnapshot, normalized.signals)
+  return {
+    node,
+    signals: inherited.signals,
+    knownSignalCount: normalized.knownSignalCount + inherited.knownDelta,
+    unknownSignalCount: normalized.unknownSignalCount + inherited.unknownDelta,
+    conditionalSignalCount: normalized.conditionalSignalCount + inherited.conditionalDelta,
+  }
 }
 
 export function buildSignalSnapshotIndex(
@@ -120,7 +136,7 @@ function inheritSignalsFromParent(
       continue
     }
 
-    if (inheritedValue.kind === "known") {
+    if (inheritedValue.kind === SignalValueKind.Known) {
       knownDelta++
       continue
     }

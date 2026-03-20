@@ -2,13 +2,9 @@ export { LayoutScrollAxis } from "./graph"
 export type { ResolvedComponentHost } from "./component-host"
 export type {
   LayoutElementNode,
+  LayoutElementRecord,
   LayoutElementRef,
   LayoutGraph,
-  LayoutGraphTopology,
-  LayoutGraphCascade,
-  LayoutGraphFacts,
-  LayoutGraphCohorts,
-  LayoutGraphIndexes,
   LayoutMatchEdge,
   LayoutConditionalSignalDeltaFact,
   LayoutContainingBlockFact,
@@ -39,6 +35,8 @@ export {
   LayoutSignalUnit,
   LayoutTextualContentState,
   SignalConflictValue,
+  SignalQuality,
+  SignalValueKind,
 } from "./signal-model"
 export type {
   AlignmentCase,

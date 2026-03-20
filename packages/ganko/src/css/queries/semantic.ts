@@ -15,13 +15,19 @@ export function getImportantDeclarationsNotInUtilities(graph: CSSGraph): readonl
     for (let j = 0, slen = selectors.length; j < slen; j++) {
       const sel = selectors[j];
       if (!sel) continue;
-      const parts = sel.parts;
-      for (let k = 0, plen = parts.length; k < plen; k++) {
-        const part = parts[k];
-        if (part && part.type === "class" && isUtilityClass(part.value)) {
-          utility = true;
-          break;
+      const compounds = sel.compounds;
+      for (let k = 0, clen = compounds.length; k < clen; k++) {
+        const compound = compounds[k];
+        if (!compound) continue;
+        const cls = compound.classes;
+        for (let m = 0, mlen = cls.length; m < mlen; m++) {
+          const className = cls[m];
+          if (className && isUtilityClass(className)) {
+            utility = true;
+            break;
+          }
         }
+        if (utility) break;
       }
       if (utility) break;
     }

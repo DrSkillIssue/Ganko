@@ -1,6 +1,8 @@
 import {
   EvidenceValueKind,
   LayoutSignalGuard,
+  SignalQuality,
+  SignalValueKind,
   type EvidenceWitness,
   type LayoutKnownSignalValue,
   type LayoutSignalName,
@@ -31,10 +33,10 @@ const EMPTY_STATEFUL_BASE_VALUE_INDEX = new Map<string, ReadonlyMap<string, Read
 const EMPTY_LAYOUT_RESERVED_SPACE_FACT: LayoutReservedSpaceFact = Object.freeze({
   hasReservedSpace: false,
   reasons: EMPTY_RESERVED_SPACE_REASONS,
-  hasUsableInlineDimension: false,
-  hasUsableBlockDimension: false,
   hasContainIntrinsicSize: false,
   hasUsableAspectRatio: false,
+  hasDeclaredInlineDimension: false,
+  hasDeclaredBlockDimension: false,
 })
 const EMPTY_LAYOUT_SCROLL_CONTAINER_FACT: LayoutScrollContainerFact = Object.freeze({
   isScrollContainer: false,
@@ -75,13 +77,13 @@ export function readKnownSignalWithGuard(
 ): LayoutKnownSignalValue | null {
   const value = snapshot.signals.get(name)
   if (!value) return null
-  if (value.kind !== "known") return null
+  if (value.kind !== SignalValueKind.Known) return null
   return value
 }
 
 function toEvidenceKind(value: LayoutKnownSignalValue): EvidenceValueKind {
   if (value.guard.kind === LayoutSignalGuard.Conditional) return EvidenceValueKind.Conditional
-  if (value.quality === "estimated") return EvidenceValueKind.Interval
+  if (value.quality === SignalQuality.Estimated) return EvidenceValueKind.Interval
   return EvidenceValueKind.Exact
 }
 
@@ -97,7 +99,7 @@ export function readNumericSignalEvidence(
     }
   }
 
-  if (value.kind !== "known") {
+  if (value.kind !== SignalValueKind.Known) {
     if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
@@ -129,7 +131,7 @@ export function readNormalizedSignalEvidence(
     }
   }
 
-  if (value.kind !== "known") {
+  if (value.kind !== SignalValueKind.Known) {
     if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
@@ -215,28 +217,28 @@ export function readReservedSpaceFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutReservedSpaceFact {
-  return graph.reservedSpaceFactsByNode.get(node) ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
+  return graph.records.get(node)?.reservedSpace ?? EMPTY_LAYOUT_RESERVED_SPACE_FACT
 }
 
 export function readScrollContainerFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutScrollContainerFact {
-  return graph.scrollContainerFactsByNode.get(node) ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
+  return graph.records.get(node)?.scrollContainer ?? EMPTY_LAYOUT_SCROLL_CONTAINER_FACT
 }
 
 export function readFlowParticipationFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutFlowParticipationFact {
-  return graph.flowParticipationFactsByNode.get(node) ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
+  return graph.records.get(node)?.flowParticipation ?? EMPTY_LAYOUT_FLOW_PARTICIPATION_FACT
 }
 
 export function readContainingBlockFact(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): LayoutContainingBlockFact {
-  return graph.containingBlockFactsByNode.get(node) ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
+  return graph.records.get(node)?.containingBlock ?? EMPTY_LAYOUT_CONTAINING_BLOCK_FACT
 }
 
 export function readConditionalSignalDeltaFact(
@@ -244,7 +246,7 @@ export function readConditionalSignalDeltaFact(
   node: LayoutElementNode,
   name: LayoutSignalName,
 ): LayoutConditionalSignalDeltaFact {
-  const byProperty = graph.conditionalSignalDeltaFactsByNode.get(node)
+  const byProperty = graph.records.get(node)?.conditionalDelta
   if (!byProperty) return EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
   return byProperty.get(name) ?? EMPTY_LAYOUT_CONDITIONAL_DELTA_FACT
 }
@@ -290,7 +292,7 @@ export function readBaselineOffsetFacts(
   graph: LayoutGraph,
   node: LayoutElementNode,
 ): ReadonlyMap<LayoutSignalName, readonly number[]> {
-  return graph.baselineOffsetFactsByNode.get(node) ?? EMPTY_BASELINE_FACTS
+  return graph.records.get(node)?.baselineOffsets ?? EMPTY_BASELINE_FACTS
 }
 
 export function readElementRef(graph: LayoutGraph, node: LayoutElementNode): LayoutElementRef | null {
