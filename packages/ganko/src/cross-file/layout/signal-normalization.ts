@@ -7,6 +7,8 @@ import type { LayoutRuleGuard } from "./guard-model"
 import {
   LayoutSignalGuard,
   LayoutSignalUnit,
+  SignalQuality,
+  SignalValueKind,
   type LayoutKnownSignalValue,
   type LayoutSignalName,
   type LayoutSignalSource,
@@ -130,7 +132,7 @@ export function normalizeSignalMapWithCounts(
       fontSizeEntry.guardProvenance, null,
     )
     out.set("font-size", parsedFontSize)
-    if (parsedFontSize.kind === "known" && parsedFontSize.guard.kind === LayoutSignalGuard.Unconditional) {
+    if (parsedFontSize.kind === SignalValueKind.Known && parsedFontSize.guard.kind === LayoutSignalGuard.Unconditional) {
       fontSizePx = parsedFontSize.px
     }
   }
@@ -161,7 +163,7 @@ export function normalizeSignalMapWithCounts(
       continue
     }
 
-    if (value.kind === "known") {
+    if (value.kind === SignalValueKind.Known) {
       knownSignalCount++
       continue
     }
@@ -232,14 +234,14 @@ function parseAspectRatio(
     if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) {
       return createUnknown(name, source, guard, "aspect-ratio ratio is invalid")
     }
-    return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Unitless, "exact")
+    return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Unitless, SignalQuality.Exact)
   }
 
   const ratio = Number(trimmed)
   if (!Number.isFinite(ratio) || ratio <= 0) {
     return createUnknown(name, source, guard, "aspect-ratio is not statically parseable")
   }
-  return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Unitless, "exact")
+  return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Unitless, SignalQuality.Exact)
 }
 
 function parseContainIntrinsicSize(
@@ -266,7 +268,7 @@ function parseContainIntrinsicSize(
     const part = parts[i];
     if (!part) continue;
     const px = parseSignedPxValue(part)
-    if (px !== null) return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, "exact")
+    if (px !== null) return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, SignalQuality.Exact)
   }
 
   return createUnknown(name, source, guard, "contain-intrinsic-size is not statically parseable in px")
@@ -282,11 +284,11 @@ function parseLineHeight(
   const unitless = parseUnitlessValue(raw)
   if (unitless !== null) {
     const base = fontSizePx === null ? 16 : fontSizePx
-    return createKnown(name, raw, source, guard, unitless * base, LayoutSignalUnit.Unitless, "estimated")
+    return createKnown(name, raw, source, guard, unitless * base, LayoutSignalUnit.Unitless, SignalQuality.Estimated)
   }
 
   const px = parseSignedPxValue(raw)
-  if (px !== null) return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, "exact")
+  if (px !== null) return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, SignalQuality.Exact)
   return createUnknown(name, source, guard, "line-height is not statically parseable")
 }
 
@@ -302,11 +304,11 @@ function parseLength(
 ): LayoutSignalValue {
   const px = parseSignedPxValue(raw)
   if (px !== null) {
-    return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, "exact")
+    return createKnown(name, raw, source, guard, px, LayoutSignalUnit.Px, SignalQuality.Exact)
   }
   const normalized = raw.trim().toLowerCase()
   if (DIMENSION_KEYWORD_SET.has(normalized) || normalized.startsWith("fit-content(")) {
-    return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Keyword, "exact")
+    return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Keyword, SignalQuality.Exact)
   }
   return createUnknown(name, source, guard, "length is not statically parseable in px")
 }
@@ -326,7 +328,7 @@ function parseKeyword(
     return createUnknown(name, source, guard, "keyword uses runtime-dependent function")
   }
 
-  return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Keyword, "exact")
+  return createKnown(name, raw, source, guard, null, LayoutSignalUnit.Keyword, SignalQuality.Exact)
 }
 
 function parseTransform(
@@ -345,7 +347,7 @@ function parseTransform(
   }
 
   const y = extractTransformYPx(normalized)
-  if (y !== null) return createKnown(name, raw, source, guard, y, LayoutSignalUnit.Px, "exact")
+  if (y !== null) return createKnown(name, raw, source, guard, y, LayoutSignalUnit.Px, SignalQuality.Exact)
   return createUnknown(name, source, guard, "transform has non-translational or non-px functions")
 }
 
@@ -365,7 +367,7 @@ function parseTranslateProperty(
   }
 
   const y = extractTranslatePropertyYPx(trimmed)
-  if (y !== null) return createKnown(name, raw, source, guard, y, LayoutSignalUnit.Px, "exact")
+  if (y !== null) return createKnown(name, raw, source, guard, y, LayoutSignalUnit.Px, SignalQuality.Exact)
   return createUnknown(name, source, guard, "translate property vertical component is not px")
 }
 
@@ -387,10 +389,10 @@ function createKnown(
   guard: LayoutRuleGuard,
   px: number | null,
   unit: LayoutSignalUnit,
-  quality: "exact" | "estimated",
+  quality: SignalQuality,
 ): LayoutKnownSignalValue {
   return {
-    kind: "known",
+    kind: SignalValueKind.Known,
     name,
     normalized: raw.trim().toLowerCase(),
     source,
@@ -408,7 +410,7 @@ function createUnknown(
   reason: string,
 ): LayoutUnknownSignalValue {
   return {
-    kind: "unknown",
+    kind: SignalValueKind.Unknown,
     name,
     source,
     guard,

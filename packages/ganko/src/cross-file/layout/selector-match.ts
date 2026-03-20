@@ -239,7 +239,7 @@ function compoundGroupNeedsAttributes(groups: readonly (readonly CompiledSelecto
 }
 
 /** Three-valued selector match result. */
-export type SelectorMatchResult = "match" | "no-match" | "conditional"
+export const enum SelectorMatchResult { Match = 0, NoMatch = 1, Conditional = 2 }
 
 export interface FileElementIndex {
   readonly byDispatchKey: ReadonlyMap<string, readonly LayoutElementNode[]>
@@ -255,14 +255,14 @@ export function selectorMatchesLayoutElement(
   fileElementIndex: FileElementIndex | null = null,
 ): SelectorMatchResult {
   const firstCompound = matcher.compoundsRightToLeft[0]
-  if (firstCompound === undefined) return "no-match"
+  if (firstCompound === undefined) return SelectorMatchResult.NoMatch
   const subjectResult = matchesCompound(node, firstCompound)
-  if (subjectResult === "no-match") return "no-match"
+  if (subjectResult === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
   if (matcher.compoundsRightToLeft.length === 1) return subjectResult
   const chainResult = matchesChain(matcher, node, 0, perf, fileRootElements, logger, fileElementIndex)
-  if (chainResult === "no-match") return "no-match"
-  if (subjectResult === "conditional" || chainResult === "conditional") return "conditional"
-  return "match"
+  if (chainResult === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
+  if (subjectResult === SelectorMatchResult.Conditional || chainResult === SelectorMatchResult.Conditional) return SelectorMatchResult.Conditional
+  return SelectorMatchResult.Match
 }
 
 function matchesChain(
@@ -275,18 +275,18 @@ function matchesChain(
   fileElementIndex: FileElementIndex | null = null,
 ): SelectorMatchResult {
   const combinator = matcher.combinatorsRightToLeft[index]
-  if (combinator === undefined) return "no-match"
+  if (combinator === undefined) return SelectorMatchResult.NoMatch
   const nextIndex = index + 1
   const targetCompound = matcher.compoundsRightToLeft[nextIndex]
-  if (targetCompound === undefined) return "no-match"
+  if (targetCompound === undefined) return SelectorMatchResult.NoMatch
   const isFinal = nextIndex === matcher.compoundsRightToLeft.length - 1
 
   if (combinator === "child") {
     const parent = node.parentElementNode
-    if (parent === null) return "no-match"
+    if (parent === null) return SelectorMatchResult.NoMatch
     perf.ancestryChecks++
     const compoundResult = matchesCompound(parent, targetCompound)
-    if (compoundResult === "no-match") return "no-match"
+    if (compoundResult === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
     if (isFinal) return compoundResult
     const chainResult = matchesChain(matcher, parent, nextIndex, perf, fileRootElements, logger, fileElementIndex)
     return mergeMatchResults(compoundResult, chainResult)
@@ -294,10 +294,10 @@ function matchesChain(
 
   if (combinator === "adjacent") {
     const sibling = node.previousSiblingNode
-    if (sibling === null) return "no-match"
+    if (sibling === null) return SelectorMatchResult.NoMatch
     perf.ancestryChecks++
     const compoundResult = matchesCompound(sibling, targetCompound)
-    if (compoundResult === "no-match") return "no-match"
+    if (compoundResult === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
     if (isFinal) return compoundResult
     const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger, fileElementIndex)
     return mergeMatchResults(compoundResult, chainResult)
@@ -308,28 +308,28 @@ function matchesChain(
     while (sibling !== null) {
       perf.ancestryChecks++
       const compoundResult = matchesCompound(sibling, targetCompound)
-      if (compoundResult !== "no-match") {
+      if (compoundResult !== SelectorMatchResult.NoMatch) {
         if (isFinal) return compoundResult
         const chainResult = matchesChain(matcher, sibling, nextIndex, perf, fileRootElements, logger, fileElementIndex)
-        if (chainResult !== "no-match") return mergeMatchResults(compoundResult, chainResult)
+        if (chainResult !== SelectorMatchResult.NoMatch) return mergeMatchResults(compoundResult, chainResult)
       }
       sibling = sibling.previousSiblingNode
     }
-    return "no-match"
+    return SelectorMatchResult.NoMatch
   }
 
   // Descendant combinator — walk ancestor chain
-  let bestResult: SelectorMatchResult = "no-match"
+  let bestResult: SelectorMatchResult = SelectorMatchResult.NoMatch
   let ancestor = node.parentElementNode
   while (ancestor !== null) {
     perf.ancestryChecks++
     const compoundResult = matchesCompound(ancestor, targetCompound)
-    if (compoundResult !== "no-match") {
+    if (compoundResult !== SelectorMatchResult.NoMatch) {
       if (isFinal) return compoundResult
       const chainResult = matchesChain(matcher, ancestor, nextIndex, perf, fileRootElements, logger, fileElementIndex)
-      if (chainResult !== "no-match") {
+      if (chainResult !== SelectorMatchResult.NoMatch) {
         const merged = mergeMatchResults(compoundResult, chainResult)
-        if (merged === "match") return "match"
+        if (merged === SelectorMatchResult.Match) return SelectorMatchResult.Match
         bestResult = merged
       }
     }
@@ -349,19 +349,19 @@ function matchesChain(
       if (root.solidFile !== node.solidFile) continue
       perf.ancestryChecks++
       const compoundResult = matchesCompound(root, targetCompound)
-      if (logger.isLevelEnabled(Level.Trace) && compoundResult === "no-match") {
+      if (logger.isLevelEnabled(Level.Trace) && compoundResult === SelectorMatchResult.NoMatch) {
         logger.trace(`[selector-match] fallback MISS: root=${root.key} tag=${root.tagName} attrs=[${[...root.attributes.entries()].map(([k,v]) => `${k}=${v}`).join(",")}]`)
       }
-      if (compoundResult !== "no-match") {
+      if (compoundResult !== SelectorMatchResult.NoMatch) {
         if (logger.isLevelEnabled(Level.Debug)) {
           const compoundDesc = describeCompound(targetCompound)
           logger.debug(`[selector-match] fallback HIT: node=${node.key} tag=${node.tagName} matched root=${root.key} tag=${root.tagName} compound=${compoundDesc} isFinal=${isFinal}`)
         }
         if (isFinal) return compoundResult
         const chainResult = matchesChain(matcher, root, nextIndex, perf, fileRootElements, logger, fileElementIndex)
-        if (chainResult !== "no-match") {
+        if (chainResult !== SelectorMatchResult.NoMatch) {
           const merged = mergeMatchResults(compoundResult, chainResult)
-          if (merged === "match") return "match"
+          if (merged === SelectorMatchResult.Match) return SelectorMatchResult.Match
           bestResult = merged
         }
       }
@@ -374,9 +374,9 @@ function matchesChain(
   // file-root elements (e.g. it lives inside a non-transparent wrapper like
   // createContext().Provider), use the per-file dispatch key index for O(1)
   // lookup of candidate elements that could match the ancestor compound.
-  // A match on a non-root element returns "conditional": the ancestor compound
+  // A match on a non-root element returns Conditional: the ancestor compound
   // exists in the same file but static descent cannot be confirmed.
-  if (fileElementIndex !== null && bestResult === "no-match") {
+  if (fileElementIndex !== null && bestResult === SelectorMatchResult.NoMatch) {
     const candidates = resolveCompoundCandidates(fileElementIndex, targetCompound)
     if (candidates !== null) {
       for (let r = 0; r < candidates.length; r++) {
@@ -385,12 +385,12 @@ function matchesChain(
         if (elem === node) continue
         perf.ancestryChecks++
         const compoundResult = matchesCompound(elem, targetCompound)
-        if (compoundResult !== "no-match") {
+        if (compoundResult !== SelectorMatchResult.NoMatch) {
           if (logger.isLevelEnabled(Level.Debug)) {
             const compoundDesc = describeCompound(targetCompound)
             logger.debug(`[selector-match] indexed fallback HIT: node=${node.key} tag=${node.tagName} matched elem=${elem.key} tag=${elem.tagName} compound=${compoundDesc}`)
           }
-          bestResult = "conditional"
+          bestResult = SelectorMatchResult.Conditional
           break
         }
       }
@@ -400,11 +400,11 @@ function matchesChain(
   return bestResult
 }
 
-/** Merge two match results — "conditional" if either is conditional, "no-match" if either is. */
+/** Merge two match results — Conditional if either is conditional, NoMatch if either is. */
 function mergeMatchResults(a: SelectorMatchResult, b: SelectorMatchResult): SelectorMatchResult {
-  if (a === "no-match" || b === "no-match") return "no-match"
-  if (a === "conditional" || b === "conditional") return "conditional"
-  return "match"
+  if (a === SelectorMatchResult.NoMatch || b === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
+  if (a === SelectorMatchResult.Conditional || b === SelectorMatchResult.Conditional) return SelectorMatchResult.Conditional
+  return SelectorMatchResult.Match
 }
 
 function describeCompound(compound: CompiledSelectorCompound): string {
@@ -445,17 +445,17 @@ function resolveCompoundCandidates(
 }
 
 function matchesCompound(node: LayoutElementNode, compound: CompiledSelectorCompound): SelectorMatchResult {
-  if (compound.tagName !== null && node.tagName !== compound.tagName) return "no-match"
+  if (compound.tagName !== null && node.tagName !== compound.tagName) return SelectorMatchResult.NoMatch
 
   if (compound.idValue !== null) {
     const id = node.attributes.get("id")
-    if (id !== compound.idValue) return "no-match"
+    if (id !== compound.idValue) return SelectorMatchResult.NoMatch
   }
 
-  if (!matchesRequiredClasses(compound.classes, node.classTokenSet)) return "no-match"
+  if (!matchesRequiredClasses(compound.classes, node.classTokenSet)) return SelectorMatchResult.NoMatch
   const attrResult = matchesRequiredAttributes(compound.attributes, node.attributes)
-  if (attrResult === "no-match") return "no-match"
-  if (!matchesPseudoConstraints(node, compound.pseudo)) return "no-match"
+  if (attrResult === SelectorMatchResult.NoMatch) return SelectorMatchResult.NoMatch
+  if (!matchesPseudoConstraints(node, compound.pseudo)) return SelectorMatchResult.NoMatch
 
   return attrResult
 }
@@ -488,7 +488,7 @@ function matchesPseudoConstraints(node: LayoutElementNode, pseudo: CompoundPseud
     for (let j = 0; j < group.length; j++) {
       const compound = group[j]
       if (compound === undefined) continue
-      if (matchesCompound(node, compound) === "no-match") continue
+      if (matchesCompound(node, compound) === SelectorMatchResult.NoMatch) continue
       matched = true
       break
     }
@@ -503,7 +503,7 @@ function matchesPseudoConstraints(node: LayoutElementNode, pseudo: CompoundPseud
     for (let j = 0; j < group.length; j++) {
       const compound = group[j]
       if (compound === undefined) continue
-      if (matchesCompound(node, compound) === "no-match") continue
+      if (matchesCompound(node, compound) === SelectorMatchResult.NoMatch) continue
       return false
     }
   }
@@ -1333,30 +1333,30 @@ function matchesRequiredAttributes(
   required: readonly SelectorAttributeConstraint[],
   actual: ReadonlyMap<string, string | null>,
 ): SelectorMatchResult {
-  if (required.length === 0) return "match"
+  if (required.length === 0) return SelectorMatchResult.Match
 
   let hasConditional = false
 
   for (let i = 0; i < required.length; i++) {
     const constraint = required[i]
     if (constraint === undefined) continue
-    if (!actual.has(constraint.name)) return "no-match"
+    if (!actual.has(constraint.name)) return SelectorMatchResult.NoMatch
     if (constraint.operator === "exists") continue
 
     const actualValue = actual.get(constraint.name)
-    if (actualValue === undefined) return "no-match"
+    if (actualValue === undefined) return SelectorMatchResult.NoMatch
     // Dynamic attribute value (null) — the runtime value COULD match.
     // Record as conditional rather than rejecting the entire selector.
     if (actualValue === null) {
       hasConditional = true
       continue
     }
-    if (constraint.value === null) return "no-match"
+    if (constraint.value === null) return SelectorMatchResult.NoMatch
     if (matchesAttributeValue(actualValue, constraint)) continue
-    return "no-match"
+    return SelectorMatchResult.NoMatch
   }
 
-  return hasConditional ? "conditional" : "match"
+  return hasConditional ? SelectorMatchResult.Conditional : SelectorMatchResult.Match
 }
 
 function matchesAttributeValue(

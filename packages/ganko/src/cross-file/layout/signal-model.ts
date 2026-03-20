@@ -63,19 +63,23 @@ export const enum LayoutSignalGuard { Unconditional = 0, Conditional = 1 }
 
 export const enum LayoutSignalUnit { Px = 0, Unitless = 1, Keyword = 2, Unknown = 3 }
 
+export const enum SignalValueKind { Known = 0, Unknown = 1 }
+
+export const enum SignalQuality { Exact = 0, Estimated = 1 }
+
 export interface LayoutKnownSignalValue {
-  readonly kind: "known"
+  readonly kind: SignalValueKind.Known
   readonly name: LayoutSignalName
   readonly normalized: string
   readonly source: LayoutSignalSource
   readonly guard: LayoutRuleGuard
   readonly unit: LayoutSignalUnit
   readonly px: number | null
-  readonly quality: "exact" | "estimated"
+  readonly quality: SignalQuality
 }
 
 export interface LayoutUnknownSignalValue {
-  readonly kind: "unknown"
+  readonly kind: SignalValueKind.Unknown
   readonly name: LayoutSignalName
   readonly source: LayoutSignalSource | null
   readonly guard: LayoutRuleGuard

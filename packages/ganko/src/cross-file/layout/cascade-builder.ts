@@ -16,7 +16,7 @@ import type {
 import type { LayoutPerfStatsMutable } from "./perf"
 import { LayoutSignalGuard, LayoutSignalSource, type LayoutSignalName } from "./signal-model"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-normalization"
-import { selectorMatchesLayoutElement, type FileElementIndex } from "./selector-match"
+import { selectorMatchesLayoutElement, SelectorMatchResult, type FileElementIndex } from "./selector-match"
 import type { LayoutRuleGuard, LayoutGuardConditionProvenance } from "./guard-model"
 import type { SelectorBuildMetadata } from "./selector-dispatch"
 import { layoutOffsetSignals, parseOffsetPx } from "./offset-baseline"
@@ -133,13 +133,13 @@ export function appendMatchingEdgesFromSelectorIds(
     }
 
     const matchResult = selectorMatchesLayoutElement(metadata.matcher, node, ctx.perf, fileRoots, ctx.logger, fileElementIndex)
-    if (matchResult === "no-match") continue
+    if (matchResult === SelectorMatchResult.NoMatch) continue
 
     const edge: LayoutMatchEdge = {
       selectorId: selector.id,
       specificityScore: selector.specificityScore,
       sourceOrder: selector.rule.sourceOrder,
-      conditionalMatch: matchResult === "conditional",
+      conditionalMatch: matchResult === SelectorMatchResult.Conditional,
     }
     applies.push(edge)
     ctx.perf.matchEdgesCreated++

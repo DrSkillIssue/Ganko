@@ -4,6 +4,7 @@ import { CONTROL_ELEMENT_TAGS, INTRINSIC_REPLACED_TAGS } from "./util"
 import {
   ContentCompositionClassification,
   LayoutTextualContentState,
+  SignalValueKind,
   type ContentCompositionFingerprint,
   type InlineReplacedKind,
   type LayoutSignalName,
@@ -254,7 +255,7 @@ function checkHeightContributions(
     if (!signalName) continue
     const signal = snapshot.signals.get(signalName)
     if (!signal) continue
-    if (signal.kind !== "known") continue
+    if (signal.kind !== SignalValueKind.Known) continue
     if (signal.px !== null && signal.px > 0) {
       state.hasHeightContributingDescendant = true
       return
@@ -268,7 +269,7 @@ function checkVerticalAlignMitigation(
 ): void {
   const verticalAlign = snapshot.signals.get("vertical-align")
   if (!verticalAlign) return
-  if (verticalAlign.kind !== "known") return
+  if (verticalAlign.kind !== SignalValueKind.Known) return
   if (VERTICAL_ALIGN_MITIGATIONS.has(verticalAlign.normalized)) {
     state.hasVerticalAlignMitigation = true
   }

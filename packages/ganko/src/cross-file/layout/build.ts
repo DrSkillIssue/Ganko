@@ -28,6 +28,8 @@ import {
   EvidenceValueKind,
   LayoutSignalGuard,
   LayoutTextualContentState,
+  SignalQuality,
+  SignalValueKind,
   type HotNormalizedSignalEvidence,
   type HotNumericSignalEvidence,
   type LayoutSignalName,
@@ -340,7 +342,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
       else elementsByTagName.set(node.tagName, [node])
     }
     for (const [signal, value] of snapshot.signals) {
-      if (value.kind !== "known") continue
+      if (value.kind !== SignalValueKind.Known) continue
       let byValue = elementsByKnownSignalValue.get(signal)
       if (!byValue) {
         byValue = new Map<string, LayoutElementNode[]>()
@@ -376,7 +378,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 
     const positionSignal = snapshot.signals.get("position")
     const isPositioned = positionSignal !== undefined
-      && positionSignal.kind === "known"
+      && positionSignal.kind === SignalValueKind.Known
       && positionSignal.normalized !== "static"
     if (isPositioned) {
       positionedAncestorByKey.set(node.key, { key: node.key, hasReservedSpace: reservedSpace.hasReservedSpace })
@@ -551,7 +553,7 @@ const ABSENT_NORMALIZED: HotNormalizedSignalEvidence = Object.freeze({
 })
 
 function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
-  if (signal.kind !== "known") {
+  if (signal.kind !== SignalValueKind.Known) {
     return {
       present: true,
       value: null,
@@ -563,12 +565,12 @@ function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
     value: signal.px,
     kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
-      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+      : signal.quality === SignalQuality.Estimated ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
 }
 
 function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence {
-  if (signal.kind !== "known") {
+  if (signal.kind !== SignalValueKind.Known) {
     return {
       present: true,
       value: null,
@@ -580,7 +582,7 @@ function toHotNormalized(signal: LayoutSignalValue): HotNormalizedSignalEvidence
     value: signal.normalized,
     kind: signal.guard.kind === LayoutSignalGuard.Conditional
       ? EvidenceValueKind.Conditional
-      : signal.quality === "estimated" ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
+      : signal.quality === SignalQuality.Estimated ? EvidenceValueKind.Interval : EvidenceValueKind.Exact,
   }
 }
 
@@ -695,13 +697,13 @@ function hasDeclaredDimension(
 ): boolean {
   const signal = snapshot.signals.get(property)
   if (!signal) return false
-  if (signal.kind === "known") {
+  if (signal.kind === SignalValueKind.Known) {
     if (signal.px !== null) return signal.px > 0
     const normalized = signal.normalized.trim().toLowerCase()
     if (normalized.length === 0) return false
     return !isNonReservingDimension(normalized)
   }
-  if (signal.kind === "unknown") {
+  if (signal.kind === SignalValueKind.Unknown) {
     return signal.source !== null
   }
   return false
@@ -709,7 +711,7 @@ function hasDeclaredDimension(
 
 function isBlockLevelDisplay(snapshot: LayoutSignalSnapshot): boolean {
   const signal = snapshot.signals.get("display")
-  if (!signal || signal.kind !== "known") return false
+  if (!signal || signal.kind !== SignalValueKind.Known) return false
   return BLOCK_LEVEL_DISPLAY_VALUES.has(signal.normalized)
 }
 
@@ -718,12 +720,12 @@ function hasUsableAspectRatio(snapshot: LayoutSignalSnapshot): boolean {
   if (!signal) return false
   if (signal.guard.kind !== LayoutSignalGuard.Unconditional) return false
 
-  if (signal.kind === "unknown") {
+  if (signal.kind === SignalValueKind.Unknown) {
     return false
   }
 
   let normalized = ""
-  if (signal.kind === "known") {
+  if (signal.kind === SignalValueKind.Known) {
     normalized = signal.normalized.trim().toLowerCase()
   }
 
@@ -741,10 +743,10 @@ function computeScrollContainerFact(snapshot: LayoutSignalSnapshot): LayoutScrol
   const overflowSignal = snapshot.signals.get("overflow")
   const overflowYSignal = snapshot.signals.get("overflow-y")
 
-  const overflow = overflowSignal && overflowSignal.kind === "known"
+  const overflow = overflowSignal && overflowSignal.kind === SignalValueKind.Known
     ? overflowSignal.normalized
     : null
-  const overflowY = overflowYSignal && overflowYSignal.kind === "known"
+  const overflowY = overflowYSignal && overflowYSignal.kind === SignalValueKind.Known
     ? overflowYSignal.normalized
     : null
 
@@ -805,7 +807,7 @@ function toScrollAxis(x: boolean, y: boolean): LayoutScrollAxis {
 
 function computeFlowParticipationFact(snapshot: LayoutSignalSnapshot): LayoutFlowParticipationFact {
   const signal = snapshot.signals.get("position")
-  if (!signal || signal.kind !== "known") {
+  if (!signal || signal.kind !== SignalValueKind.Known) {
     return {
       inFlow: true,
       position: null,
@@ -849,10 +851,10 @@ function buildContextIndex(
       const displaySignal = snapshot.signals.get("display")
       const flexDirSignal = snapshot.signals.get("flex-direction")
       const displayDesc = displaySignal
-        ? `${displaySignal.kind}:${displaySignal.kind === "known" ? displaySignal.normalized : "?"}(guard=${displaySignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        ? `${displaySignal.kind}:${displaySignal.kind === SignalValueKind.Known ? displaySignal.normalized : "?"}(guard=${displaySignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
         : "absent"
       const flexDirDesc = flexDirSignal
-        ? `${flexDirSignal.kind}:${flexDirSignal.kind === "known" ? flexDirSignal.normalized : "?"}(guard=${flexDirSignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
+        ? `${flexDirSignal.kind}:${flexDirSignal.kind === SignalValueKind.Known ? flexDirSignal.normalized : "?"}(guard=${flexDirSignal.guard.kind === LayoutSignalGuard.Conditional ? "conditional" : "unconditional"})`
         : "absent"
       logger.trace(
         `[context] parent=${parent.key} tag=${parent.tagName ?? "null"} children=${children.length}`

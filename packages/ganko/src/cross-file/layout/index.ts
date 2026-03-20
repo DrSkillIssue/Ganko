@@ -35,6 +35,8 @@ export {
   LayoutSignalUnit,
   LayoutTextualContentState,
   SignalConflictValue,
+  SignalQuality,
+  SignalValueKind,
 } from "./signal-model"
 export type {
   AlignmentCase,

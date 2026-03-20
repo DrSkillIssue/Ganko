@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest"
 import { isLayoutHidden } from "../../src/cross-file/layout/signal-access"
 import type { LayoutElementNode } from "../../src/cross-file/layout/graph"
-import { LayoutSignalGuard, LayoutSignalSource, LayoutSignalUnit, LayoutTextualContentState, type LayoutSignalSnapshot, type LayoutKnownSignalValue, type LayoutSignalName } from "../../src/cross-file/layout/signal-model"
+import { LayoutSignalGuard, LayoutSignalSource, LayoutSignalUnit, LayoutTextualContentState, SignalQuality, SignalValueKind, type LayoutSignalSnapshot, type LayoutKnownSignalValue, type LayoutSignalName } from "../../src/cross-file/layout/signal-model"
 
 function makeNode(overrides: Partial<{
   attributes: ReadonlyMap<string, string | null>
@@ -42,14 +42,14 @@ function makeNode(overrides: Partial<{
 
 function makeSignal(name: LayoutSignalName, normalized: string): LayoutKnownSignalValue {
   return {
-    kind: "known",
+    kind: SignalValueKind.Known,
     name,
     normalized,
     source: LayoutSignalSource.Selector,
     guard: { kind: LayoutSignalGuard.Unconditional, conditions: [], key: "always" as const },
     unit: LayoutSignalUnit.Keyword,
     px: null,
-    quality: "exact",
+    quality: SignalQuality.Exact,
   }
 }
 

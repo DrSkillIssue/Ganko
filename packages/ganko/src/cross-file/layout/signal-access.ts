@@ -1,6 +1,8 @@
 import {
   EvidenceValueKind,
   LayoutSignalGuard,
+  SignalQuality,
+  SignalValueKind,
   type EvidenceWitness,
   type LayoutKnownSignalValue,
   type LayoutSignalName,
@@ -75,13 +77,13 @@ export function readKnownSignalWithGuard(
 ): LayoutKnownSignalValue | null {
   const value = snapshot.signals.get(name)
   if (!value) return null
-  if (value.kind !== "known") return null
+  if (value.kind !== SignalValueKind.Known) return null
   return value
 }
 
 function toEvidenceKind(value: LayoutKnownSignalValue): EvidenceValueKind {
   if (value.guard.kind === LayoutSignalGuard.Conditional) return EvidenceValueKind.Conditional
-  if (value.quality === "estimated") return EvidenceValueKind.Interval
+  if (value.quality === SignalQuality.Estimated) return EvidenceValueKind.Interval
   return EvidenceValueKind.Exact
 }
 
@@ -97,7 +99,7 @@ export function readNumericSignalEvidence(
     }
   }
 
-  if (value.kind !== "known") {
+  if (value.kind !== SignalValueKind.Known) {
     if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
@@ -129,7 +131,7 @@ export function readNormalizedSignalEvidence(
     }
   }
 
-  if (value.kind !== "known") {
+  if (value.kind !== SignalValueKind.Known) {
     if (value.guard.kind === LayoutSignalGuard.Conditional) {
       return {
         value: null,
