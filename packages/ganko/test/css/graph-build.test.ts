@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CSSPlugin } from "../../src";
 import { buildGraph, buildGraphMultiple } from "./test-utils";
-import { hasParseErrors } from "../../src/css/queries";
 import { hasFlag, REF_IS_RESOLVED } from "../../src/css/entities";
 
 describe("CSSPlugin.build() integration", () => {
@@ -235,7 +234,7 @@ describe("CSSPlugin.build() integration", () => {
         .button { color: red
       `);
 
-      expect(hasParseErrors(graph)).toBe(true);
+      expect(graph.parseErrors.length > 0).toBe(true);
       expect(graph.parseErrors.length).toBeGreaterThan(0);
     });
   });

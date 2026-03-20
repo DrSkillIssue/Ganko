@@ -576,14 +576,11 @@ export class CSSGraph {
    */
   buildDerivedIndexes(): void {
     this.buildContainingMediaStacks();
-    this.buildKeyframeIndex();
+    this.buildKeyframeIndexes();
     this.buildContainerNameIndexes();
     this.buildMultiDeclarationProperties();
-    this.buildKeyframeDeclarations();
-    this.buildKeyframeLayoutMutationsByName();
     this.buildLayoutPropertiesByClassToken();
-    this.buildFontFamilyUsageByRule();
-    this.buildFontFaceDescriptorsByFamily();
+    this.buildFontIndexes();
   }
 
   private buildContainingMediaStacks(): void {
@@ -600,7 +597,7 @@ export class CSSGraph {
     }
   }
 
-  private buildKeyframeIndex(): void {
+  private buildKeyframeIndexes(): void {
     const IGNORED = new Set([...CSS_WIDE_KEYWORDS, "none"]);
 
     for (let i = 0; i < this.keyframes.length; i++) {
@@ -623,6 +620,57 @@ export class CSSGraph {
         if (this.knownKeyframeNames.has(name)) continue;
         this.unresolvedAnimationRefs.push({ declaration: d, name });
       }
+    }
+
+    const byAnimationByProperty = new Map<string, Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>>();
+
+    for (let i = 0; i < this.declarations.length; i++) {
+      const d = this.declarations[i];
+      if (!d) continue;
+      const rule = d.rule;
+      if (!rule) continue;
+      const parent = rule.parent;
+      if (!parent) continue;
+      if (parent.kind === "rule") continue;
+      if (parent.kind !== "keyframes") continue;
+      this.keyframeDeclarations.push(d);
+
+      const property = d.property.toLowerCase();
+      if (!LAYOUT_ANIMATION_MUTATION_PROPERTIES.has(property)) continue;
+
+      const animationName = normalizeAnimationName(parent.params);
+      if (!animationName) continue;
+
+      let byProperty = byAnimationByProperty.get(animationName);
+      if (!byProperty) {
+        byProperty = new Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>();
+        byAnimationByProperty.set(animationName, byProperty);
+      }
+
+      let bucket = byProperty.get(property);
+      if (!bucket) {
+        bucket = { values: new Set<string>(), declarations: [] };
+        byProperty.set(property, bucket);
+      }
+
+      bucket.values.add(normalizeCssValue(d.value));
+      bucket.declarations.push(d);
+    }
+
+    for (const [animationName, byProperty] of byAnimationByProperty) {
+      const mutations: KeyframeLayoutMutation[] = [];
+
+      for (const [property, bucket] of byProperty) {
+        if (bucket.values.size <= 1) continue;
+        mutations.push({
+          property,
+          values: [...bucket.values],
+          declarations: bucket.declarations,
+        });
+      }
+
+      if (mutations.length === 0) continue;
+      this.keyframeLayoutMutationsByName.set(animationName, mutations);
     }
   }
 
@@ -685,70 +733,6 @@ export class CSSGraph {
     }
   }
 
-  /**
-   * Collect declarations whose parent rule is inside a @keyframes block.
-   */
-  private buildKeyframeDeclarations(): void {
-    for (let i = 0; i < this.declarations.length; i++) {
-      const d = this.declarations[i];
-      if (!d) continue;
-      const rule = d.rule;
-      if (!rule) continue;
-      const parent = rule.parent;
-      if (!parent) continue;
-      if (parent.kind === "rule") continue;
-      if (parent.kind !== "keyframes") continue;
-      this.keyframeDeclarations.push(d);
-    }
-  }
-
-  private buildKeyframeLayoutMutationsByName(): void {
-    const byAnimationByProperty = new Map<string, Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>>();
-
-    for (let i = 0; i < this.keyframeDeclarations.length; i++) {
-      const declaration = this.keyframeDeclarations[i];
-      if (!declaration) continue;
-      const rule = declaration.rule;
-      if (!rule || rule.parent === null || rule.parent.kind !== "keyframes") continue;
-
-      const property = declaration.property.toLowerCase();
-      if (!LAYOUT_ANIMATION_MUTATION_PROPERTIES.has(property)) continue;
-
-      const animationName = normalizeAnimationName(rule.parent.params);
-      if (!animationName) continue;
-
-      let byProperty = byAnimationByProperty.get(animationName);
-      if (!byProperty) {
-        byProperty = new Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>();
-        byAnimationByProperty.set(animationName, byProperty);
-      }
-
-      let bucket = byProperty.get(property);
-      if (!bucket) {
-        bucket = { values: new Set<string>(), declarations: [] };
-        byProperty.set(property, bucket);
-      }
-
-      bucket.values.add(normalizeCssValue(declaration.value));
-      bucket.declarations.push(declaration);
-    }
-
-    for (const [animationName, byProperty] of byAnimationByProperty) {
-      const mutations: KeyframeLayoutMutation[] = [];
-
-      for (const [property, bucket] of byProperty) {
-        if (bucket.values.size <= 1) continue;
-        mutations.push({
-          property,
-          values: [...bucket.values],
-          declarations: bucket.declarations,
-        });
-      }
-
-      if (mutations.length === 0) continue;
-      this.keyframeLayoutMutationsByName.set(animationName, mutations);
-    }
-  }
 
   private buildLayoutPropertiesByClassToken(): void {
     const byClass = new Map<string, Set<string>>();
@@ -785,7 +769,7 @@ export class CSSGraph {
     }
   }
 
-  private buildFontFamilyUsageByRule(): void {
+  private buildFontIndexes(): void {
     const declarations = this.declarationsForProperties(...FONT_LAYOUT_PROPERTIES);
 
     for (let i = 0; i < declarations.length; i++) {
@@ -817,9 +801,7 @@ export class CSSGraph {
       }
       this.usedFontFamiliesByRule.set(rule.id, [...merged]);
     }
-  }
 
-  private buildFontFaceDescriptorsByFamily(): void {
     const byFamily = new Map<string, FontFaceDescriptor[]>();
 
     for (let i = 0; i < this.fontFaces.length; i++) {
