@@ -1,7 +1,7 @@
 import { resolveMessage } from "../../../diagnostic"
 import { defineCSSRule } from "../../rule"
 import { emitCSSDiagnostic } from "../util"
-import type { SelectorEntity, SelectorPart } from "../../entities"
+import type { SelectorEntity } from "../../entities"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../entities"
 
 const messages = {
@@ -9,89 +9,39 @@ const messages = {
     "Lower-specificity selector `{{laterSelector}}` appears after `{{earlierSelector}}` for `{{property}}`, creating brittle cascade behavior.",
 } as const
 
-/**
- * A compound selector segment: element/class/id parts between combinators.
- * Built from the graph's pre-parsed SelectorPart[].
- */
 interface Compound {
   readonly tag: string | null
   readonly classes: readonly string[]
   readonly ids: readonly string[]
 }
 
-const UNSUPPORTED_TYPES = new Set<SelectorPart["type"]>(["attribute", "pseudo-class", "pseudo-element", "universal", "nesting"])
-
-/**
- * Group a selector entity's pre-parsed parts into compound segments.
- * Returns null if any part type is unsupported for this analysis.
- */
 function extractCompounds(selector: SelectorEntity): readonly Compound[] | null {
-  const parts = selector.parts
-  if (parts.length === 0) return null
+  const selectorCompounds = selector.compounds
+  if (selectorCompounds.length === 0) return null
 
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]
-    if (!part) continue
-    if (UNSUPPORTED_TYPES.has(part.type)) return null
+  for (let i = 0; i < selectorCompounds.length; i++) {
+    const sc = selectorCompounds[i]
+    if (!sc) continue
+    const parts = sc.parts
+    for (let j = 0; j < parts.length; j++) {
+      const part = parts[j]
+      if (!part) continue
+      const t = part.type
+      if (t === "attribute" || t === "pseudo-class" || t === "pseudo-element" || t === "universal" || t === "nesting") return null
+    }
   }
 
-  return splitIntoCompounds(selector)
-}
-
-/**
- * Split selector parts into compounds by re-grouping.
- * Each compound ends when we've consumed enough parts to reach the next combinator position.
- * Uses the raw string approach since parts don't encode combinator boundaries.
- */
-function splitIntoCompounds(selector: SelectorEntity): readonly Compound[] | null {
-  const raw = selector.raw
-  const combinators = selector.complexity.combinators
-
-  // Split by combinators in the raw string to get compound segments
-  const segments = splitRawByCombinators(raw)
-  if (!segments || segments.length !== combinators.length + 1) return null
-
   const compounds: Compound[] = []
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-    if (!seg) continue
-    const compound = parseCompoundFromParts(seg)
-    if (!compound) return null
-    compounds.push(compound)
+  for (let i = 0; i < selectorCompounds.length; i++) {
+    const sc = selectorCompounds[i]
+    if (!sc) continue
+    const ids: string[] = []
+    if (sc.idValue !== null) ids.push(sc.idValue)
+    if (!sc.tagName && sc.classes.length === 0 && ids.length === 0) return null
+    compounds.push({ tag: sc.tagName, classes: sc.classes, ids })
   }
 
   return compounds
-}
-
-const COMBINATOR_SPLIT = /\s*[>+~]\s*|\s+/
-
-function splitRawByCombinators(raw: string): readonly string[] | null {
-  const trimmed = raw.trim()
-  if (trimmed.length === 0) return null
-  const segments = trimmed.split(COMBINATOR_SPLIT).filter(s => s.length > 0)
-  return segments.length > 0 ? segments : null
-}
-
-const COMPOUND_TOKEN = /([.#]?)([_a-zA-Z][_a-zA-Z0-9-]*)/g
-
-function parseCompoundFromParts(segment: string): Compound | null {
-  let tag: string | null = null
-  const classes: string[] = []
-  const ids: string[] = []
-
-  COMPOUND_TOKEN.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = COMPOUND_TOKEN.exec(segment)) !== null) {
-    const prefix = match[1]
-    const value = match[2]
-    if (!value) continue
-    if (prefix === ".") classes.push(value)
-    else if (prefix === "#") ids.push(value)
-    else tag = value
-  }
-
-  if (!tag && classes.length === 0 && ids.length === 0) return null
-  return { tag, classes, ids }
 }
 
 function hasToken(list: readonly string[], token: string): boolean {
@@ -145,8 +95,8 @@ function isProvableDescendingPair(earlier: SelectorEntity, later: SelectorEntity
   const laterCompounds = extractCompounds(later)
   if (!laterCompounds) return false
 
-  const earlierCombinators = earlier.complexity.combinators
-  const laterCombinators = later.complexity.combinators
+  const earlierCombinators = earlier.combinators
+  const laterCombinators = later.combinators
 
   if (earlierCompounds.length !== laterCompounds.length) return false
   if (earlierCombinators.length !== laterCombinators.length) return false

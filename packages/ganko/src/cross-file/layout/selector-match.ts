@@ -1,19 +1,6 @@
-import type { CombinatorType, SelectorEntity, SelectorAttributeConstraint } from "../../css/entities"
-import {
-  CHAR_CLOSE_BRACKET,
-  CHAR_CLOSE_PAREN,
-  CHAR_COMMA,
-  CHAR_DOUBLE_QUOTE,
-  CHAR_GT,
-  CHAR_OPEN_BRACKET,
-  CHAR_OPEN_PAREN,
-  CHAR_PLUS,
-  CHAR_SINGLE_QUOTE,
-  CHAR_TILDE,
-  isHexDigit,
-  isIdentChar,
-  isWhitespace,
-} from "@drskillissue/ganko-shared"
+import type { CombinatorType, SelectorEntity, SelectorAttributeConstraint, SelectorCompound, NthPattern } from "../../css/entities"
+import { PseudoConstraintKind } from "../../css/entities"
+import { isWhitespace } from "@drskillissue/ganko-shared"
 import type { LayoutElementNode } from "./graph"
 import type { LayoutPerfStatsMutable } from "./perf"
 import type { Logger } from "@drskillissue/ganko-shared"
@@ -29,11 +16,6 @@ interface CompoundPseudoConstraints {
   readonly nthLastOfType: NthPattern | null
   readonly anyOfGroups: readonly (readonly CompiledSelectorCompound[])[]
   readonly noneOfGroups: readonly (readonly CompiledSelectorCompound[])[]
-}
-
-interface NthPattern {
-  readonly step: number
-  readonly offset: number
 }
 
 interface CompiledSelectorCompound {
@@ -64,33 +46,6 @@ export interface CompiledSelectorMatcher {
   readonly combinatorsRightToLeft: readonly CombinatorType[]
 }
 
-interface ParsedSelectorPattern {
-  readonly compounds: readonly string[]
-  readonly combinators: readonly CombinatorType[]
-}
-
-interface ParsedCompoundPart {
-  readonly type: "element" | "universal" | "id" | "class" | "attribute" | "pseudo-class"
-  readonly value: string
-  readonly raw: string
-}
-
-type ParsedPseudoConstraint =
-  | { kind: "first-child" }
-  | { kind: "last-child" }
-  | { kind: "only-child" }
-  | { kind: "nth-child"; value: NthPattern }
-  | { kind: "nth-last-child"; value: NthPattern }
-  | { kind: "nth-of-type"; value: NthPattern }
-  | { kind: "nth-last-of-type"; value: NthPattern }
-  | { kind: "matches-any"; selectors: readonly CompiledSelectorCompound[] }
-  | { kind: "matches-none"; selectors: readonly CompiledSelectorCompound[] }
-  | { kind: "ignore" }
-
-const ATTRIBUTE_EXISTS_RE = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/
-const ATTRIBUTE_CONSTRAINT_RE = /^([-_a-zA-Z][-_a-zA-Z0-9]*)\s*(=|~=|\|=|\^=|\$=|\*=)\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))(?:\s+([iIsS]))?$/
-const MAX_PSEUDO_COMPILE_DEPTH = 4
-
 const STATEFUL_PSEUDO_CLASSES = new Set<string>([
   "active",
   "checked",
@@ -115,16 +70,28 @@ const STATEFUL_PSEUDO_CLASSES = new Set<string>([
   "visited",
 ])
 
+const EMPTY_PSEUDO: CompoundPseudoConstraints = {
+  firstChild: false,
+  lastChild: false,
+  onlyChild: false,
+  nthChild: null,
+  nthLastChild: null,
+  nthOfType: null,
+  nthLastOfType: null,
+  anyOfGroups: [],
+  noneOfGroups: [],
+}
+
 export function compileSelectorMatcher(selector: SelectorEntity): CompiledSelectorMatcher | null {
-  const parsed = parseSelectorPattern(selector.raw)
-  if (parsed === null) return null
+  const selectorCompounds = selector.compounds
+  if (selectorCompounds.length === 0) return null
 
   const compoundsLeftToRight: CompiledSelectorCompound[] = []
 
-  for (let i = 0; i < parsed.compounds.length; i++) {
-    const compoundRaw = parsed.compounds[i]
-    if (compoundRaw === undefined) continue
-    const compiled = compileCompound(compoundRaw, 0)
+  for (let i = 0; i < selectorCompounds.length; i++) {
+    const sc = selectorCompounds[i]
+    if (sc === undefined) continue
+    const compiled = buildCompiledCompound(sc)
     if (compiled === null) return null
     compoundsLeftToRight.push(compiled)
   }
@@ -144,8 +111,124 @@ export function compileSelectorMatcher(selector: SelectorEntity): CompiledSelect
     },
     requirements: resolveFeatureRequirements(compoundsLeftToRight),
     compoundsRightToLeft: compoundsLeftToRight.toReversed(),
-    combinatorsRightToLeft: parsed.combinators.toReversed(),
+    combinatorsRightToLeft: selector.combinators.toReversed(),
   }
+}
+
+function buildCompiledCompound(sc: SelectorCompound): CompiledSelectorCompound | null {
+  const parts = sc.parts
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (!part) continue
+    if (part.type === "pseudo-element") return null
+  }
+
+  const pseudoConstraints = sc.pseudoClasses
+  if (pseudoConstraints.length === 0) {
+    return {
+      tagName: sc.tagName,
+      idValue: sc.idValue,
+      classes: sc.classes,
+      attributes: sc.attributes,
+      pseudo: EMPTY_PSEUDO,
+    }
+  }
+
+  let firstChild = false
+  let lastChild = false
+  let onlyChild = false
+  let nthChild: NthPattern | null = null
+  let nthLastChild: NthPattern | null = null
+  let nthOfType: NthPattern | null = null
+  let nthLastOfType: NthPattern | null = null
+  const anyOfGroups: (readonly CompiledSelectorCompound[])[] = []
+  const noneOfGroups: (readonly CompiledSelectorCompound[])[] = []
+
+  for (let i = 0; i < pseudoConstraints.length; i++) {
+    const pc = pseudoConstraints[i]
+    if (!pc) continue
+
+    if (pc.kind === PseudoConstraintKind.Simple) {
+      if (STATEFUL_PSEUDO_CLASSES.has(pc.name)) return null
+      continue
+    }
+
+    if (pc.kind === PseudoConstraintKind.FirstChild) { firstChild = true; continue }
+    if (pc.kind === PseudoConstraintKind.LastChild) { lastChild = true; continue }
+    if (pc.kind === PseudoConstraintKind.OnlyChild) { firstChild = true; lastChild = true; onlyChild = true; continue }
+
+    if (pc.kind === PseudoConstraintKind.NthChild) {
+      if (!pc.nthPattern) return null
+      nthChild = pc.nthPattern
+      continue
+    }
+    if (pc.kind === PseudoConstraintKind.NthLastChild) {
+      if (!pc.nthPattern) return null
+      nthLastChild = pc.nthPattern
+      continue
+    }
+    if (pc.kind === PseudoConstraintKind.NthOfType) {
+      if (!pc.nthPattern) return null
+      nthOfType = pc.nthPattern
+      continue
+    }
+    if (pc.kind === PseudoConstraintKind.NthLastOfType) {
+      if (!pc.nthPattern) return null
+      nthLastOfType = pc.nthPattern
+      continue
+    }
+
+    if (pc.kind === PseudoConstraintKind.MatchesAny) {
+      if (pc.nestedCompounds && pc.nestedCompounds.length > 0) {
+        const group = buildNestedGroup(pc.nestedCompounds)
+        if (group === null) return null
+        if (group.length > 0) anyOfGroups.push(group)
+      }
+      continue
+    }
+
+    if (pc.kind === PseudoConstraintKind.NoneOf) {
+      if (pc.nestedCompounds && pc.nestedCompounds.length > 0) {
+        const group = buildNestedGroup(pc.nestedCompounds)
+        if (group === null) return null
+        if (group.length > 0) noneOfGroups.push(group)
+      }
+      continue
+    }
+  }
+
+  return {
+    tagName: sc.tagName,
+    idValue: sc.idValue,
+    classes: sc.classes,
+    attributes: sc.attributes,
+    pseudo: {
+      firstChild,
+      lastChild,
+      onlyChild,
+      nthChild,
+      nthLastChild,
+      nthOfType,
+      nthLastOfType,
+      anyOfGroups,
+      noneOfGroups,
+    },
+  }
+}
+
+function buildNestedGroup(nestedCompounds: readonly SelectorCompound[][]): readonly CompiledSelectorCompound[] | null {
+  const out: CompiledSelectorCompound[] = []
+  for (let i = 0; i < nestedCompounds.length; i++) {
+    const compoundGroup = nestedCompounds[i]
+    if (!compoundGroup) continue
+    if (compoundGroup.length !== 1) continue
+    const sc = compoundGroup[0]
+    if (!sc) continue
+    const compiled = buildCompiledCompound(sc)
+    if (compiled === null) return null
+    out.push(compiled)
+  }
+  return out
 }
 
 function collectSubjectAttributeNames(subject: CompiledSelectorCompound): readonly string[] {
@@ -511,770 +594,6 @@ function matchesPseudoConstraints(node: LayoutElementNode, pseudo: CompoundPseud
   return true
 }
 
-function parseSelectorPattern(raw: string): ParsedSelectorPattern | null {
-  const compounds: string[] = []
-  const combinators: CombinatorType[] = []
-  const length = raw.length
-  let start = 0
-  let bracketDepth = 0
-  let parenDepth = 0
-  let i = 0
-
-  while (i < length) {
-    const code = raw.charCodeAt(i)
-
-    if (code === CHAR_OPEN_BRACKET) {
-      bracketDepth++
-      i++
-      continue
-    }
-
-    if (code === CHAR_CLOSE_BRACKET) {
-      if (bracketDepth > 0) bracketDepth--
-      i++
-      continue
-    }
-
-    if (code === CHAR_OPEN_PAREN) {
-      parenDepth++
-      i++
-      continue
-    }
-
-    if (code === CHAR_CLOSE_PAREN) {
-      if (parenDepth > 0) parenDepth--
-      i++
-      continue
-    }
-
-    if (bracketDepth === 0 && parenDepth === 0) {
-      if (code === CHAR_GT || code === CHAR_PLUS || code === CHAR_TILDE) {
-        const compound = raw.slice(start, i).trim()
-        if (compound.length === 0) return null
-        compounds.push(compound)
-        combinators.push(combinatorFromCode(code))
-        i++
-        while (i < length && isWhitespace(raw.charCodeAt(i))) i++
-        start = i
-        continue
-      }
-
-      if (isWhitespace(code)) {
-        const compound = raw.slice(start, i).trim()
-        if (compound.length > 0) compounds.push(compound)
-
-        while (i < length && isWhitespace(raw.charCodeAt(i))) i++
-        if (i >= length) break
-
-        const next = raw.charCodeAt(i)
-        if (next === CHAR_GT || next === CHAR_PLUS || next === CHAR_TILDE) {
-          if (compound.length === 0) return null
-          combinators.push(combinatorFromCode(next))
-          i++
-          while (i < length && isWhitespace(raw.charCodeAt(i))) i++
-          start = i
-          continue
-        }
-
-        if (compound.length > 0) combinators.push("descendant")
-        start = i
-        continue
-      }
-    }
-
-    i++
-  }
-
-  const trailing = raw.slice(start).trim()
-  if (trailing.length > 0) compounds.push(trailing)
-  if (compounds.length === 0) return null
-  if (combinators.length !== compounds.length - 1) return null
-
-  return { compounds, combinators }
-}
-
-function combinatorFromCode(code: number): CombinatorType {
-  if (code === CHAR_GT) return "child"
-  if (code === CHAR_PLUS) return "adjacent"
-  return "sibling"
-}
-
-function compileCompound(raw: string, depth: number): CompiledSelectorCompound | null {
-  if (depth > MAX_PSEUDO_COMPILE_DEPTH) return null
-
-  const parts = parseCompoundParts(raw)
-  if (parts.length === 0) return null
-
-  let tagName: string | null = null
-  let idValue: string | null = null
-  const classes: string[] = []
-  const seenClasses = new Set<string>()
-  const attributes: SelectorAttributeConstraint[] = []
-  let firstChild = false
-  let lastChild = false
-  let onlyChild = false
-  let nthChild: NthPattern | null = null
-  let nthLastChild: NthPattern | null = null
-  let nthOfType: NthPattern | null = null
-  let nthLastOfType: NthPattern | null = null
-  const anyOfGroups: (readonly CompiledSelectorCompound[])[] = []
-  const noneOfGroups: (readonly CompiledSelectorCompound[])[] = []
-
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]
-    if (part === undefined) continue
-
-    if (part.type === "element") {
-      tagName = part.value.toLowerCase()
-      continue
-    }
-
-    if (part.type === "universal") continue
-
-    if (part.type === "id") {
-      idValue = part.value
-      continue
-    }
-
-    if (part.type === "class") {
-      if (seenClasses.has(part.value)) continue
-      seenClasses.add(part.value)
-      classes.push(part.value)
-      continue
-    }
-
-    if (part.type === "attribute") {
-      const attribute = parseAttributeConstraint(part.value)
-      if (attribute === null) return null
-      attributes.push(attribute)
-      continue
-    }
-
-    if (part.type === "pseudo-class") {
-      const pseudo = parsePseudoConstraint(part.raw, depth)
-      if (pseudo === null) return null
-
-      if (pseudo.kind === "first-child") {
-        firstChild = true
-        continue
-      }
-
-      if (pseudo.kind === "last-child") {
-        lastChild = true
-        continue
-      }
-
-      if (pseudo.kind === "only-child") {
-        firstChild = true
-        lastChild = true
-        onlyChild = true
-        continue
-      }
-
-      if (pseudo.kind === "nth-child") {
-        if (nthChild !== null && !isSameNthPattern(nthChild, pseudo.value)) return null
-        nthChild = pseudo.value
-        continue
-      }
-
-      if (pseudo.kind === "nth-last-child") {
-        if (nthLastChild !== null && !isSameNthPattern(nthLastChild, pseudo.value)) return null
-        nthLastChild = pseudo.value
-        continue
-      }
-
-      if (pseudo.kind === "nth-of-type") {
-        if (nthOfType !== null && !isSameNthPattern(nthOfType, pseudo.value)) return null
-        nthOfType = pseudo.value
-        continue
-      }
-
-      if (pseudo.kind === "nth-last-of-type") {
-        if (nthLastOfType !== null && !isSameNthPattern(nthLastOfType, pseudo.value)) return null
-        nthLastOfType = pseudo.value
-        continue
-      }
-
-      if (pseudo.kind === "ignore") continue
-
-      if (pseudo.kind === "matches-any") {
-        anyOfGroups.push(pseudo.selectors)
-        continue
-      }
-
-      noneOfGroups.push(pseudo.selectors)
-      continue
-    }
-
-    return null
-  }
-
-  if (firstChild && nthChild !== null && !matchesNthPattern(1, nthChild)) return null
-  if (lastChild && nthLastChild !== null && !matchesNthPattern(1, nthLastChild)) return null
-
-  return {
-    tagName,
-    idValue,
-    classes,
-    attributes,
-    pseudo: {
-      firstChild,
-      lastChild,
-      onlyChild,
-      nthChild,
-      nthLastChild,
-      nthOfType,
-      nthLastOfType,
-      anyOfGroups,
-      noneOfGroups,
-    },
-  }
-}
-
-function parseAttributeConstraint(raw: string): SelectorAttributeConstraint | null {
-  const trimmed = raw.trim()
-  const constrained = ATTRIBUTE_CONSTRAINT_RE.exec(trimmed)
-
-  if (constrained) {
-    const operatorToken = constrained[2]
-    if (operatorToken === undefined) return null
-    const operator = mapAttributeOperatorFromToken(operatorToken)
-    if (operator === null) return null
-
-    const value = constrained[3] ?? constrained[4] ?? constrained[5] ?? null
-    if (value === null) return null
-
-    const nameToken = constrained[1]
-    if (nameToken === undefined) return null
-
-    return {
-      name: nameToken.toLowerCase(),
-      operator,
-      value,
-      caseInsensitive: (constrained[6] ?? "").toLowerCase() === "i",
-    }
-  }
-
-  if (!ATTRIBUTE_EXISTS_RE.test(trimmed)) return null
-
-  return {
-    name: trimmed.toLowerCase(),
-    operator: "exists",
-    value: null,
-    caseInsensitive: false,
-  }
-}
-
-function mapAttributeOperatorFromToken(
-  operator: string,
-): SelectorAttributeConstraint["operator"] | null {
-  if (operator === "=") return "equals"
-  if (operator === "~=") return "includes-word"
-  if (operator === "|=") return "dash-prefix"
-  if (operator === "^=") return "prefix"
-  if (operator === "$=") return "suffix"
-  if (operator === "*=") return "contains"
-  return null
-}
-
-function parsePseudoConstraint(raw: string, depth: number): ParsedPseudoConstraint | null {
-  const trimmed = raw.trim()
-  const normalized = trimmed.toLowerCase()
-
-  if (normalized === ":first-child") return { kind: "first-child" }
-  if (normalized === ":last-child") return { kind: "last-child" }
-  if (normalized === ":only-child") return { kind: "only-child" }
-
-  const nthChild = parseNthPseudoArgument(trimmed, "nth-child")
-  if (nthChild !== undefined) {
-    if (nthChild === null) return null
-    return { kind: "nth-child", value: nthChild }
-  }
-
-  const nthLastChild = parseNthPseudoArgument(trimmed, "nth-last-child")
-  if (nthLastChild !== undefined) {
-    if (nthLastChild === null) return null
-    return { kind: "nth-last-child", value: nthLastChild }
-  }
-
-  const nthOfType = parseNthPseudoArgument(trimmed, "nth-of-type")
-  if (nthOfType !== undefined) {
-    if (nthOfType === null) return null
-    return { kind: "nth-of-type", value: nthOfType }
-  }
-
-  const nthLastOfType = parseNthPseudoArgument(trimmed, "nth-last-of-type")
-  if (nthLastOfType !== undefined) {
-    if (nthLastOfType === null) return null
-    return { kind: "nth-last-of-type", value: nthLastOfType }
-  }
-
-  const name = readPseudoName(normalized)
-  if (name === null) return null
-  if (STATEFUL_PSEUDO_CLASSES.has(name)) return null
-
-  if (name !== "is" && name !== "where" && name !== "not") {
-    return { kind: "ignore" }
-  }
-
-  const content = extractFunctionalPseudoContent(trimmed, name)
-  if (content === null) return null
-
-  const selectors = compileFunctionalPseudoArguments(content, depth + 1)
-  if (selectors === null || selectors.length === 0) return null
-
-  if (name === "not") {
-    return {
-      kind: "matches-none",
-      selectors,
-    }
-  }
-
-  return {
-    kind: "matches-any",
-    selectors,
-  }
-}
-
-function parseNthPseudoArgument(
-  raw: string,
-  name: "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type",
-): NthPattern | null | undefined {
-  const content = extractFunctionalPseudoContent(raw, name)
-  if (content === null) return undefined
-  return parseNthPattern(content)
-}
-
-function parseNthPattern(raw: string): NthPattern | null {
-  const normalized = raw.trim().toLowerCase().replaceAll(" ", "")
-  if (normalized.length === 0) return null
-
-  if (normalized === "odd") {
-    return { step: 2, offset: 1 }
-  }
-
-  if (normalized === "even") {
-    return { step: 2, offset: 0 }
-  }
-
-  const nIndex = normalized.indexOf("n")
-  if (nIndex === -1) {
-    const value = Number.parseInt(normalized, 10)
-    if (Number.isNaN(value)) return null
-    return { step: 0, offset: value }
-  }
-
-  const stepPart = normalized.slice(0, nIndex)
-  const offsetPart = normalized.slice(nIndex + 1)
-
-  let step: number
-  if (stepPart.length === 0 || stepPart === "+") {
-    step = 1
-  } else if (stepPart === "-") {
-    step = -1
-  } else {
-    step = Number.parseInt(stepPart, 10)
-    if (Number.isNaN(step)) return null
-  }
-
-  let offset = 0
-  if (offsetPart.length > 0) {
-    offset = Number.parseInt(offsetPart, 10)
-    if (Number.isNaN(offset)) return null
-  }
-
-  return {
-    step,
-    offset,
-  }
-}
-
-function extractFunctionalPseudoContent(raw: string, name: string): string | null {
-  const prefix = `:${name}(`
-  if (!raw.toLowerCase().startsWith(prefix)) return null
-  if (!raw.endsWith(")")) return null
-  return raw.slice(prefix.length, -1)
-}
-
-function compileFunctionalPseudoArguments(content: string, depth: number): readonly CompiledSelectorCompound[] | null {
-  if (depth > MAX_PSEUDO_COMPILE_DEPTH) return null
-
-  const args = splitTopLevelSelectorArguments(content)
-  if (args.length === 0) return null
-
-  const out: CompiledSelectorCompound[] = []
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (arg === undefined) return null
-    const raw = arg.trim()
-    if (raw.length === 0) return null
-
-    const parsed = parseSelectorPattern(raw)
-    if (parsed === null) return null
-    if (parsed.combinators.length !== 0) return null
-    if (parsed.compounds.length !== 1) return null
-
-    const compoundRaw = parsed.compounds[0]
-    if (compoundRaw === undefined) return null
-    const compiled = compileCompound(compoundRaw, depth)
-    if (compiled === null) return null
-    out.push(compiled)
-  }
-
-  return out
-}
-
-function splitTopLevelSelectorArguments(content: string): readonly string[] {
-  const out: string[] = []
-  let start = 0
-  let parenDepth = 0
-  let bracketDepth = 0
-  let quote: number | null = null
-
-  for (let i = 0; i < content.length; i++) {
-    const code = content.charCodeAt(i)
-
-    if (quote !== null) {
-      if (code === quote) quote = null
-      continue
-    }
-
-    if (code === CHAR_SINGLE_QUOTE || code === CHAR_DOUBLE_QUOTE) {
-      quote = code
-      continue
-    }
-
-    if (code === CHAR_OPEN_PAREN) {
-      parenDepth++
-      continue
-    }
-
-    if (code === CHAR_CLOSE_PAREN) {
-      if (parenDepth > 0) parenDepth--
-      continue
-    }
-
-    if (code === CHAR_OPEN_BRACKET) {
-      bracketDepth++
-      continue
-    }
-
-    if (code === CHAR_CLOSE_BRACKET) {
-      if (bracketDepth > 0) bracketDepth--
-      continue
-    }
-
-    if (code !== CHAR_COMMA) continue
-    if (parenDepth !== 0) continue
-    if (bracketDepth !== 0) continue
-
-    out.push(content.slice(start, i))
-    start = i + 1
-  }
-
-  out.push(content.slice(start))
-  return out
-}
-
-function parseCompoundParts(raw: string): readonly ParsedCompoundPart[] {
-  const trimmed = raw.trim()
-  if (trimmed.length === 0) return []
-
-  const out: ParsedCompoundPart[] = []
-  const length = trimmed.length
-  let i = 0
-  let allowsElement = true
-
-  while (i < length) {
-    const code = trimmed.charCodeAt(i)
-
-    if (code === CHAR_OPEN_BRACKET) {
-      const end = readBracketed(trimmed, i)
-      if (end === null) return []
-      const inner = trimmed.slice(i + 1, end - 1)
-      out.push({
-        type: "attribute",
-        value: inner,
-        raw: trimmed.slice(i, end),
-      })
-      i = end
-      allowsElement = false
-      continue
-    }
-
-    if (code === 35) {
-      const ident = readIdentifier(trimmed, i + 1)
-      if (ident.consumed === 0) return []
-      out.push({
-        type: "id",
-        value: ident.value,
-        raw: trimmed.slice(i, i + 1 + ident.consumed),
-      })
-      i += 1 + ident.consumed
-      allowsElement = false
-      continue
-    }
-
-    if (code === 46) {
-      const ident = readIdentifier(trimmed, i + 1)
-      if (ident.consumed === 0) return []
-      out.push({
-        type: "class",
-        value: ident.value,
-        raw: trimmed.slice(i, i + 1 + ident.consumed),
-      })
-      i += 1 + ident.consumed
-      allowsElement = false
-      continue
-    }
-
-    if (code === 58) {
-      const pseudo = readPseudo(trimmed, i)
-      if (pseudo === null) return []
-      out.push(pseudo)
-      i += pseudo.raw.length
-      allowsElement = false
-      continue
-    }
-
-    if (code === 42) {
-      out.push({
-        type: "universal",
-        value: "*",
-        raw: "*",
-      })
-      i++
-      allowsElement = false
-      continue
-    }
-
-    if (!allowsElement) return []
-
-    const ident = readIdentifier(trimmed, i)
-    if (ident.consumed === 0) return []
-    out.push({
-      type: "element",
-      value: ident.value,
-      raw: trimmed.slice(i, i + ident.consumed),
-    })
-    i += ident.consumed
-    allowsElement = false
-  }
-
-  return out
-}
-
-function readPseudo(input: string, start: number): ParsedCompoundPart | null {
-  const second = input.charCodeAt(start + 1)
-  if (second === 58) return null
-
-  let i = start + 1
-  while (i < input.length) {
-    const code = input.charCodeAt(i)
-    if (!isIdentChar(code)) break
-    i++
-  }
-
-  if (i === start + 1) return null
-  const value = input.slice(start + 1, i)
-
-  if (input.charCodeAt(i) !== CHAR_OPEN_PAREN) {
-    return {
-      type: "pseudo-class",
-      value,
-      raw: input.slice(start, i),
-    }
-  }
-
-  const end = readParenthesized(input, i)
-  if (end === null) return null
-
-  return {
-    type: "pseudo-class",
-    value,
-    raw: input.slice(start, end),
-  }
-}
-
-function readBracketed(input: string, start: number): number | null {
-  let quote: number | null = null
-  let depth = 0
-
-  for (let i = start; i < input.length; i++) {
-    const code = input.charCodeAt(i)
-
-    if (quote !== null) {
-      if (code === quote) quote = null
-      continue
-    }
-
-    if (code === CHAR_SINGLE_QUOTE || code === CHAR_DOUBLE_QUOTE) {
-      quote = code
-      continue
-    }
-
-    if (code === CHAR_OPEN_BRACKET) {
-      depth++
-      continue
-    }
-
-    if (code !== CHAR_CLOSE_BRACKET) continue
-    depth--
-    if (depth === 0) return i + 1
-    if (depth < 0) return null
-  }
-
-  return null
-}
-
-function readParenthesized(input: string, start: number): number | null {
-  let quote: number | null = null
-  let depth = 0
-
-  for (let i = start; i < input.length; i++) {
-    const code = input.charCodeAt(i)
-
-    if (quote !== null) {
-      if (code === quote) quote = null
-      continue
-    }
-
-    if (code === CHAR_SINGLE_QUOTE || code === CHAR_DOUBLE_QUOTE) {
-      quote = code
-      continue
-    }
-
-    if (code === CHAR_OPEN_PAREN) {
-      depth++
-      continue
-    }
-
-    if (code !== CHAR_CLOSE_PAREN) continue
-    depth--
-    if (depth === 0) return i + 1
-    if (depth < 0) return null
-  }
-
-  return null
-}
-
-interface IdentifierReadResult {
-  readonly value: string
-  readonly consumed: number
-}
-
-const EMPTY_IDENTIFIER: IdentifierReadResult = { value: "", consumed: 0 }
-
-/**
- * Reads a CSS identifier from the input, starting at `start`.
- *
- * Handles CSS escape sequences per CSS Syntax Level 3 §4.3.7:
- * - `\` followed by 1-6 hex digits (optionally followed by one whitespace)
- *   represents the Unicode code point.
- * - `\` followed by any non-hex, non-newline character represents that
- *   character literally (e.g. `\[` → `[`, `\]` → `]`).
- *
- * Returns the decoded identifier value and the number of raw characters consumed
- * from the input, which may differ from `value.length` when escapes are present.
- */
-function readIdentifier(input: string, start: number): IdentifierReadResult {
-  const length = input.length
-  let i = start
-  let hasEscape = false
-
-  while (i < length) {
-    const code = input.charCodeAt(i)
-
-    if (code === CHAR_BACKSLASH) {
-      if (i + 1 >= length) break
-      hasEscape = true
-      i = skipCssEscapeSequence(input, i + 1)
-      continue
-    }
-
-    if (!isIdentChar(code)) break
-    i++
-  }
-
-  const consumed = i - start
-  if (consumed === 0) return EMPTY_IDENTIFIER
-
-  if (!hasEscape) {
-    const value = input.slice(start, i)
-    return { value, consumed }
-  }
-
-  return { value: decodeCssEscapes(input, start, i), consumed }
-}
-
-const CHAR_BACKSLASH = 92
-
-/**
- * Advances past a CSS escape sequence starting AFTER the leading backslash.
- * Returns the index of the first character after the escape.
- */
-function skipCssEscapeSequence(input: string, afterBackslash: number): number {
-  const length = input.length
-  if (afterBackslash >= length) return afterBackslash
-
-  const first = input.charCodeAt(afterBackslash)
-  if (!isHexDigit(first)) return afterBackslash + 1
-
-  let end = afterBackslash + 1
-  const maxHex = Math.min(afterBackslash + 6, length)
-  while (end < maxHex && isHexDigit(input.charCodeAt(end))) end++
-
-  if (end < length && isWhitespace(input.charCodeAt(end))) end++
-  return end
-}
-
-/**
- * Decodes CSS escape sequences in a slice of the input, producing the
- * unescaped identifier string.
- */
-function decodeCssEscapes(input: string, start: number, end: number): string {
-  const parts: string[] = []
-  let i = start
-
-  while (i < end) {
-    const code = input.charCodeAt(i)
-
-    if (code !== CHAR_BACKSLASH) {
-      parts.push(String.fromCharCode(code))
-      i++
-      continue
-    }
-
-    i++
-    if (i >= end) break
-
-    const first = input.charCodeAt(i)
-    if (!isHexDigit(first)) {
-      parts.push(String.fromCharCode(first))
-      i++
-      continue
-    }
-
-    const hexStart = i
-    const maxHex = Math.min(i + 6, end)
-    while (i < maxHex && isHexDigit(input.charCodeAt(i))) i++
-
-    const codePoint = Number.parseInt(input.slice(hexStart, i), 16)
-    if (codePoint > 0 && codePoint <= 0x10FFFF) {
-      parts.push(String.fromCodePoint(codePoint))
-    }
-
-    if (i < end && isWhitespace(input.charCodeAt(i))) i++
-  }
-
-  return parts.join("")
-}
-
-function isSameNthPattern(left: NthPattern, right: NthPattern): boolean {
-  if (left.step !== right.step) return false
-  return left.offset === right.offset
-}
 
 function matchesNthPattern(index: number, pattern: NthPattern): boolean {
   if (index < 1) return false
@@ -1296,23 +615,6 @@ function matchesNthPattern(index: number, pattern: NthPattern): boolean {
   const delta = offset - index
   if (delta < 0) return false
   return delta % positiveStep === 0
-}
-
-function readPseudoName(raw: string): string | null {
-  if (!raw.startsWith(":")) return null
-
-  let index = 1
-  while (index < raw.length) {
-    const code = raw.charCodeAt(index)
-    const isUpper = code >= 65 && code <= 90
-    const isLower = code >= 97 && code <= 122
-    const isDash = code === 45
-    if (!isUpper && !isLower && !isDash) break
-    index++
-  }
-
-  if (index <= 1) return null
-  return raw.slice(1, index)
 }
 
 function matchesRequiredClasses(required: readonly string[], actual: ReadonlySet<string>): boolean {

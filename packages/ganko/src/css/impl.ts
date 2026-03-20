@@ -289,15 +289,12 @@ export class CSSGraph {
       for (let i = 0, len = this.idSelectors.length; i < len; i++) {
         const sel = this.idSelectors[i];
         if (!sel) continue;
-        const parts = sel.parts;
-        for (let j = 0, plen = parts.length; j < plen; j++) {
-          const p = parts[j];
-          if (!p) continue;
-          const t = p.type;
-          if (t === "element" || t === "class" || t === "attribute") {
-            result.push(sel);
-            break;
-          }
+        const compounds = sel.compounds;
+        if (compounds.length === 0) continue;
+        const subject = compounds[compounds.length - 1];
+        if (!subject) continue;
+        if (subject.idValue !== null && (subject.tagName !== null || subject.classes.length > 0 || subject.attributes.length > 0)) {
+          result.push(sel);
         }
       }
       this._overqualifiedSelectors = result;
@@ -381,14 +378,17 @@ export class CSSGraph {
     if (anchor.targetsCheckbox) this.selectorsTargetingCheckbox.push(selector);
     if (anchor.targetsTableCell) this.selectorsTargetingTableCell.push(selector);
 
-    const parts = selector.parts;
-    for (let j = 0; j < parts.length; j++) {
-      const part = parts[j];
-      if (!part) continue;
-      if (part.type === "class") {
-        const existing = this.classNameIndex.get(part.value);
+    const compounds = selector.compounds;
+    for (let ci = 0; ci < compounds.length; ci++) {
+      const compound = compounds[ci];
+      if (!compound) continue;
+      const cls = compound.classes;
+      for (let j = 0; j < cls.length; j++) {
+        const className = cls[j];
+        if (!className) continue;
+        const existing = this.classNameIndex.get(className);
         if (existing) existing.push(selector);
-        else this.classNameIndex.set(part.value, [selector]);
+        else this.classNameIndex.set(className, [selector]);
       }
     }
 

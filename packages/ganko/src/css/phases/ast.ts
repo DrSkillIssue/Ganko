@@ -20,7 +20,6 @@ import type {
   MediaFeature,
   Specificity,
   SelectorAnchor,
-  SelectorAttributeConstraint,
   VariableScope,
   CascadePosition,
   FunctionCallInfo,
@@ -38,7 +37,6 @@ import {
   setFlag,
 } from "../entities";
 import {
-  parseSelector,
   parseSelectorList,
   parseSelectorComplete,
 } from "../parser/selector";
@@ -49,13 +47,6 @@ import {
   CHAR_HYPHEN,
   CHAR_DOLLAR,
   CHAR_EXCLAIM,
-  CHAR_OPEN_PAREN,
-  CHAR_CLOSE_PAREN,
-  CHAR_OPEN_BRACKET,
-  CHAR_CLOSE_BRACKET,
-  CHAR_GT,
-  CHAR_PLUS,
-  CHAR_TILDE,
   CHAR_I,
   CHAR_M,
   CHAR_P,
@@ -76,8 +67,6 @@ import {
 } from "@drskillissue/ganko-shared";
 
 const CSS_IDENT = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/
-const ATTRIBUTE_EXISTS_RE = /^[-_a-zA-Z][-_a-zA-Z0-9]*$/
-const ATTRIBUTE_CONSTRAINT_RE = /^([-_a-zA-Z][-_a-zA-Z0-9]*)\s*(=|~=|\|=|\^=|\$=|\*=)\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))(?:\s+([iIsS]))?$/
 
 interface NestingContext {
   readonly parentRule: RuleEntity | null;
@@ -776,170 +765,6 @@ function getRuleBlockOffsets(file: FileEntity, startOffset: number, endOffset: n
   }
 }
 
-function extractSubjectCompound(raw: string): string {
-  const len = raw.length
-  if (len === 0) return ""
-
-  let end = len - 1
-  while (end >= 0 && isWhitespace(raw.charCodeAt(end))) end--
-  if (end < 0) return ""
-
-  let parenDepth = 0
-  let bracketDepth = 0
-
-  for (let i = end; i >= 0; i--) {
-    const code = raw.charCodeAt(i)
-
-    if (code === CHAR_CLOSE_PAREN) {
-      parenDepth++
-      continue
-    }
-    if (code === CHAR_OPEN_PAREN) {
-      if (parenDepth > 0) parenDepth--
-      continue
-    }
-    if (code === CHAR_CLOSE_BRACKET) {
-      bracketDepth++
-      continue
-    }
-    if (code === CHAR_OPEN_BRACKET) {
-      if (bracketDepth > 0) bracketDepth--
-      continue
-    }
-    if (parenDepth > 0 || bracketDepth > 0) continue
-
-    if (code === CHAR_GT || code === CHAR_PLUS || code === CHAR_TILDE) {
-      return raw.slice(i + 1, end + 1).trim()
-    }
-
-    if (!isWhitespace(code)) continue
-    return raw.slice(i + 1, end + 1).trim()
-  }
-
-  return raw.slice(0, end + 1).trim()
-}
-
-function parseAnchorAttributes(parts: readonly { type: string; value: string }[]): SelectorAttributeConstraint[] {
-  const out: SelectorAttributeConstraint[] = []
-
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (!part) continue;
-    if (part.type !== "attribute") continue
-
-    const trimmed = part.value.trim()
-    const constrained = ATTRIBUTE_CONSTRAINT_RE.exec(trimmed)
-    if (constrained) {
-      const opToken = constrained[2];
-      if (!opToken) continue;
-      const operator = mapAttributeOperatorFromToken(opToken)
-      if (operator === null) continue
-      const value = constrained[3] ?? constrained[4] ?? constrained[5] ?? null
-      if (value === null) continue
-      const attrName = constrained[1];
-      if (!attrName) continue;
-
-      out.push({
-        name: attrName.toLowerCase(),
-        operator,
-        value,
-        caseInsensitive: (constrained[6] ?? "").toLowerCase() === "i",
-      })
-      continue
-    }
-
-    if (!ATTRIBUTE_EXISTS_RE.test(trimmed)) continue
-    out.push({
-      name: trimmed.toLowerCase(),
-      operator: "exists",
-      value: null,
-      caseInsensitive: false,
-    })
-  }
-
-  return out
-}
-
-function mapAttributeOperatorFromToken(
-  operator: string,
-): SelectorAttributeConstraint["operator"] | null {
-  if (operator === "=") return "equals"
-  if (operator === "~=") return "includes-word"
-  if (operator === "|=") return "dash-prefix"
-  if (operator === "^=") return "prefix"
-  if (operator === "$=") return "suffix"
-  if (operator === "*=") return "contains"
-  return null
-}
-
-function buildSelectorAnchor(
-  raw: string,
-  parts: readonly { type: string; value: string }[],
-  combinators: readonly string[],
-): SelectorAnchor {
-  const subjectCompound = extractSubjectCompound(raw)
-  const subjectParts = parseSelector(subjectCompound)
-
-  let subjectTag: string | null = null
-  const classes: string[] = []
-  const seenClasses = new Set<string>()
-
-  for (let i = 0; i < subjectParts.length; i++) {
-    const part = subjectParts[i];
-    if (!part) continue;
-    if (part.type === "element") {
-      subjectTag = part.value.toLowerCase()
-      continue
-    }
-    if (part.type !== "class") continue
-    const cls = part.value
-    if (seenClasses.has(cls)) continue
-    seenClasses.add(cls)
-    classes.push(cls)
-  }
-
-  const attributes = parseAnchorAttributes(subjectParts)
-  const includesDescendantCombinator = combinators.includes("descendant")
-
-  let includesPseudoSelector = false
-  let includesNesting = false
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (!part) continue;
-    if (part.type === "pseudo-class" || part.type === "pseudo-element") {
-      includesPseudoSelector = true
-      continue
-    }
-    if (part.type === "nesting") includesNesting = true
-  }
-
-  let hasCheckboxAttribute = false
-  for (let i = 0; i < attributes.length; i++) {
-    const a = attributes[i];
-    if (!a) continue;
-    if (a.name !== "type") continue
-    if (a.operator !== "equals") continue
-    if (a.value === null) continue
-    const normalized = a.caseInsensitive ? a.value.toLowerCase() : a.value
-    if (normalized !== "checkbox") continue
-    hasCheckboxAttribute = true
-    break
-  }
-
-  const targetsCheckbox = (subjectTag === "input" || subjectTag === null) && hasCheckboxAttribute
-  const targetsTableCell = subjectTag === "td" || subjectTag === "th"
-
-  return {
-    subjectTag,
-    classes,
-    attributes,
-    includesDescendantCombinator,
-    includesPseudoSelector,
-    dynamic: includesPseudoSelector || includesNesting,
-    targetsCheckbox,
-    targetsTableCell,
-  }
-}
 
 /**
  * Creates a RuleEntity for a CSS rule block.
@@ -1013,15 +838,62 @@ function createSelectorEntity(
   rule: RuleEntity,
 ): SelectorEntity {
   const id = graph.nextSelectorId();
-  const { parts, specificity, complexity } = parseSelectorComplete(raw);
+  const { parts, compounds, combinators, specificity, complexity } = parseSelectorComplete(raw);
   const specificityScore = specificityToScore(specificity);
-  const anchor = buildSelectorAnchor(raw, parts, complexity.combinators);
 
   const kinds = rule.elementKinds;
   for (let k = 0; k < parts.length; k++) {
     const part = parts[k];
     if (part) classifyPart(part, kinds);
   }
+
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : null;
+
+  let includesPseudoSelector = false;
+  let includesNesting = false;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    if (part.type === "pseudo-class" || part.type === "pseudo-element") {
+      includesPseudoSelector = true;
+      continue;
+    }
+    if (part.type === "nesting") includesNesting = true;
+  }
+
+  const subjectTag = subject?.tagName ?? null;
+  const subjectIdValue = subject?.idValue ?? null;
+  const subjectClasses = subject?.classes ?? [];
+  const subjectAttributes = subject?.attributes ?? [];
+  const includesDescendantCombinator = combinators.includes("descendant");
+
+  let hasCheckboxAttribute = false;
+  for (let i = 0; i < subjectAttributes.length; i++) {
+    const a = subjectAttributes[i];
+    if (!a) continue;
+    if (a.name !== "type") continue;
+    if (a.operator !== "equals") continue;
+    if (a.value === null) continue;
+    const normalized = a.caseInsensitive ? a.value.toLowerCase() : a.value;
+    if (normalized !== "checkbox") continue;
+    hasCheckboxAttribute = true;
+    break;
+  }
+
+  const targetsCheckbox = (subjectTag === "input" || subjectTag === null) && hasCheckboxAttribute;
+  const targetsTableCell = subjectTag === "td" || subjectTag === "th";
+
+  const anchor: SelectorAnchor = {
+    subjectTag,
+    idValue: subjectIdValue,
+    classes: subjectClasses,
+    attributes: subjectAttributes,
+    includesDescendantCombinator,
+    includesPseudoSelector,
+    dynamic: includesPseudoSelector || includesNesting,
+    targetsCheckbox,
+    targetsTableCell,
+  };
 
   return {
     id,
@@ -1030,6 +902,8 @@ function createSelectorEntity(
     specificity,
     specificityScore,
     complexity,
+    compounds,
+    combinators,
     parts: parts.length > 0 ? parts : [],
     anchor,
     overrides: [],
