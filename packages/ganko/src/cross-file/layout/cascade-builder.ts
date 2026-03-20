@@ -3,7 +3,7 @@ import type { TailwindValidator } from "../../css/tailwind"
 import type { SelectorEntity, CascadePosition, RuleEntity } from "../../css/entities"
 import { compareCascadePositions } from "../../css/analysis/cascade"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
-import { expandShorthand } from "./shorthand-expansion"
+import { expandShorthand, getShorthandLonghandNames } from "./shorthand-expansion"
 import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
@@ -28,20 +28,11 @@ const DYNAMIC_ATTRIBUTE_GUARD: LayoutRuleGuard = {
 }
 
 export interface MonitoredDeclaration {
-  readonly property: MonitoredSignalKey
+  readonly property: LayoutSignalName
   readonly value: string
   readonly position: CascadePosition
   readonly guardProvenance: LayoutRuleGuard
 }
-
-export type MonitoredSignalKey =
-  | LayoutSignalName
-  | "padding"
-  | "border-width"
-  | "margin-block"
-  | "padding-block"
-  | "inset-block"
-  | "flex-flow"
 
 export interface LayoutCascadeCandidate {
   readonly declaration: LayoutCascadedDeclaration
@@ -49,7 +40,6 @@ export interface LayoutCascadeCandidate {
 }
 
 export const SCROLLABLE_VALUES: ReadonlySet<string> = new Set(["auto", "scroll"])
-const EMPTY_EXPANSION_RESULT: readonly { name: LayoutSignalName; value: string }[] = []
 
 export function collectMonitoredDeclarations(
   selector: SelectorEntity,
@@ -63,62 +53,53 @@ export function collectMonitoredDeclarations(
     if (!declaration) continue
     const property = declaration.property.toLowerCase()
     if (!isMonitoredSignal(property)) continue
-    const monitored = toMonitoredSignalKey(property)
-    if (!monitored) continue
-    out.push({
-      property: monitored,
-      value: declaration.value,
-      guardProvenance: guard,
-      position: {
-        layer: declaration.cascadePosition.layer,
-        layerOrder,
-        sourceOrder: declaration.sourceOrder,
-        specificity: selector.specificity,
-        specificityScore: selector.specificityScore,
-        isImportant: declaration.cascadePosition.isImportant || declaration.node.important,
-      },
-    })
+
+    const position: CascadePosition = {
+      layer: declaration.cascadePosition.layer,
+      layerOrder,
+      sourceOrder: declaration.sourceOrder,
+      specificity: selector.specificity,
+      specificityScore: selector.specificityScore,
+      isImportant: declaration.cascadePosition.isImportant || declaration.node.important,
+    }
+
+    const directSignal = MONITORED_SIGNAL_NAME_MAP.get(property)
+    if (directSignal !== undefined) {
+      out.push({ property: directSignal, value: declaration.value, guardProvenance: guard, position })
+      continue
+    }
+
+    const value = declaration.value.trim().toLowerCase()
+    const expanded = expandShorthand(property, value)
+    if (expanded === undefined) continue
+    if (expanded === null) {
+      const longhandNames = getShorthandLonghandNames(property)
+      if (longhandNames === null) continue
+      for (let j = 0; j < longhandNames.length; j++) {
+        const longhand = longhandNames[j]
+        if (!longhand) continue
+        const signal = MONITORED_SIGNAL_NAME_MAP.get(longhand)
+        if (signal === undefined) continue
+        out.push({ property: signal, value: declaration.value, guardProvenance: guard, position })
+      }
+      continue
+    }
+    for (let j = 0; j < expanded.length; j++) {
+      const entry = expanded[j]
+      if (!entry) continue
+      const signal = MONITORED_SIGNAL_NAME_MAP.get(entry.name)
+      if (signal === undefined) continue
+      out.push({ property: signal, value: entry.value, guardProvenance: guard, position })
+    }
   }
 
   return out
 }
 
-function toMonitoredSignalKey(property: string): MonitoredSignalKey | null {
-  const signal = MONITORED_SIGNAL_NAME_MAP.get(property)
-  if (signal) return signal
-
-  switch (property) {
-    case "padding":
-    case "border-width":
-    case "margin-block":
-    case "padding-block":
-    case "inset-block":
-    case "flex-flow":
-      return property
-    default:
-      return null
-  }
-}
-
 export function expandMonitoredDeclarationForDelta(
   declaration: MonitoredDeclaration,
 ): readonly { name: LayoutSignalName; value: string }[] {
-  const value = declaration.value.trim().toLowerCase()
-  const expanded = expandShorthand(declaration.property, value)
-  if (expanded !== undefined) {
-    if (expanded === null) return EMPTY_EXPANSION_RESULT
-    const filtered: { name: LayoutSignalName; value: string }[] = []
-    for (let i = 0; i < expanded.length; i++) {
-      const entry = expanded[i]
-      if (!entry) continue
-      const signalName = MONITORED_SIGNAL_NAME_MAP.get(entry.name)
-      if (signalName !== undefined) filtered.push({ name: signalName, value: entry.value })
-    }
-    return filtered
-  }
-  const signalName = MONITORED_SIGNAL_NAME_MAP.get(declaration.property)
-  if (signalName === undefined) return EMPTY_EXPANSION_RESULT
-  return [{ name: signalName, value }]
+  return [{ name: declaration.property, value: declaration.value.trim().toLowerCase() }]
 }
 
 export interface SelectorMatchContext {

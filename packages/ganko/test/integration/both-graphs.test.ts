@@ -123,7 +123,7 @@ describe("Integration: Both Solid and CSS plugins", () => {
         throw new Error("Expected checkbox element in layout graph");
       }
 
-      const edges = layout.appliesByNode.get(checkbox) ?? [];
+      const edges = layout.records.get(checkbox)?.edges ?? [];
       const cssFiles = new Set<string>();
 
       for (const edge of edges) {
@@ -271,7 +271,7 @@ describe("Integration: Both Solid and CSS plugins", () => {
         throw new Error("Expected checkbox element in composed row");
       }
 
-      const edges = layout.appliesByNode.get(checkbox) ?? [];
+      const edges = layout.records.get(checkbox)?.edges ?? [];
       const selectorRaws: string[] = [];
       for (const edge of edges) {
         const selector = layout.selectorsById.get(edge.selectorId);

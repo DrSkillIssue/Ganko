@@ -10,12 +10,13 @@ Cache expanded longhands on `MonitoredDeclaration` during `collectMonitoredDecla
 
 **Files**: `cascade-builder.ts`, `signal-normalization.ts`, `stateful-rule-index.ts`, `shorthand-expansion.ts`
 
-- [ ] Add `expandedLonghands: readonly { name: LayoutSignalName; value: string }[] | null` to `MonitoredDeclaration`
-- [ ] Compute expansion once in `collectMonitoredDeclarations`
-- [ ] Replace `expandMonitoredDeclarationForDelta` body with cached read
-- [ ] Replace `applyExpandedShorthand` in signal-normalization with cached read
-- [ ] Replace expansion in `buildStatefulRuleIndexes` with cached read
-- [ ] Verify identical results via existing tests
+- [x] Pre-expand shorthands into longhands in `collectMonitoredDeclarations`
+- [x] `MonitoredDeclaration.property` is now always `LayoutSignalName` (removed `MonitoredSignalKey`)
+- [x] `expandMonitoredDeclarationForDelta` simplified to passthrough (declarations already longhands)
+- [x] Removed `applyExpandedShorthand` and `MONITORED_SHORTHAND_SET` check from signal-normalization
+- [x] Removed `expandShorthand`/`getShorthandLonghandNames` imports from signal-normalization
+- [x] `stateful-rule-index.ts` kept separate (different data path — raw rule declarations)
+- [x] 311/311 tests pass
 
 ---
 
@@ -24,17 +25,16 @@ Replace 14 separate `Map`/`WeakMap` structures keyed by `LayoutElementNode` with
 
 **Files**: `graph.ts`, `build.ts`, `signal-access.ts`, all rules
 
-- [ ] Define `LayoutElementRecord` interface in `graph.ts`:
-  ```
-  node, ref, edges, cascade, snapshot, hotSignals,
-  reservedSpace, scrollContainer, flowParticipation,
-  containingBlock, conditionalDelta, baselineOffsets
-  ```
-- [ ] Add `records: ReadonlyMap<LayoutElementNode, LayoutElementRecord>` to `LayoutGraph`
-- [ ] Remove individual fact maps from `LayoutGraph` interface (`reservedSpaceFactsByNode`, `scrollContainerFactsByNode`, `flowParticipationFactsByNode`, `containingBlockFactsByNode`, `conditionalSignalDeltaFactsByNode`, `baselineOffsetFactsByNode`, `snapshotHotSignalsByNode`, `cascadeByElementNode`, `snapshotByElementNode`, `appliesByNode`)
-- [ ] Update all `read*Fact` accessors in `signal-access.ts` to use `graph.records.get(node)`
-- [ ] Update all rule files to use new accessors
-- [ ] Update `cohort-index.ts` and `context-classification.ts` to read from records
+- [x] Defined `LayoutElementRecord` in `graph.ts` (ref, edges, cascade, snapshot, hotSignals, 6 facts)
+- [x] Added `records: ReadonlyMap<LayoutElementNode, LayoutElementRecord>` to `LayoutGraphFacts`
+- [x] Removed per-element maps from `LayoutGraphCascade` (`appliesByNode`, `cascadeByElementNode`, `snapshotByElementNode`, `snapshotHotSignalsByNode`)
+- [x] Removed per-element maps from `LayoutGraphFacts` (all 6 fact maps)
+- [x] Updated all `read*Fact` accessors in `signal-access.ts` to use `graph.records.get(node)`
+- [x] Updated `collectSignalSnapshot` to use `graph.records.get(node).snapshot`
+- [x] Rules unchanged — all access through accessor functions
+- [x] Internal build pipeline unchanged — uses local maps, constructs records at end
+- [x] Updated test files accessing removed fields (`appliesByNode`, `snapshotHotSignalsByNode`)
+- [x] 327/327 tests pass
 
 ---
 

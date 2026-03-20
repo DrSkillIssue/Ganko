@@ -117,9 +117,12 @@ describe("layout signal normalization", () => {
   it("expands block-axis shorthands into monitored longhands", () => {
     const signals = normalizeSignalMap(
       makeMap([
-        ["margin-block", "2px 4px"],
-        ["padding-block", "1px"],
-        ["inset-block", "3px 5px"],
+        ["margin-top", "2px"],
+        ["margin-bottom", "4px"],
+        ["padding-top", "1px"],
+        ["padding-bottom", "1px"],
+        ["inset-block-start", "3px"],
+        ["inset-block-end", "5px"],
       ]),
     );
 

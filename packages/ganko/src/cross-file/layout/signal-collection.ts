@@ -23,13 +23,13 @@ export function collectSignalSnapshot(
   context: CrossRuleContext,
   node: LayoutElementNode,
 ): LayoutSignalSnapshot {
-  const existing = context.layout.snapshotByElementNode.get(node)
-  if (existing) {
+  const record = context.layout.records.get(node)
+  if (record) {
     context.layout.perf.signalSnapshotCacheHits++
-    return existing
+    return record.snapshot
   }
 
-  throw new Error(`missing precomputed layout snapshot for ${node.key}`)
+  throw new Error(`missing precomputed layout record for ${node.key}`)
 }
 
 export function buildSignalSnapshotIndex(

@@ -2,6 +2,7 @@ export { LayoutScrollAxis } from "./graph"
 export type { ResolvedComponentHost } from "./component-host"
 export type {
   LayoutElementNode,
+  LayoutElementRecord,
   LayoutElementRef,
   LayoutGraph,
   LayoutGraphTopology,

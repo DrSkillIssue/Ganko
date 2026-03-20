@@ -2,7 +2,6 @@ import { parseUnitlessValue } from "../../css/parser/value-util"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
 import type { LayoutCascadedDeclaration } from "./graph"
 import { extractTransformYPx, extractTranslatePropertyYPx, parseSignedPxValue } from "./offset-baseline"
-import { expandShorthand, getShorthandLonghandNames } from "./shorthand-expansion"
 import { CONTROL_ELEMENT_TAGS } from "./util"
 import type { LayoutRuleGuard } from "./guard-model"
 import {
@@ -139,11 +138,6 @@ export function normalizeSignalMapWithCounts(
   for (const [property, declaration] of values) {
     if (property === "font-size") continue
 
-    if (MONITORED_SHORTHAND_SET.has(property)) {
-      applyExpandedShorthand(out, property, declaration, fontSizePx)
-      continue
-    }
-
     const name = toMonitoredSignalName(property)
     if (!name) continue
 
@@ -179,38 +173,6 @@ export function normalizeSignalMapWithCounts(
     knownSignalCount,
     unknownSignalCount,
     conditionalSignalCount,
-  }
-}
-
-function applyExpandedShorthand(
-  out: Map<LayoutSignalName, LayoutSignalValue>,
-  property: string,
-  declaration: LayoutCascadedDeclaration,
-  fontSizePx: number | null,
-): void {
-  const expanded = expandShorthand(property, declaration.value)
-  if (expanded === null) {
-    const reason = `${property} value is not statically parseable`
-    const longhandNames = getShorthandLonghandNames(property)
-    if (longhandNames === null) return
-    for (let i = 0; i < longhandNames.length; i++) {
-      const longhand = longhandNames[i]
-      if (!longhand) continue
-      const name = MONITORED_SIGNAL_NAME_MAP.get(longhand)
-      if (name === undefined) continue
-      out.set(name, createUnknown(name, declaration.source, declaration.guardProvenance, reason))
-    }
-    return
-  }
-
-  if (expanded === undefined) return
-
-  for (let i = 0; i < expanded.length; i++) {
-    const entry = expanded[i]
-    if (!entry) continue
-    const name = MONITORED_SIGNAL_NAME_MAP.get(entry.name)
-    if (name === undefined) continue
-    out.set(name, normalizeSignal(name, entry.value, declaration.source, declaration.guardProvenance, fontSizePx))
   }
 }
 

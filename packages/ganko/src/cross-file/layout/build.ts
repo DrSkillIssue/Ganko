@@ -10,6 +10,7 @@ import {
   type LayoutCascadedDeclaration,
   type LayoutContainingBlockFact,
   type LayoutElementNode,
+  type LayoutElementRecord,
   type LayoutElementRef,
   type LayoutFlowParticipationFact,
   type LayoutGraph,
@@ -71,6 +72,8 @@ import {
 } from "./element-record"
 
 const EMPTY_NUMBER_LIST: readonly number[] = []
+const EMPTY_EDGE_LIST: readonly LayoutMatchEdge[] = Object.freeze([])
+const EMPTY_CASCADE: ReadonlyMap<string, LayoutCascadedDeclaration> = new Map()
 const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch"])
 const BLOCK_LEVEL_DISPLAY_VALUES = new Set(["block", "flex", "grid", "table", "list-item", "flow-root", "table-row", "table-cell", "table-caption", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"])
 
@@ -373,6 +376,27 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
 
   perf.elapsedMs = performance.now() - startedAt
 
+  const records = new Map<LayoutElementNode, LayoutElementRecord>()
+  for (let i = 0; i < elements.length; i++) {
+    const node = elements[i]
+    if (!node) continue
+    const snapshot = snapshotByElementNode.get(node)
+    if (!snapshot) continue
+    records.set(node, {
+      ref: elementRefsBySolidFileAndIdMutable.get(node.solidFile)?.get(node.elementId) ?? null,
+      edges: appliesByNode.get(node) ?? EMPTY_EDGE_LIST,
+      cascade: cascadeByElementNode.get(node) ?? EMPTY_CASCADE,
+      snapshot,
+      hotSignals: factIndex.snapshotHotSignalsByNode.get(node) ?? EMPTY_HOT_SIGNALS,
+      reservedSpace: factIndex.reservedSpaceFactsByNode.get(node) ?? EMPTY_RESERVED_SPACE,
+      scrollContainer: factIndex.scrollContainerFactsByNode.get(node) ?? EMPTY_SCROLL_CONTAINER,
+      flowParticipation: factIndex.flowParticipationFactsByNode.get(node) ?? EMPTY_FLOW_PARTICIPATION,
+      containingBlock: factIndex.containingBlockFactsByNode.get(node) ?? EMPTY_CONTAINING_BLOCK,
+      conditionalDelta: conditionalDeltaIndex.conditionalSignalDeltaFactsByNode.get(node) ?? null,
+      baselineOffsets: conditionalDeltaIndex.baselineOffsetFactsByNode.get(node) ?? null,
+    })
+  }
+
   return {
     elements,
     styleRules,
@@ -382,11 +406,10 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elementBySolidFileAndId: elementBySolidFileAndIdMutable,
     elementRefsBySolidFileAndId: elementRefsBySolidFileAndIdMutable,
     hostElementRefsByNode: hostElementRefsByNodeMutable,
-    appliesByNode,
     selectorCandidatesByNode,
     selectorsById,
     measurementNodeByRootKey,
-    snapshotHotSignalsByNode: factIndex.snapshotHotSignalsByNode,
+    records,
     elementsByTagName: factIndex.elementsByTagName,
     elementsWithConditionalDeltaBySignal: conditionalDeltaIndex.elementsWithConditionalDeltaBySignal,
     elementsWithConditionalOverflowDelta,
@@ -394,18 +417,10 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     elementsByKnownSignalValue: factIndex.elementsByKnownSignalValue,
     dynamicSlotCandidateElements: factIndex.dynamicSlotCandidateElements,
     scrollContainerElements: factIndex.scrollContainerElements,
-    reservedSpaceFactsByNode: factIndex.reservedSpaceFactsByNode,
-    scrollContainerFactsByNode: factIndex.scrollContainerFactsByNode,
-    flowParticipationFactsByNode: factIndex.flowParticipationFactsByNode,
-    containingBlockFactsByNode: factIndex.containingBlockFactsByNode,
-    conditionalSignalDeltaFactsByNode: conditionalDeltaIndex.conditionalSignalDeltaFactsByNode,
-    baselineOffsetFactsByNode: conditionalDeltaIndex.baselineOffsetFactsByNode,
     statefulSelectorEntriesByRuleId: statefulRuleIndexes.selectorEntriesByRuleId,
     statefulNormalizedDeclarationsByRuleId: statefulRuleIndexes.normalizedDeclarationsByRuleId,
     statefulBaseValueIndex: statefulRuleIndexes.baseValueIndex,
     cohortStatsByParentNode: cohortIndex.statsByParentNode,
-    cascadeByElementNode,
-    snapshotByElementNode,
     contextByParentNode,
     perf,
   }
@@ -589,6 +604,36 @@ const ABSENT_NUMERIC: HotNumericSignalEvidence = Object.freeze({
 })
 const ABSENT_NORMALIZED: HotNormalizedSignalEvidence = Object.freeze({
   present: false, value: null, kind: EvidenceValueKind.Unknown,
+})
+const EMPTY_RESERVED_SPACE: LayoutReservedSpaceFact = Object.freeze({
+  hasReservedSpace: false, reasons: Object.freeze([]),
+  hasContainIntrinsicSize: false, hasUsableAspectRatio: false,
+  hasDeclaredInlineDimension: false, hasDeclaredBlockDimension: false,
+})
+const EMPTY_SCROLL_CONTAINER: LayoutScrollContainerFact = Object.freeze({
+  isScrollContainer: false, axis: LayoutScrollAxis.None,
+  overflow: null, overflowY: null,
+  hasConditionalScroll: false, hasUnconditionalScroll: false,
+})
+const EMPTY_FLOW_PARTICIPATION: LayoutFlowParticipationFact = Object.freeze({
+  inFlow: true, position: null,
+  hasConditionalOutOfFlow: false, hasUnconditionalOutOfFlow: false,
+})
+const EMPTY_CONTAINING_BLOCK: LayoutContainingBlockFact = Object.freeze({
+  nearestPositionedAncestorKey: null,
+  nearestPositionedAncestorHasReservedSpace: false,
+})
+const EMPTY_HOT_SIGNALS: LayoutSnapshotHotSignals = Object.freeze({
+  lineHeight: ABSENT_NUMERIC, verticalAlign: ABSENT_NORMALIZED,
+  alignSelf: ABSENT_NORMALIZED, placeSelf: ABSENT_NORMALIZED,
+  flexDirection: ABSENT_NORMALIZED, gridAutoFlow: ABSENT_NORMALIZED,
+  writingMode: ABSENT_NORMALIZED, direction: ABSENT_NORMALIZED,
+  display: ABSENT_NORMALIZED, alignItems: ABSENT_NORMALIZED,
+  placeItems: ABSENT_NORMALIZED, position: ABSENT_NORMALIZED,
+  insetBlockStart: ABSENT_NUMERIC, insetBlockEnd: ABSENT_NUMERIC,
+  transform: ABSENT_NUMERIC, translate: ABSENT_NUMERIC,
+  top: ABSENT_NUMERIC, bottom: ABSENT_NUMERIC,
+  marginTop: ABSENT_NUMERIC, marginBottom: ABSENT_NUMERIC,
 })
 
 function toHotNumeric(signal: LayoutSignalValue): HotNumericSignalEvidence {
