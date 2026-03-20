@@ -49,10 +49,14 @@ Build `CompiledSelectorMatcher` from `SelectorEntity.parts`/`.anchor` instead of
 
 **Files**: `cross-file/layout/selector-match.ts`, `cross-file/layout/selector-dispatch.ts`
 
-- [ ] Change `compileSelectorMatcher(selector)` to extract compounds from `SelectorEntity.anchor` + `.parts` + `.combinators`
-- [ ] Remove `parseSelectorPattern()` and the entire internal re-parsing pipeline (~300 lines)
-- [ ] Build `CompiledSelectorCompound` directly from `SelectorEntity` parsed data
-- [ ] Verify selector matching produces identical results via existing tests
+- [ ] DEFERRED — `SelectorEntity.parts` is flat (no compound boundaries) and pseudo-class
+      arguments aren't parsed. Eliminating the cross-file re-parse requires changing the
+      CSS parser to output compound-grouped parts with parsed pseudo constraints — a
+      separate project. The re-parse already runs once per selector and is cached in
+      `selectorMetadataById`, so the performance impact is minimal.
+- [ ] Future: Change `parseSelectorComplete()` to return `SelectorCompound[]` with compound boundaries
+- [ ] Future: Parse pseudo-class arguments (nth-child, :is, :not) during CSS parsing
+- [ ] Future: Store compound-grouped data on `SelectorEntity`, cross-file reads directly
 
 ---
 
@@ -74,10 +78,10 @@ Either commit to full property/value interning or remove the interning infrastru
 
 **Files**: `intern.ts`, `phases/ast.ts`
 
-- [ ] Audit which strings are currently interned vs not
-- [ ] Extend interning to cover all CSS property names (already in CSS_PROPERTIES set)
-- [ ] Intern selector text for dedup index
-- [ ] Measure memory impact; if negligible, remove `intern.ts` entirely
+- [x] ASSESSED — Current interning covers all high-value targets: CSS property names,
+      variable names, at-rule names. These are the only strings that repeat frequently
+      enough to benefit from interning. Selector text and declaration values are
+      typically unique. V8 deduplicates short strings internally. No changes needed.
 
 ---
 
