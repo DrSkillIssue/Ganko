@@ -368,14 +368,60 @@ export class CSSGraph {
 
   addSelector(selector: SelectorEntity): void {
     this.selectors.push(selector);
+
+    const anchor = selector.anchor;
+    if (anchor.subjectTag === null) {
+      this.selectorsWithoutSubjectTag.push(selector);
+    } else {
+      const existingByTag = this.selectorsBySubjectTag.get(anchor.subjectTag);
+      if (existingByTag) existingByTag.push(selector);
+      else this.selectorsBySubjectTag.set(anchor.subjectTag, [selector]);
+    }
+
+    if (anchor.targetsCheckbox) this.selectorsTargetingCheckbox.push(selector);
+    if (anchor.targetsTableCell) this.selectorsTargetingTableCell.push(selector);
+
+    const parts = selector.parts;
+    for (let j = 0; j < parts.length; j++) {
+      const part = parts[j];
+      if (!part) continue;
+      if (part.type === "class") {
+        const existing = this.classNameIndex.get(part.value);
+        if (existing) existing.push(selector);
+        else this.classNameIndex.set(part.value, [selector]);
+      }
+    }
+
+    const complexity = selector.complexity;
+    const flags = complexity._flags;
+    if (hasFlag(flags, SEL_HAS_ID)) this.idSelectors.push(selector);
+    if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) this.attributeSelectors.push(selector);
+    if (hasFlag(flags, SEL_HAS_UNIVERSAL)) this.universalSelectors.push(selector);
+
+    const pseudoClasses = complexity.pseudoClasses;
+    for (let j = 0; j < pseudoClasses.length; j++) {
+      const pc = pseudoClasses[j];
+      if (!pc) continue;
+      const pcExisting = this.selectorsByPseudoClass.get(pc);
+      if (pcExisting) pcExisting.push(selector);
+      else this.selectorsByPseudoClass.set(pc, [selector]);
+    }
   }
 
   addDeclaration(decl: DeclarationEntity): void {
     this.declarations.push(decl);
-    const existing = this.declarationsByProperty.get(decl.property);
+    const property = decl.property;
+    const existing = this.declarationsByProperty.get(property);
     if (existing) existing.push(decl);
-    else this.declarationsByProperty.set(decl.property, [decl]);
+    else this.declarationsByProperty.set(property, [decl]);
     if (hasFlag(decl._flags, DECL_IS_IMPORTANT) || decl.node.important) this.importantDeclarations.push(decl);
+    if (decl.rule !== null) {
+      const p = property.toLowerCase();
+      const ruleIndex = decl.rule.declarationIndex;
+      const ruleExisting = ruleIndex.get(p);
+      if (ruleExisting) ruleExisting.push(decl);
+      else ruleIndex.set(p, [decl]);
+    }
   }
 
   addVariable(variable: VariableEntity): void {
@@ -529,34 +575,15 @@ export class CSSGraph {
    * Called after all phases complete.
    */
   buildDerivedIndexes(): void {
-    this.buildRuleDeclarationIndexes();
     this.buildContainingMediaStacks();
     this.buildKeyframeIndex();
     this.buildContainerNameIndexes();
-    this.buildSelectorPseudoClassIndex();
     this.buildMultiDeclarationProperties();
     this.buildKeyframeDeclarations();
     this.buildKeyframeLayoutMutationsByName();
-    this.buildSelectorDerivedIndexes();
     this.buildLayoutPropertiesByClassToken();
     this.buildFontFamilyUsageByRule();
     this.buildFontFaceDescriptorsByFamily();
-  }
-
-  private buildRuleDeclarationIndexes(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      const index = rule.declarationIndex;
-      for (let j = 0; j < rule.declarations.length; j++) {
-        const d = rule.declarations[j];
-        if (!d) continue;
-        const p = d.property.toLowerCase();
-        const existing = index.get(p);
-        if (existing) existing.push(d);
-        else index.set(p, [d]);
-      }
-    }
   }
 
   private buildContainingMediaStacks(): void {
@@ -645,21 +672,6 @@ export class CSSGraph {
     }
   }
 
-  private buildSelectorPseudoClassIndex(): void {
-    for (let i = 0; i < this.selectors.length; i++) {
-      const sel = this.selectors[i];
-      if (!sel) continue;
-      const pseudoClasses = sel.complexity.pseudoClasses;
-      for (let j = 0; j < pseudoClasses.length; j++) {
-        const pc = pseudoClasses[j];
-        if (!pc) continue;
-        const existing = this.selectorsByPseudoClass.get(pc);
-        if (existing) existing.push(sel);
-        else this.selectorsByPseudoClass.set(pc, [sel]);
-      }
-    }
-  }
-
   /**
    * Sort each declarationsByProperty list by sourceOrder and populate
    * multiDeclarationProperties with only those having 2+ entries.
@@ -735,41 +747,6 @@ export class CSSGraph {
 
       if (mutations.length === 0) continue;
       this.keyframeLayoutMutationsByName.set(animationName, mutations);
-    }
-  }
-
-  private buildSelectorDerivedIndexes(): void {
-    for (let i = 0, len = this.selectors.length; i < len; i++) {
-      const sel = this.selectors[i];
-      if (!sel) continue;
-      const parts = sel.parts;
-      const anchor = sel.anchor;
-
-      if (anchor.subjectTag === null) {
-        this.selectorsWithoutSubjectTag.push(sel);
-      } else {
-        const existingByTag = this.selectorsBySubjectTag.get(anchor.subjectTag);
-        if (existingByTag) existingByTag.push(sel);
-        else this.selectorsBySubjectTag.set(anchor.subjectTag, [sel]);
-      }
-
-      if (anchor.targetsCheckbox) this.selectorsTargetingCheckbox.push(sel);
-      if (anchor.targetsTableCell) this.selectorsTargetingTableCell.push(sel);
-
-      for (let j = 0, plen = parts.length; j < plen; j++) {
-        const part = parts[j];
-        if (!part) continue;
-        if (part.type === "class") {
-          const existing = this.classNameIndex.get(part.value);
-          if (existing) existing.push(sel);
-          else this.classNameIndex.set(part.value, [sel]);
-        }
-      }
-
-      const flags = sel.complexity._flags;
-      if (hasFlag(flags, SEL_HAS_ID)) this.idSelectors.push(sel);
-      if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) this.attributeSelectors.push(sel);
-      if (hasFlag(flags, SEL_HAS_UNIVERSAL)) this.universalSelectors.push(sel);
     }
   }
 
