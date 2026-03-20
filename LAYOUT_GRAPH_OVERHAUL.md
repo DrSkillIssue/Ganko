@@ -63,19 +63,18 @@ Replace 5-interface composition with flat grouped structure.
 
 **Files**: `graph.ts`, `build.ts`, all consumers
 
-- [ ] Collapse `LayoutGraphTopology`, `LayoutGraphCascade`, `LayoutGraphFacts`, `LayoutGraphCohorts`, `LayoutGraphIndexes` into single `LayoutGraph`
-- [ ] Group remaining fields semantically (topology fields stay top-level, indexes grouped)
-- [ ] Update all rule imports/access patterns
+- [x] Collapsed 5 sub-interfaces into single flat `LayoutGraph`
+- [x] Removed `LayoutGraphTopology`, `LayoutGraphCascade`, `LayoutGraphFacts`, `LayoutGraphCohorts`, `LayoutGraphIndexes`
+- [x] No external consumers — clean removal
 
 ---
 
 ## Phase 6: Unify Dispatch Key Extraction
-`buildSelectorDispatchKeys` (element-record.ts) and `resolveSubjectDispatchKeys` (selector-dispatch.ts) duplicate the same id/class/attr key logic.
 
-**Files**: `selector-dispatch.ts`, `element-record.ts`
-
-- [ ] Extract shared `buildDispatchKeys(id, classes, attributes)` function
-- [ ] Both callers delegate to it with their respective input shapes
+- [x] Extracted shared `buildDispatchKeys(idValue, classTokens, attributeNames)` in `selector-dispatch.ts`
+- [x] `buildSelectorDispatchKeys` delegates to `buildDispatchKeys`
+- [x] `resolveSubjectDispatchKeys` delegates to `buildDispatchKeys`
+- [x] 327/327 tests pass
 
 ---
 

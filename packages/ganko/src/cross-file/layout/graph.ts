@@ -140,23 +140,6 @@ export interface LayoutNormalizedRuleDeclaration {
   readonly propertyLength: number
 }
 
-export interface LayoutGraphTopology {
-  readonly elements: readonly LayoutElementNode[]
-  readonly childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>
-  readonly elementBySolidFileAndId: ReadonlyMap<string, ReadonlyMap<number, LayoutElementNode>>
-  readonly elementRefsBySolidFileAndId: ReadonlyMap<string, ReadonlyMap<number, LayoutElementRef>>
-  readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
-  readonly measurementNodeByRootKey: ReadonlyMap<string, LayoutElementNode>
-  /**
-   * Maps component call-site nodes to their resolved host DOM element reference.
-   * Only populated for nodes that represent a component resolved to a concrete DOM
-   * element. Native DOM element nodes and unresolvable components are absent.
-   * Used by rules that need to inspect the host element's JSX attributes (e.g.
-   * dynamic `width`/`height` expressions not capturable as static strings).
-   */
-  readonly hostElementRefsByNode: ReadonlyMap<LayoutElementNode, LayoutElementRef>
-}
-
 export interface LayoutElementRecord {
   readonly ref: LayoutElementRef | null
   readonly edges: readonly LayoutMatchEdge[]
@@ -171,24 +154,22 @@ export interface LayoutElementRecord {
   readonly baselineOffsets: ReadonlyMap<LayoutSignalName, readonly number[]> | null
 }
 
-export interface LayoutGraphCascade {
+export interface LayoutGraph {
+  readonly elements: readonly LayoutElementNode[]
+  readonly childrenByParentNode: ReadonlyMap<LayoutElementNode, readonly LayoutElementNode[]>
+  readonly elementBySolidFileAndId: ReadonlyMap<string, ReadonlyMap<number, LayoutElementNode>>
+  readonly elementRefsBySolidFileAndId: ReadonlyMap<string, ReadonlyMap<number, LayoutElementRef>>
+  readonly elementsByTagName: ReadonlyMap<string, readonly LayoutElementNode[]>
+  readonly measurementNodeByRootKey: ReadonlyMap<string, LayoutElementNode>
+  readonly hostElementRefsByNode: ReadonlyMap<LayoutElementNode, LayoutElementRef>
   readonly styleRules: readonly LayoutStyleRuleNode[]
   readonly applies: readonly LayoutMatchEdge[]
   readonly cssScopeBySolidFile: ReadonlyMap<string, readonly string[]>
   readonly selectorCandidatesByNode: ReadonlyMap<LayoutElementNode, readonly number[]>
   readonly selectorsById: ReadonlyMap<number, SelectorEntity>
-}
-
-export interface LayoutGraphFacts {
   readonly records: ReadonlyMap<LayoutElementNode, LayoutElementRecord>
-}
-
-export interface LayoutGraphCohorts {
   readonly cohortStatsByParentNode: ReadonlyMap<LayoutElementNode, LayoutCohortStats>
   readonly contextByParentNode: ReadonlyMap<LayoutElementNode, AlignmentContext>
-}
-
-export interface LayoutGraphIndexes {
   readonly elementsWithConditionalDeltaBySignal: ReadonlyMap<LayoutSignalName, readonly LayoutElementNode[]>
   readonly elementsWithConditionalOverflowDelta: readonly LayoutElementNode[]
   readonly elementsWithConditionalOffsetDelta: readonly LayoutElementNode[]
@@ -198,10 +179,6 @@ export interface LayoutGraphIndexes {
   readonly statefulSelectorEntriesByRuleId: ReadonlyMap<number, readonly LayoutStatefulSelectorEntry[]>
   readonly statefulNormalizedDeclarationsByRuleId: ReadonlyMap<number, readonly LayoutNormalizedRuleDeclaration[]>
   readonly statefulBaseValueIndex: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>
-}
-
-export interface LayoutGraph
-  extends LayoutGraphTopology, LayoutGraphCascade, LayoutGraphFacts, LayoutGraphCohorts, LayoutGraphIndexes {
   readonly perf: LayoutPerfStatsMutable
 }
 
