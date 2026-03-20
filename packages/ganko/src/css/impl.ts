@@ -81,25 +81,7 @@ const FONT_GENERIC_FAMILY_SET = new Set([
 const FONT_LAYOUT_PROPERTIES = new Set(["font-family"]);
 const WHITESPACE_RE = /\s+/;
 
-/**
- * Classify a rule's semantic element kinds from its selectors' parts.
- * Populates the rule's elementKinds set.
- */
-function classifyRuleElementKinds(rule: RuleEntity): void {
-  const kinds = rule.elementKinds;
-  for (let i = 0; i < rule.selectors.length; i++) {
-    const sel = rule.selectors[i];
-    if (!sel) continue;
-    const parts = sel.parts;
-    for (let j = 0; j < parts.length; j++) {
-      const part = parts[j];
-      if (!part) continue;
-      classifyPart(part, kinds);
-    }
-  }
-}
-
-function classifyPart(part: SelectorPart, kinds: Set<RuleElementKind>): void {
+export function classifyPart(part: SelectorPart, kinds: Set<RuleElementKind>): void {
   if (part.type === "element") {
     const lower = part.value.toLowerCase();
     if (HEADING_ELEMENTS.has(lower)) { kinds.add("heading"); return; }
@@ -551,7 +533,6 @@ export class CSSGraph {
     this.buildContainingMediaStacks();
     this.buildKeyframeIndex();
     this.buildContainerNameIndexes();
-    this.buildElementKinds();
     this.buildSelectorPseudoClassIndex();
     this.buildMultiDeclarationProperties();
     this.buildKeyframeDeclarations();
@@ -661,14 +642,6 @@ export class CSSGraph {
           this.unknownContainerQueries.push(atRule);
         }
       }
-    }
-  }
-
-  private buildElementKinds(): void {
-    for (let i = 0; i < this.rules.length; i++) {
-      const rule = this.rules[i];
-      if (!rule) continue;
-      classifyRuleElementKinds(rule);
     }
   }
 

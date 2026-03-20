@@ -5,7 +5,7 @@
  */
 
 import type { AtRule, Rule, Declaration, Container } from "postcss";
-import type { CSSGraph } from "../impl";
+import { classifyPart, type CSSGraph } from "../impl";
 import type { CSSInput } from "../input";
 import type {
   FileEntity,
@@ -1016,6 +1016,12 @@ function createSelectorEntity(
   const { parts, specificity, complexity } = parseSelectorComplete(raw);
   const specificityScore = specificityToScore(specificity);
   const anchor = buildSelectorAnchor(raw, parts, complexity.combinators);
+
+  const kinds = rule.elementKinds;
+  for (let k = 0; k < parts.length; k++) {
+    const part = parts[k];
+    if (part) classifyPart(part, kinds);
+  }
 
   return {
     id,
