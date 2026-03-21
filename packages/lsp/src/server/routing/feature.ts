@@ -21,7 +21,6 @@ import { convertDiagnostics } from "../handlers/diagnostics";
 import { collectTsDiagnosticsForFile } from "../handlers/ts-diagnostics";
 import { isServerReady } from "../handlers/lifecycle";
 import { DiagnosticKind } from "../diagnostics-manager";
-import { isRunningOrEnriched } from "../server-state";
 import type { FeatureHandlerContext } from "../handlers/handler-context";
 import type { GcTimer } from "../gc-timer";
 import type { Logger } from "../../core/logger";
@@ -87,11 +86,11 @@ export function setupFeatureHandlers(context: ServerContext): void {
 
   function getCtx(): FeatureHandlerContext | null {
     const phase = context.phase;
-    return isRunningOrEnriched(phase) ? phase.handlerCtx : null;
+    return phase.tag === "running" || phase.tag === "enriched" ? phase.handlerCtx : null;
   }
 
   function isReady(): boolean {
-    return isServerReady(context.serverState) && isRunningOrEnriched(context.phase);
+    return isServerReady(context.serverState) && context.phase.tag === "running" || context.phase.tag === "enriched";
   }
 
   const { log, gcTimer } = context;
@@ -184,7 +183,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
        (3–8s), blocking the entire event loop and stalling all pending LSP
        messages. Return empty; the client will retry once we push results via
        the normal Tier 2 startup path. */
-    if (!isRunningOrEnriched(phase) || !isServerReady(context.serverState)) {
+    if (phase.tag !== "running" && phase.tag !== "enriched" || !isServerReady(context.serverState)) {
       if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] EARLY EXIT: phase=${context.phase.tag} serverReady=${isServerReady(context.serverState)}`);
       return { kind: DocumentDiagnosticReportKind.Full, items: [] };
     }

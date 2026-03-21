@@ -45,8 +45,3 @@ export type LifecyclePhase =
   | PhaseRunning
   | PhaseEnriched
   | PhaseShuttingDown;
-
-// eslint-disable-next-line solid/avoid-type-casting -- type guard, not a cast
-export function isRunningOrEnriched(phase: LifecyclePhase): phase is PhaseRunning | PhaseEnriched {
-  return phase.tag === "running" || phase.tag === "enriched";
-}

@@ -28,7 +28,6 @@ import {
 import { createFileIndex } from "../../core/file-index";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
-import { isRunningOrEnriched } from "../server-state";
 import type { LifecyclePhase } from "../server-state";
 import type { ServerContext } from "../connection";
 import type { LifecycleHandlerContext } from "../handlers/handler-context";
@@ -75,17 +74,17 @@ export function setupLifecycleHandlers(context: ServerContext): void {
   connection.onDidChangeWatchedFiles(async (params) => {
     await context.ready;
     const watchPhase = context.phase;
-    if (!isRunningOrEnriched(watchPhase)) return;
+    if (watchPhase.tag !== "running" && watchPhase.tag !== "enriched") return;
     let eslintConfigChanged = false;
     const changes = params.changes;
-    const paths: string[] = new Array(changes.length);
+    const paths: string[] = [];
     const fileIndex = watchPhase.tag === "enriched" ? watchPhase.fileIndex : watchPhase.fileIndex;
 
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       const path = uriToPath(change.uri);
-      paths[i] = path;
+      paths.push(path);
 
       if (path.endsWith("eslint.config.mjs") || path.endsWith("eslint.config.js") || path.endsWith("eslint.config.cjs")) {
         eslintConfigChanged = true;
@@ -132,7 +131,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         for (const dep of deps) needed.add(dep);
       }
       if (needed.size > 0) {
-        const open = context.docManager.openPaths() as string[];
+        const open = context.docManager.openPaths();
         for (let i = 0, len = open.length; i < len; i++) {
           const p = open[i];
           if (!p) continue;
@@ -142,11 +141,11 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     }
 
     context.changeProcessor.processChanges(
-      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
+      paths.map(p => ({ path: p, kind: "changed" as const })),
     );
 
     const rediagPhase = context.phase;
-    if (isRunningOrEnriched(rediagPhase)) {
+    if (rediagPhase.tag === "running" || rediagPhase.tag === "enriched") {
       const project = rediagPhase.project;
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
@@ -172,7 +171,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       context.log.setLevel(parseLogLevel(rawLevel, "info"));
     }
 
-    if (!isRunningOrEnriched(context.phase)) return;
+    if (context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
 
     const result = handleConfigurationChange(params, serverState);
     if (!result.rebuildIndex && !result.reloadEslint && !result.rediagnose) return;

@@ -24,7 +24,6 @@ import type { Project } from "../core/project";
 import { collectTsDiagnosticsForFile, tsDiagsEqual, convertTsDiagnostic } from "./handlers/ts-diagnostics";
 import { convertDiagnostics } from "./handlers/diagnostics";
 import type { Logger } from "../core/logger";
-import { isRunningOrEnriched } from "./server-state";
 import type { ServerContext } from "./connection";
 import { DiagnosticKind } from "./diagnostics-manager";
 import type { ResourceMap } from "./resource-map";
@@ -135,7 +134,7 @@ export function publishFileDiagnostics(
   const key = canonicalPath(path);
   const kind = classifyFile(key);
   const phase = context.phase;
-  const handlerCtx = isRunningOrEnriched(phase) ? phase.handlerCtx : null;
+  const handlerCtx = phase.tag === "running" || phase.tag === "enriched" ? phase.handlerCtx : null;
   const resolved = content
     ?? (kind !== "unknown" ? handlerCtx?.getContent(key) ?? undefined : undefined)
     ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
@@ -164,7 +163,7 @@ export function publishFileDiagnostics(
     context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
   }
 
-  if (context.serverState.config.enableTsDiagnostics && isRunningOrEnriched(phase) && kind === "solid") {
+  if (context.serverState.config.enableTsDiagnostics && phase.tag === "running" || phase.tag === "enriched" && kind === "solid") {
     if (content !== undefined) {
       const ls = project.getLanguageService();
       const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
@@ -226,10 +225,10 @@ export function propagateTsDiagnostics(
   project: Project,
   exclude: ReadonlySet<string>,
 ): void {
-  if (!context.serverState.config.enableTsDiagnostics || !isRunningOrEnriched(context.phase)) return;
+  if (!context.serverState.config.enableTsDiagnostics || context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
 
   const ls = project.getLanguageService();
-  const allOpen = (context.docManager.openPaths() as string[]).filter(p =>
+  const allOpen = context.docManager.openPaths().filter(p =>
     p !== undefined && !exclude.has(p) && classifyFile(p) === "solid",
   );
   if (allOpen.length === 0) return;

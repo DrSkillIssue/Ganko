@@ -21,7 +21,6 @@ import {
   republishMergedDiagnostics,
   propagateTsDiagnostics,
 } from "../diagnostics-push";
-import { isRunningOrEnriched } from "../server-state";
 import type { ServerContext } from "../connection";
 import type { DocumentHandlerContext } from "../handlers/handler-context";
 import type { Project } from "../../core/project";
@@ -72,20 +71,20 @@ export function setupDocumentHandlers(context: ServerContext): void {
     log: context.log,
     runDiagnostics(path: string) {
       const phase = context.phase;
-      if (!isRunningOrEnriched(phase)) return;
+      if (phase.tag !== "running" && phase.tag !== "enriched") return;
       publishFileDiagnostics(context, phase.project, path);
     },
   };
 
   function processChangesCallback(): void {
     const phase = context.phase;
-    const project = isRunningOrEnriched(phase) ? phase.project : context.serverState.project;
+    const project = phase.tag === "running" || phase.tag === "enriched" ? phase.project : context.serverState.project;
     if (!project) return;
 
     const changes = docManager.drainPendingChanges();
     if (changes.length === 0) return;
 
-    if (!isRunningOrEnriched(phase)) {
+    if (phase.tag !== "running" && phase.tag !== "enriched") {
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];
         if (!change) continue;
@@ -99,12 +98,12 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     const t0 = performance.now();
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
-    const paths: string[] = new Array(changes.length);
+    const paths: string[] = [];
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      paths[i] = change.path;
+      paths.push(change.path);
       project.updateFile(change.path, change.content);
       evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, change.path);
     }
@@ -119,7 +118,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     refreshCrossFileCache(context, project, changes);
     context.changeProcessor.processChanges(
-      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
+      paths.map(p => ({ path: p, kind: "changed" as const })),
       diagnosed,
     );
 
@@ -149,7 +148,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       + `version=${event.document.version} openDocs=${docManager.openCount}`,
     );
 
-    if (!isRunningOrEnriched(openPhase)) {
+    if (openPhase.tag !== "running" && openPhase.tag !== "enriched") {
       const kind = classifyFile(key);
       if (kind === "solid") {
         publishTier1Diagnostics(context, key, event.document.getText());
@@ -164,7 +163,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
     await context.ready;
     const queued = docManager.change(event);
-    if (!queued || !isRunningOrEnriched(context.phase)) return;
+    if (!queued || context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
     context.tsPropagationCancel?.();
   });
 
@@ -174,12 +173,12 @@ export function setupDocumentHandlers(context: ServerContext): void {
     if (!isServerReady(serverState)) return;
 
     const savePhase = context.phase;
-    const project = isRunningOrEnriched(savePhase) ? savePhase.project : context.serverState.project;
+    const project = savePhase.tag === "running" || savePhase.tag === "enriched" ? savePhase.project : context.serverState.project;
     if (!project) return;
 
     docManager.save(event);
 
-    if (!isRunningOrEnriched(savePhase)) {
+    if (savePhase.tag !== "running" && savePhase.tag !== "enriched") {
       const changes = docManager.drainPendingChanges();
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];
@@ -214,16 +213,16 @@ export function setupDocumentHandlers(context: ServerContext): void {
     publishFileDiagnostics(context, project, savedPath, savedContent);
     diagnosed.add(savedPath);
 
-    const paths: string[] = new Array(changes.length + 1);
+    const paths: string[] = [];
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      paths[i] = change.path;
+      paths.push(change.path);
     }
-    paths[changes.length] = savedPath;
+    paths.push(savedPath);
 
     context.changeProcessor.processChanges(
-      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
+      paths.map(p => ({ path: p, kind: "changed" as const })),
       diagnosed,
     );
     propagateTsDiagnostics(context, project, new Set([savedPath]));
