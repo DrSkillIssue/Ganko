@@ -22,7 +22,6 @@ import {
   createConnection,
   ProposedFeatures,
   type Connection,
-  type Diagnostic as LSPDiagnostic,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import ts from "typescript";
@@ -33,13 +32,11 @@ import {
   classifyFile,
   contentHash,
   isToolingConfig,
-  CROSS_FILE_DEPENDENTS,
   ALL_EXTENSIONS,
   prefixLogger,
   createLogger,
   Level,
 } from "@drskillissue/ganko-shared";
-import type { FileKind } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
 import type { FileIndex } from "../core/file-index";
@@ -51,7 +48,6 @@ import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
 
 import { type ServerState, createServerState } from "./handlers/lifecycle";
-import { type DocumentState, createDocumentState, getOpenDocumentPaths } from "./handlers/document";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "./diagnostics-push";
 
 import { createResourceIdentity, type ResourceIdentity } from "./resource-identity";
@@ -118,40 +114,6 @@ function createHandlerContext(
   };
 }
 
-/**
- * Collect open file paths whose cross-file diagnostics are affected
- * by a batch of changed paths.
- *
- * Unions the dependent-kind sets for each changed path's kind via
- * `CROSS_FILE_DEPENDENTS`, then returns open files matching those kinds
- * (minus any in `exclude`).
- */
-function collectAffectedPaths(
-  changed: readonly string[],
-  state: DocumentState,
-  exclude?: ReadonlySet<string>,
-  logger?: Logger,
-): string[] {
-  const needed = new Set<FileKind>();
-  for (let i = 0, len = changed.length; i < len; i++) {
-    const changedPath = changed[i];
-    if (!changedPath) continue;
-    const deps = CROSS_FILE_DEPENDENTS[classifyFile(changedPath)];
-    for (const dep of deps) needed.add(dep);
-  }
-  if (needed.size === 0) return [];
-
-  const open = getOpenDocumentPaths(state);
-  const out: string[] = [];
-  for (let i = 0, len = open.length; i < len; i++) {
-    const p = open[i];
-    if (!p) continue;
-    if (exclude !== undefined && exclude.has(p)) continue;
-    if (needed.has(classifyFile(p))) out.push(p);
-  }
-  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
-  return out;
-}
 
 /**
  * Server context containing all state.
@@ -166,7 +128,6 @@ export interface ServerContext {
   readonly documents: FilteredTextDocuments
   readonly log: LeveledLogger
   readonly serverState: ServerState
-  readonly documentState: DocumentState
   handlerCtx: HandlerContext | null
   project: Project | null
   fileIndex: FileIndex | null
@@ -178,7 +139,6 @@ export interface ServerContext {
   cachedTier1Host: ts.CompilerHost | null
   watchProgramReady: boolean
   workspaceReady: boolean
-  readonly tsDiagCache: Map<string, readonly LSPDiagnostic[]>
   tsPropagationCancel: (() => void) | null
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
@@ -238,7 +198,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   });
 
   const diagCache = new Map<string, readonly Diagnostic[]>();
-  const tsDiagCache = new Map<string, readonly LSPDiagnostic[]>();
   const graphCache = new GraphCache(prefixLogger(log, "cache"));
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
@@ -264,7 +223,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     documents,
     log,
     serverState,
-    documentState: createDocumentState(),
     handlerCtx: null,
     project: null,
     fileIndex: null,
@@ -275,7 +233,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     cachedTier1Host: null,
     watchProgramReady: false,
     workspaceReady: false,
-    tsDiagCache,
     tsPropagationCancel: null,
     gcTimer,
     memoryWatcher,
@@ -292,9 +249,9 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     },
 
     resolveContent(path) {
-      const uri = context.documentState.pathIndex.get(canonicalPath(path));
-      if (uri !== undefined) {
-        const doc = documents.get(uri);
+      const tracked = docManager.getByPath(path);
+      if (tracked !== null) {
+        const doc = documents.get(tracked.uri);
         if (doc) return doc.getText();
       }
       try {
@@ -308,7 +265,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       const key = canonicalPath(path);
       if (log.isLevelEnabled(Level.Debug)) log.debug(`evictFileCache: ${key}`);
       diagCache.delete(key);
-      tsDiagCache.delete(key);
+      diagManager.evict(key);
       graphCache.invalidate(key);
     },
 
@@ -317,15 +274,10 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       if (!project) return;
       if (changed.length === 0) return;
 
-      const affected = collectAffectedPaths(changed, context.documentState, exclude, log);
-      if (affected.length > 0) {
-        if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
-      }
-      for (let i = 0, len = affected.length; i < len; i++) {
-        const affectedPath = affected[i];
-        if (!affectedPath) continue;
-        publishFileDiagnostics(context, project, affectedPath);
-      }
+      changeProcessor.processChanges(
+        changed.map(p => ({ path: p, kind: "changed" as const })),
+        exclude,
+      );
     },
 
     rediagnoseAll(clearTsCache = false) {
@@ -334,10 +286,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
       graphCache.invalidateAll();
       diagCache.clear();
-      if (clearTsCache) {
-        tsDiagCache.clear();
-        diagManager.clear();
-      }
+      diagManager.clear();
       const paths = docManager.openPaths();
       if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
       for (let i = 0, len = paths.length; i < len; i++) {

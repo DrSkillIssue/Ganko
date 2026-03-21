@@ -55,7 +55,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
   connection.onShutdown(() => {
     context.gcTimer.dispose();
     context.memoryWatcher.stop();
-    handleShutdown(serverState, context.documentState, context.log, context);
+    handleShutdown(serverState, context.log, context);
   });
 
   connection.onExit(() => {

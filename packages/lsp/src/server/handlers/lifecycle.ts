@@ -22,7 +22,6 @@ import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
-import type { DocumentState } from "./document";
 import type { Logger } from "../../core/logger";
 
 
@@ -317,32 +316,22 @@ async function enrichWorkspace(
  */
 export function handleShutdown(
   state: ServerState,
-  documentState: DocumentState,
   log: Logger,
   context?: ServerContext,
 ): void {
   state.shuttingDown = true;
 
-  // Flush docManager debounce if available
   if (context) {
     context.docManager.flush();
-  }
-
-  if (documentState.debounceTimer !== null) {
-    clearTimeout(documentState.debounceTimer);
-    documentState.debounceTimer = null;
+    context.tsPropagationCancel?.();
+    context.tsPropagationCancel = null;
+    context.project = null;
+    context.handlerCtx = null;
   }
 
   if (state.project) {
     state.project.dispose();
     state.project = null;
-  }
-
-  if (context) {
-    context.tsPropagationCancel?.();
-    context.tsPropagationCancel = null;
-    context.project = null;
-    context.handlerCtx = null;
   }
 
   log.info("Solid LSP shutting down");

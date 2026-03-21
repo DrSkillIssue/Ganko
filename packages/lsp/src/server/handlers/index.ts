@@ -16,23 +16,6 @@ export {
   isServerReady,
 } from "./lifecycle";
 
-export {
-  type DocumentState,
-  type DocumentInfo,
-  type PendingChange,
-  createDocumentState,
-  handleDidOpen,
-  handleDidChange,
-  handleDidSave,
-  handleDidClose,
-  getPendingChanges,
-  clearPendingChanges,
-  flushPendingChanges,
-  isDebouncing,
-  getDocumentInfo,
-  getDocumentByPath,
-  getOpenDocumentPaths,
-} from "./document";
 
 export {
   toLSPDiagnostic,
