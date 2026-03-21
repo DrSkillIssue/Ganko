@@ -219,14 +219,18 @@ function walkAndProcess(
         parentAtRule.rules.push(rule);
       }
 
-      const selectorStrings = parseSelectorList(rule.selectorText);
-      for (let j = 0; j < selectorStrings.length; j++) {
-        const selectorText = selectorStrings[j];
-        if (!selectorText) continue;
-        const selector = createSelectorEntity(graph, selectorText, rule);
-        graph.addSelector(selector);
-        rule.selectors.push(selector);
-        graph.registerRuleBySelector(selectorText, rule);
+      // Keyframe step selectors (0%, 16.67%, from, to) are not CSS selectors.
+      // Parsing them causes percentage decimals like .67 to be indexed as classes.
+      if (parentAtRule === null || parentAtRule.kind !== "keyframes") {
+        const selectorStrings = parseSelectorList(rule.selectorText);
+        for (let j = 0; j < selectorStrings.length; j++) {
+          const selectorText = selectorStrings[j];
+          if (!selectorText) continue;
+          const selector = createSelectorEntity(graph, selectorText, rule);
+          graph.addSelector(selector);
+          rule.selectors.push(selector);
+          graph.registerRuleBySelector(selectorText, rule);
+        }
       }
 
       const ruleChildren = ruleNode.nodes;
