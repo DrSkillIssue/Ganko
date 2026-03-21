@@ -334,8 +334,11 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
       graphCache.invalidateAll();
       diagCache.clear();
-      if (clearTsCache) tsDiagCache.clear();
-      const paths = getOpenDocumentPaths(context.documentState);
+      if (clearTsCache) {
+        tsDiagCache.clear();
+        diagManager.clear();
+      }
+      const paths = docManager.openPaths();
       if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
       for (let i = 0, len = paths.length; i < len; i++) {
         const p = paths[i];

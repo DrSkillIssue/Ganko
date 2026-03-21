@@ -13,14 +13,6 @@
 
 import { canonicalPath, classifyFile, uriToPath, Level } from "@drskillissue/ganko-shared";
 import { runCrossFileDiagnostics } from "../../core/analyze";
-import type { PendingChange } from "../handlers/document";
-import {
-  handleDidOpen,
-  handleDidChange,
-  handleDidClose,
-  handleDidSave,
-  flushPendingChanges,
-} from "../handlers/document";
 import { isServerReady } from "../handlers/lifecycle";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import {
@@ -32,8 +24,6 @@ import {
 import type { ServerContext } from "../connection";
 import type { Project } from "../../core/project";
 
-/** Debounce delay for document changes in milliseconds. */
-const DEBOUNCE_MS = 150;
 
 /**
  * Rebuild workspace cross-file results once for the current cache state.
@@ -45,7 +35,7 @@ const DEBOUNCE_MS = 150;
 function refreshCrossFileCache(
   context: ServerContext,
   project: Project,
-  changed: readonly PendingChange[],
+  changed: readonly { readonly path: string }[],
 ): void {
   const fileIndex = context.fileIndex;
   if (!fileIndex) return;
@@ -75,25 +65,16 @@ function refreshCrossFileCache(
  * Wire document handlers onto the LSP connection.
  */
 export function setupDocumentHandlers(context: ServerContext): void {
-  const { documents, documentState, serverState } = context;
+  const { documents, serverState, docManager } = context;
 
-  /**
-   * Process pending document changes after debounce.
-   *
-   * Two-phase approach: first evict all caches, then diagnose all
-   * changed files. This ensures cross-file diagnostics use the
-   * latest state even when CSS and Solid files change in the same batch.
-   */
   function processChangesCallback(): void {
-    documentState.debounceTimer = null;
     const project = context.project;
     if (!project) return;
 
+    const changes = docManager.drainPendingChanges();
+    if (changes.length === 0) return;
+
     if (!context.watchProgramReady) {
-      /* Tier 1 path: program not built yet. Update the project's file buffers
-         (so the eventual program build uses current content) and publish
-         Tier 1 diagnostics for solid files. */
-      const changes = flushPendingChanges(documentState);
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];
         if (!change) continue;
@@ -106,7 +87,6 @@ export function setupDocumentHandlers(context: ServerContext): void {
     }
 
     const t0 = performance.now();
-    const changes = flushPendingChanges(documentState);
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
     const paths: string[] = new Array(changes.length);
 
@@ -114,7 +94,6 @@ export function setupDocumentHandlers(context: ServerContext): void {
       const change = changes[i];
       if (!change) continue;
       paths[i] = change.path;
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: evicting ${change.path}`);
       project.updateFile(change.path, change.content);
       context.evictFileCache(change.path);
     }
@@ -123,14 +102,11 @@ export function setupDocumentHandlers(context: ServerContext): void {
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: diagnosing ${change.path} (includeCrossFile=false)`);
       publishFileDiagnostics(context, project, change.path, change.content, false);
       diagnosed.add(change.path);
     }
 
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug("processChangesCallback: refreshing cross-file cache for changed batch");
     refreshCrossFileCache(context, project, changes);
-
     context.rediagnoseAffected(paths, diagnosed);
 
     for (let i = 0, len = changes.length; i < len; i++) {
@@ -142,25 +118,25 @@ export function setupDocumentHandlers(context: ServerContext): void {
     context.connection.tracer.log(
       `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
     );
-
     propagateTsDiagnostics(context, project, diagnosed);
   }
 
+  // Register the debounced changes callback on docManager
+  docManager.onDebouncedChanges(() => processChangesCallback());
+
   documents.onDidOpen(async (event) => {
-    const path = handleDidOpen(event, documentState);
+    const path = docManager.open(event);
     if (!path) return;
     await context.ready;
 
     const key = canonicalPath(path);
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
       `didOpen: uri=${event.document.uri} path=${key} hasProject=${!!context.project} `
-      + `version=${event.document.version} openDocs=${documentState.openDocuments.size} `
+      + `version=${event.document.version} openDocs=${docManager.openCount} `
       + `watchReady=${context.watchProgramReady}`,
     );
 
     if (!context.watchProgramReady) {
-      /* Tier 1: single-file program, no waiting for full build.
-         Only solid files get Tier 1 — CSS and unknown files wait for Tier 2/3. */
       const kind = classifyFile(key);
       if (kind === "solid") {
         publishTier1Diagnostics(context, key, event.document.getText());
@@ -168,10 +144,8 @@ export function setupDocumentHandlers(context: ServerContext): void {
       return;
     }
 
-    /* Tier 2+: full program available. */
     const project = context.project;
     if (project) {
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didOpen: calling publishFileDiagnostics for ${key}`);
       publishFileDiagnostics(context, project, key, event.document.getText());
     }
   });
@@ -179,41 +153,24 @@ export function setupDocumentHandlers(context: ServerContext): void {
   documents.onDidChangeContent(async (event) => {
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
     await context.ready;
-    const queued = handleDidChange(event, documentState);
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: queued=${queued} hasProject=${!!context.project} pendingChanges=${documentState.pendingChanges.size}`);
+    const queued = docManager.change(event);
     if (!queued || !context.project) return;
-
     context.tsPropagationCancel?.();
-
-    const timer = documentState.debounceTimer;
-    if (timer !== null) {
-      clearTimeout(timer);
-    }
-
-    documentState.debounceTimer = setTimeout(processChangesCallback, DEBOUNCE_MS);
+    // Debounce is handled internally by docManager
   });
 
   documents.onDidSave(async (event) => {
     await context.ready;
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave ENTER: uri=${event.document.uri} version=${event.document.version}`);
-    if (!isServerReady(serverState)) {
-      context.log.debug("didSave: server not ready, returning");
-      return;
-    }
+    if (!isServerReady(serverState)) return;
 
     const project = context.project;
-    if (!project) {
-      context.log.debug("didSave: no project, returning");
-      return;
-    }
+    if (!project) return;
 
-    handleDidSave(event, documentState);
+    docManager.save(event);
 
     if (!context.watchProgramReady) {
-      /* During Tier 1: flush pending changes to project file buffers so the
-         eventual program build uses current content. Skip diagnosis — Tier 2
-         re-diagnosis in handleInitialized Phase B will pick this up. */
-      const changes = flushPendingChanges(documentState);
+      const changes = docManager.drainPendingChanges();
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];
         if (!change) continue;
@@ -222,38 +179,28 @@ export function setupDocumentHandlers(context: ServerContext): void {
       return;
     }
 
-    const changes = flushPendingChanges(documentState);
+    docManager.flush();
+    const changes = docManager.drainPendingChanges();
     const savedPath = uriToPath(event.document.uri);
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: ${changes.length} pending changes, savedPath=${savedPath}`);
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: evicting pending change ${change.path}`);
       project.updateFile(change.path, change.content);
       context.evictFileCache(change.path);
     }
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: evicting saved file ${savedPath}`);
     context.evictFileCache(savedPath);
 
-    /* Use the current document text for the saved file to avoid the
-       debounce-timer race: if the timer fired between the save event
-       arriving and this handler running, the TS service has pre-save
-       content. Explicitly passing the document text ensures diagnostics
-       match what is on disk (or what the editor holds post-format). */
     const savedContent = event.document.getText();
-
     const diagnosed = new Set<string>();
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
       if (!change) continue;
       if (change.path !== savedPath) {
-        if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: diagnosing pending change ${change.path}`);
         publishFileDiagnostics(context, project, change.path);
         diagnosed.add(change.path);
       }
     }
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave: diagnosing saved file ${savedPath}`);
     publishFileDiagnostics(context, project, savedPath, savedContent);
     diagnosed.add(savedPath);
 
@@ -266,26 +213,17 @@ export function setupDocumentHandlers(context: ServerContext): void {
     paths[changes.length] = savedPath;
 
     context.rediagnoseAffected(paths, diagnosed);
-    if (project) propagateTsDiagnostics(context, project, new Set([savedPath]));
-    context.log.debug("didSave EXIT");
+    propagateTsDiagnostics(context, project, new Set([savedPath]));
   });
 
   documents.onDidClose((event) => {
-    const path = handleDidClose(event, documentState);
+    const path = docManager.close(event);
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
     if (path) {
       clearDiagnostics(context.connection, event.document.uri);
-      /* Do NOT call evictFileCache here. Closing a tab does not change file
-         content — the SolidGraph, LayoutGraph, and cross-file results remain
-         valid. Calling invalidate() would null the LayoutGraph causing a
-         ~240ms rebuild on the next didOpen. The per-file AST and diagnostic
-         caches are harmless stale entries that get overwritten on reopen.
-         The SolidGraph is version-keyed and self-invalidates when the
-         file's script version changes (e.g. on disk modification). */
       const key = canonicalPath(path);
       context.diagCache.delete(key);
-      context.tsDiagCache.delete(key);
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: cleared diag cache for ${key} (graph preserved)`);
+      context.diagManager.onClose(key);
     }
   });
 }

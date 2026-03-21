@@ -20,7 +20,7 @@ import { runDiagnostics } from "../diagnostics-push";
 import { convertDiagnostics } from "../handlers/diagnostics";
 import { collectTsDiagnosticsForFile } from "../handlers/ts-diagnostics";
 import { isServerReady } from "../handlers/lifecycle";
-import { getOpenDocumentPaths } from "../handlers/document";
+import { DiagnosticKind } from "../diagnostics-manager";
 import type { HandlerContext } from "../handlers/handler-context";
 import type { GcTimer } from "../gc-timer";
 import type { Logger } from "../../core/logger";
@@ -124,7 +124,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
   connection.onWorkspaceSymbol((params) => {
     const ctx = getCtx();
     if (!isReady() || !ctx) return null;
-    const paths = getOpenDocumentPaths(context.documentState);
+    const paths = context.docManager.openPaths();
     const firstPath = paths[0];
     if (paths.length === 0 || !firstPath) return null;
     try {
@@ -208,16 +208,11 @@ export function setupFeatureHandlers(context: ServerContext): void {
       context.evictFileCache(key);
     }
 
-    /* diagCache must hold ONLY singleFile — republishMergedDiagnostics merges
-       diagCache[key] + graphCache.crossFileDiagnostics[key]; storing merged
-       would double-count cross-file diagnostics in subsequent pushes. */
     const contentUnchanged = content === undefined || content === existing;
     const cachedSingle = contentUnchanged ? context.diagCache.get(key) : undefined;
     const singleFile = cachedSingle
       ?? runDiagnostics(project, context.diagCache, key, content, context.serverState.ruleOverrides, context.log);
 
-    /* When content unchanged, cross-file cache is still valid (evictFileCache
-       was skipped). getCachedCrossFileDiagnostics avoids the ~240ms rebuild. */
     const crossFile: readonly Diagnostic[] = context.fileIndex
       ? (contentUnchanged
         ? context.graphCache.getCachedCrossFileDiagnostics(key)
@@ -227,27 +222,22 @@ export function setupFeatureHandlers(context: ServerContext): void {
     const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
     const items = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
 
-    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | fileIndex=${!!context.fileIndex} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
-    if (context.log.isLevelEnabled(Level.Debug)) {
-      for (let d = 0; d < rawDiagnostics.length; d++) {
-        const rd = rawDiagnostics[d];
-        if (rd) context.log.debug(`[PULL-DIAG]   raw[${d}] rule=${rd.rule} sev=${rd.severity} msg=${rd.message.slice(0, 80)}`);
-      }
+    // Update diagManager so push path stays in sync
+    context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.warningsAsErrors));
+    if (crossFile.length > 0) {
+      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.warningsAsErrors));
     }
+
+    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | fileIndex=${!!context.fileIndex} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
 
     if (context.serverState.enableTsDiagnostics && kind === "solid") {
       const ls = project.getLanguageService();
       const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
-      if (tsDiags.length > 0) {
-        context.tsDiagCache.set(key, tsDiags);
-      } else {
-        context.tsDiagCache.delete(key);
-      }
+      context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
       for (let i = 0, len = tsDiags.length; i < len; i++) {
         const td = tsDiags[i];
         if (td) items.push(td);
       }
-      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG]   +${tsDiags.length} TS diags → total ${items.length}`);
     }
 
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics (contentUnchanged=${contentUnchanged})`);

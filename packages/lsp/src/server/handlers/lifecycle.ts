@@ -22,7 +22,7 @@ import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
-import { type DocumentState, getOpenDocumentPaths } from "./document";
+import type { DocumentState } from "./document";
 import type { Logger } from "../../core/logger";
 
 
@@ -224,7 +224,7 @@ export async function handleInitialized(
 
   /* Re-diagnose open files with full program (no cross-file yet — workspace
      enrichment hasn't run). */
-  const openPaths = getOpenDocumentPaths(context.documentState);
+  const openPaths = context.docManager.openPaths() as string[];
   for (let i = 0, len = openPaths.length; i < len; i++) {
     const p = openPaths[i];
     if (!p) continue;
@@ -249,7 +249,7 @@ export async function handleInitialized(
      (5-10s of async work). Using the stale Phase B snapshot would miss
      any file opened after line 218, leaving it with single-file-only
      diagnostics permanently. */
-  const currentOpenPaths = getOpenDocumentPaths(context.documentState);
+  const currentOpenPaths = context.docManager.openPaths() as string[];
   for (let i = 0, len = currentOpenPaths.length; i < len; i++) {
     const p = currentOpenPaths[i];
     if (!p) continue;
@@ -323,6 +323,11 @@ export function handleShutdown(
 ): void {
   state.shuttingDown = true;
 
+  // Flush docManager debounce if available
+  if (context) {
+    context.docManager.flush();
+  }
+
   if (documentState.debounceTimer !== null) {
     clearTimeout(documentState.debounceTimer);
     documentState.debounceTimer = null;
@@ -333,9 +338,6 @@ export function handleShutdown(
     state.project = null;
   }
 
-  /* Null out context references so that any in-flight debounce callback
-     (setTimeout that fired before clearTimeout ran) finds a null project
-     and exits harmlessly. */
   if (context) {
     context.tsPropagationCancel?.();
     context.tsPropagationCancel = null;

@@ -19,16 +19,16 @@ import {
 } from "vscode-languageserver/node";
 import { createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, pathToUri, Level } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
 import { createTier1Program } from "../core/tier1-program";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics } from "../core/analyze";
 import type { Project } from "../core/project";
 import { collectTsDiagnosticsForFile, tsDiagsEqual, convertTsDiagnostic } from "./handlers/ts-diagnostics";
 import { convertDiagnostics } from "./handlers/diagnostics";
-import { getOpenDocumentPaths } from "./handlers/document";
 import type { Logger } from "../core/logger";
 import type { ServerContext } from "./connection";
+import { DiagnosticKind } from "./diagnostics-manager";
 
 /**
  * Run single-file diagnostics and cache the result.
@@ -123,22 +123,26 @@ export function publishTier1Diagnostics(
   context.diagCache.set(path, diagnostics);
 
   const converted = convertDiagnostics(diagnostics, context.serverState.warningsAsErrors);
+  context.diagManager.update(path, DiagnosticKind.Ganko, converted);
 
   if (context.serverState.enableTsDiagnostics) {
+    const tsDiags: LSPDiagnostic[] = [];
     const syntactic = tier1.program.getSyntacticDiagnostics(tier1.sourceFile);
     for (let i = 0, len = syntactic.length; i < len; i++) {
       const d = syntactic[i];
       if (!d) continue;
       const lspDiag = convertTsDiagnostic(d);
-      if (lspDiag !== null) converted.push(lspDiag);
+      if (lspDiag !== null) tsDiags.push(lspDiag);
     }
+    context.diagManager.update(path, DiagnosticKind.TypeScript, tsDiags);
   }
 
-  const uri = context.documentState.pathIndex.get(path) ?? pathToUri(path);
-  const docInfo = context.documentState.openDocuments.get(uri);
+  const uri = context.docManager.uriForPath(path);
+  const tracked = context.docManager.getByUri(uri);
 
-  const params: PublishDiagnosticsParams = { uri, diagnostics: converted };
-  if (docInfo?.version !== undefined) params.version = docInfo.version;
+  const allDiags = context.diagManager.getDiagnostics(path);
+  const params: PublishDiagnosticsParams = { uri, diagnostics: [...allDiags] };
+  if (tracked?.version !== undefined) params.version = tracked.version;
   context.connection.sendDiagnostics(params);
 
   if (context.log.isLevelEnabled(Level.Info)) {
@@ -189,29 +193,22 @@ export function publishFileDiagnostics(
      that would violate the single-file-only invariant and cause double-counting
      in republishMergedDiagnostics and the pull diagnostic handler. */
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-  const diagnostics = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
+
+  context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.warningsAsErrors));
+  if (crossFile.length > 0) {
+    context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.warningsAsErrors));
+  }
 
   if (context.serverState.enableTsDiagnostics && context.watchProgramReady && kind === "solid") {
-    let tsDiags: readonly LSPDiagnostic[];
     if (content !== undefined) {
       const ls = project.getLanguageService();
-      tsDiags = collectTsDiagnosticsForFile(ls, key, true);
-      if (tsDiags.length > 0) {
-        context.tsDiagCache.set(key, tsDiags);
-      } else {
-        context.tsDiagCache.delete(key);
-      }
-    } else {
-      tsDiags = context.tsDiagCache.get(key) ?? [];
-    }
-    for (let i = 0, len = tsDiags.length; i < len; i++) {
-      const td = tsDiags[i];
-      if (td) diagnostics.push(td);
+      const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
+      context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
     }
   }
 
-  const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
-  const docInfo = context.documentState.openDocuments.get(uri);
+  const uri = context.docManager.uriForPath(key);
+  const tracked = context.docManager.getByUri(uri);
 
   const elapsed = (performance.now() - t0).toFixed(1);
   if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
@@ -223,8 +220,9 @@ export function publishFileDiagnostics(
     `publishFileDiagnostics ${key}: ${rawDiagnostics.length} diagnostics in ${elapsed}ms`,
   );
 
-  const params: PublishDiagnosticsParams = { uri, diagnostics };
-  if (docInfo?.version !== undefined) params.version = docInfo.version;
+  const allDiags = context.diagManager.getDiagnostics(key);
+  const params: PublishDiagnosticsParams = { uri, diagnostics: [...allDiags] };
+  if (tracked?.version !== undefined) params.version = tracked.version;
   context.connection.sendDiagnostics(params);
 }
 
@@ -247,37 +245,10 @@ export function republishMergedDiagnostics(
 ): void {
   const key = canonicalPath(path);
   const crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
-  const hasTsDiags = context.serverState.enableTsDiagnostics && context.tsDiagCache.has(key);
-  if (crossFile.length === 0 && !hasTsDiags) return;
-
-  const singleFile = context.diagCache.get(key);
-  if (singleFile === undefined) return;
-
-  /* Merge for publication only — do NOT write back to diagCache.
-     diagCache must remain single-file-only (see runDiagnostics doc comment). */
-  const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-  const diagnostics = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
-
-  if (hasTsDiags) {
-    const tsDiags = context.tsDiagCache.get(key);
-    if (tsDiags !== undefined) {
-      for (let i = 0, len = tsDiags.length; i < len; i++) {
-        const td = tsDiags[i];
-        if (td) diagnostics.push(td);
-      }
-    }
+  if (crossFile.length > 0) {
+    context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.warningsAsErrors));
   }
-
-  const uri = context.documentState.pathIndex.get(key) ?? pathToUri(key);
-  const docInfo = context.documentState.openDocuments.get(uri);
-
-  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
-    `republishMergedDiagnostics: ${key} single=${singleFile.length} cross=${crossFile.length} ts=${hasTsDiags ? context.tsDiagCache.get(key)?.length ?? 0 : 0}`,
-  );
-
-  const params: PublishDiagnosticsParams = { uri, diagnostics };
-  if (docInfo?.version !== undefined) params.version = docInfo.version;
-  context.connection.sendDiagnostics(params);
+  context.diagManager.republish(key);
 }
 
 /**
@@ -293,7 +264,7 @@ export function propagateTsDiagnostics(
   if (!context.serverState.enableTsDiagnostics || !context.watchProgramReady) return;
 
   const ls = project.getLanguageService();
-  const allOpen = getOpenDocumentPaths(context.documentState).filter(p =>
+  const allOpen = (context.docManager.openPaths() as string[]).filter(p =>
     p !== undefined && !exclude.has(p) && classifyFile(p) === "solid",
   );
   if (allOpen.length === 0) return;
@@ -311,14 +282,10 @@ export function propagateTsDiagnostics(
       const p = allOpen[i];
       if (!p) continue;
       const tsDiags = collectTsDiagnosticsForFile(ls, p, true);
-      const prev = context.tsDiagCache.get(p);
+      const prev = context.diagManager.getDiagnosticsByKind(p, DiagnosticKind.TypeScript);
       if (!tsDiagsEqual(prev, tsDiags)) {
-        if (tsDiags.length > 0) {
-          context.tsDiagCache.set(p, tsDiags);
-        } else {
-          context.tsDiagCache.delete(p);
-        }
-        republishMergedDiagnostics(context, p);
+        context.diagManager.update(p, DiagnosticKind.TypeScript, tsDiags);
+        context.diagManager.republish(p);
       }
     }
     context.tsPropagationCancel = null;

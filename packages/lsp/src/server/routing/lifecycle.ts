@@ -27,7 +27,6 @@ import {
 } from "../handlers/lifecycle";
 import { createFileIndex } from "../../core/file-index";
 import { clearDiagnostics } from "../handlers/diagnostics";
-import { getOpenDocumentPaths } from "../handlers/document";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import type { ServerContext } from "../connection";
 
@@ -120,7 +119,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         for (const dep of deps) needed.add(dep);
       }
       if (needed.size > 0) {
-        const open = getOpenDocumentPaths(context.documentState);
+        const open = context.docManager.openPaths() as string[];
         for (let i = 0, len = open.length; i < len; i++) {
           const p = open[i];
           if (!p) continue;
@@ -142,9 +141,9 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         if (!path) continue;
         const key = canonicalPath(path);
         if (alreadyDiagnosed.has(key)) continue;
-        const uri = context.documentState.pathIndex.get(key);
+        const uri = context.docManager.uriForPath(key);
         if (uri === undefined) continue;
-        if (!context.documentState.openDocuments.has(uri)) continue;
+        if (!context.docManager.getByUri(uri) !== null) continue;
 
         const doc = context.documents.get(uri);
         const content = doc !== undefined ? doc.getText() : undefined;
