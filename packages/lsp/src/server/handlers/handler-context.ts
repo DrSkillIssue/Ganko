@@ -17,6 +17,3 @@ export interface FeatureHandlerContext {
   getContent(path: string): string | null
   getSolidGraph(path: string): SolidGraph | null
 }
-
-/** @deprecated Use FeatureHandlerContext */
-export type HandlerContext = FeatureHandlerContext

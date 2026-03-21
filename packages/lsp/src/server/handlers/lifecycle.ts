@@ -3,7 +3,7 @@
  *
  * Handles LSP lifecycle events: initialize, initialized, shutdown, exit.
  * On initialized, creates the Project using ganko plugins and
- * wires it into the HandlerContext for all handlers.
+ * wires it into the FeatureHandlerContext for all handlers.
  */
 
 import type {

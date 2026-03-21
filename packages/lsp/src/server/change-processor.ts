@@ -14,12 +14,25 @@
  * Callers never need to know the evict-before-rediagnose dependency.
  */
 
-import type { GraphCache } from "@drskillissue/ganko"
+import type { Diagnostic, GraphCache } from "@drskillissue/ganko"
 import { canonicalPath, classifyFile, CROSS_FILE_DEPENDENTS, Level } from "@drskillissue/ganko-shared"
 import type { FileKind } from "@drskillissue/ganko-shared"
+import type { ResourceMap } from "./resource-map"
 import type { DiagnosticsManager } from "./diagnostics-manager"
 import type { DocumentManager } from "./document-manager"
 import type { Logger } from "../core/logger"
+
+export function evictCachesForPath(
+  diagCache: ResourceMap<readonly Diagnostic[]>,
+  diagManager: DiagnosticsManager,
+  graphCache: GraphCache,
+  path: string,
+): void {
+  const key = canonicalPath(path)
+  diagCache.delete(key)
+  diagManager.evict(key)
+  graphCache.invalidate(key)
+}
 
 export interface FileChangeEvent {
   readonly path: string

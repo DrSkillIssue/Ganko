@@ -8,11 +8,6 @@
  *
  * Modeled after typescript-language-server's ServerState namespace with
  * None/Running/Errored discriminated states and explicit transitions.
- *
- * Migration note: during the transition, ServerContext retains a `phase`
- * field of type ServerPhase. Existing handlers continue working through
- * ServerContext. New handlers use requirePhase() for typed access.
- * Phase 6 deletes ServerContext entirely.
  */
 
 import type { Connection, InitializeParams } from "vscode-languageserver"

@@ -1,7 +1,7 @@
 /**
  * Test Server Implementation
  *
- * Uses HandlerContext to delegate to real LSP handlers.
+ * Uses FeatureHandlerContext to delegate to real LSP handlers.
  * No ts.LanguageService — TS-based features (definition, references,
  * hover, rename) return null. Diagnostics use ganko's
  * analyzeInput directly for in-memory files. Code actions use
@@ -25,7 +25,7 @@ import { resolve } from "node:path";
 import ts from "typescript";
 import { createSolidInput, analyzeInput, type Diagnostic } from "@drskillissue/ganko";
 import { noopLogger } from "@drskillissue/ganko-shared";
-import type { HandlerContext } from "../../src/server/handlers/handler-context";
+import type { FeatureFeatureHandlerContext } from "../../src/server/handlers/handler-context";
 
 import { handleDefinition } from "../../src/server/handlers/definition";
 import { handleReferences } from "../../src/server/handlers/references";
@@ -81,12 +81,12 @@ const EXPR_CONTEXT = /\{([a-zA-Z]*)$/;
 /**
  * Test server instance for integration testing.
  *
- * Provides a HandlerContext backed by in-memory files. TS LanguageService
+ * Provides a FeatureHandlerContext backed by in-memory files. TS LanguageService
  * features return null; diagnostics use ganko's analyzeInput.
  */
 export class TestServer {
   private readonly files = new Map<string, CachedFile>();
-  private readonly ctx: HandlerContext;
+  private readonly ctx: FeatureHandlerContext;
 
   /**
    * Shared ts.Program built from all virtual files. Rebuilt lazily when

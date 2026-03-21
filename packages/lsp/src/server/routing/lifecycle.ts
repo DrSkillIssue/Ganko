@@ -29,30 +29,7 @@ import { createFileIndex } from "../../core/file-index";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import type { ServerContext } from "../connection";
-
-function evictCachesForPath(context: ServerContext, path: string): void {
-  const key = canonicalPath(path);
-  context.diagCache.delete(key);
-  context.diagManager.evict(key);
-  context.graphCache.invalidate(key);
-}
-
-function rediagnoseAll(context: ServerContext, clearTsCache = false): void {
-  const project = context.project;
-  if (!project) return;
-
-  context.graphCache.invalidateAll();
-  context.diagCache.clear();
-  context.diagManager.clear();
-  const paths = context.docManager.openPaths();
-  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
-  for (let i = 0, len = paths.length; i < len; i++) {
-    const p = paths[i];
-    if (!p) continue;
-    publishFileDiagnostics(context, project, p);
-  }
-  propagateTsDiagnostics(context, project, new Set());
-}
+import { evictCachesForPath } from "../change-processor";
 
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
@@ -103,15 +80,15 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
       if (change.type === FileChangeType.Created) {
         context.fileIndex?.add(path);
-        evictCachesForPath(context, path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
       if (change.type === FileChangeType.Changed) {
-        evictCachesForPath(context, path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
       if (change.type === FileChangeType.Deleted) {
         context.fileIndex?.remove(path);
         clearDiagnostics(connection, change.uri);
-        evictCachesForPath(context, path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
     }
 
@@ -121,7 +98,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
-        rediagnoseAll(context);
+        context.changeProcessor.processWorkspaceChange();
         return;
       }
     }
@@ -197,6 +174,6 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
     }
 
-    if (needRediagnose) rediagnoseAll(context, result.rediagnose);
+    if (needRediagnose) context.changeProcessor.processWorkspaceChange(result.rediagnose);
   });
 }

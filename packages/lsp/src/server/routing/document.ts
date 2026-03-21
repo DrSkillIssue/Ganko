@@ -23,14 +23,7 @@ import {
 } from "../diagnostics-push";
 import type { ServerContext } from "../connection";
 import type { Project } from "../../core/project";
-
-
-function evictCachesForPath(context: ServerContext, path: string): void {
-  const key = canonicalPath(path);
-  context.diagCache.delete(key);
-  context.diagManager.evict(key);
-  context.graphCache.invalidate(key);
-}
+import { evictCachesForPath } from "../change-processor";
 
 /**
  * Rebuild workspace cross-file results once for the current cache state.
@@ -98,7 +91,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       if (!change) continue;
       paths[i] = change.path;
       project.updateFile(change.path, change.content);
-      evictCachesForPath(context, change.path);
+      evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, change.path);
     }
 
     const diagnosed = new Set<string>();
@@ -191,9 +184,9 @@ export function setupDocumentHandlers(context: ServerContext): void {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
-      evictCachesForPath(context, change.path);
+      evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, change.path);
     }
-    evictCachesForPath(context, savedPath);
+    evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, savedPath);
 
     const savedContent = event.document.getText();
     const diagnosed = new Set<string>();
