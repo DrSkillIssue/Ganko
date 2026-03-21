@@ -47,6 +47,7 @@ export function collectMonitoredDeclarations(
   selector: SelectorEntity,
   layerOrder: number,
   guard: LayoutRuleGuard,
+  variablesByName: ReadonlyMap<string, readonly VariableEntity[]> | null,
 ): readonly MonitoredDeclaration[] {
   const out: MonitoredDeclaration[] = []
   const declarations = selector.rule.declarations
@@ -65,13 +66,22 @@ export function collectMonitoredDeclarations(
       isImportant: declaration.cascadePosition.isImportant || declaration.node.important,
     }
 
+    // Resolve var() references at the declaration level. This is done once per
+    // selector (not per element) since CSS custom properties from :root are
+    // global. All downstream consumers — cascade map, delta fact system,
+    // signal normalization — receive resolved values automatically.
+    const rawValue = declaration.value
+    const resolvedValue = variablesByName !== null && rawValue.includes("var(")
+      ? substituteVarReferences(rawValue, variablesByName, 0)
+      : rawValue
+
     const directSignal = MONITORED_SIGNAL_NAME_MAP.get(property)
     if (directSignal !== undefined) {
-      out.push({ property: directSignal, value: declaration.value, guardProvenance: guard, position })
+      out.push({ property: directSignal, value: resolvedValue, guardProvenance: guard, position })
       continue
     }
 
-    const value = declaration.value.trim().toLowerCase()
+    const value = resolvedValue.trim().toLowerCase()
     const expanded = expandShorthand(property, value)
     if (expanded === undefined) continue
     if (expanded === null) {
@@ -82,7 +92,7 @@ export function collectMonitoredDeclarations(
         if (!longhand) continue
         const signal = MONITORED_SIGNAL_NAME_MAP.get(longhand)
         if (signal === undefined) continue
-        out.push({ property: signal, value: declaration.value, guardProvenance: guard, position })
+        out.push({ property: signal, value: resolvedValue, guardProvenance: guard, position })
       }
       continue
     }
@@ -242,32 +252,6 @@ function augmentCascadeWithTailwind(
 
 const MAX_VAR_SUBSTITUTION_DEPTH = 10
 
-/**
- * Resolves var() references in cascade declaration values using the CSSGraph's
- * pre-indexed custom property definitions. Substitutes `var(--name)` with the
- * concrete value from the best-matching VariableEntity definition.
- *
- * Handles recursive resolution (vars referencing other vars) up to a bounded
- * depth. Unresolvable references remain as-is — signal normalization will
- * classify them as Unknown.
- */
-function resolveVarReferencesInCascade(
-  cascade: Map<string, LayoutCascadedDeclaration>,
-  variablesByName: ReadonlyMap<string, readonly VariableEntity[]>,
-): void {
-  for (const [property, declaration] of cascade) {
-    if (!declaration.value.includes("var(")) continue
-    const resolved = substituteVarReferences(declaration.value, variablesByName, 0)
-    if (resolved !== declaration.value) {
-      cascade.set(property, {
-        value: resolved,
-        source: declaration.source,
-        guardProvenance: declaration.guardProvenance,
-      })
-    }
-  }
-}
-
 function substituteVarReferences(
   value: string,
   variablesByName: ReadonlyMap<string, readonly VariableEntity[]>,
@@ -327,7 +311,6 @@ export function buildCascadeMapForElement(
   edges: readonly LayoutMatchEdge[],
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
   tailwind: TailwindValidator | null,
-  variablesByName: ReadonlyMap<string, readonly VariableEntity[]> | null,
 ): ReadonlyMap<string, LayoutCascadedDeclaration> {
   const out = new Map<string, LayoutCascadedDeclaration>()
   const positions = new Map<string, CascadePosition>()
@@ -404,13 +387,6 @@ export function buildCascadeMapForElement(
      inline style declarations already present in the cascade. */
   if (tailwind !== null) {
     augmentCascadeWithTailwind(out, node, tailwind)
-  }
-
-  /* Resolve var() references in cascade values using the CSSGraph's
-     pre-resolved variable index. Substitutes var(--name) with the concrete
-     declared value of the matching custom property definition. */
-  if (variablesByName !== null) {
-    resolveVarReferencesInCascade(out, variablesByName)
   }
 
   return out
