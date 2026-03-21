@@ -37,6 +37,7 @@ import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
 import type { FileIndex } from "../core/file-index";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
+import type { LifecyclePhase } from "./server-state";
 import { readFileSync } from "node:fs";
 import { buildSolidGraphForPath } from "../core/analyze";
 import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
@@ -106,32 +107,59 @@ function createFeatureHandlerContext(
 
 
 export interface ServerContext {
+  // --- Infrastructure (always available) ---
   readonly connection: Connection
   readonly documents: FilteredTextDocuments
   readonly log: LeveledLogger
   readonly serverState: ServerState
-  handlerCtx: FeatureHandlerContext | null
-  project: Project | null
-  fileIndex: FileIndex | null
   readonly diagCache: ResourceMap<readonly Diagnostic[]>
   readonly graphCache: GraphCache
-  tailwindValidator: TailwindValidator | null
-  externalCustomProperties?: ReadonlySet<string>
-  watchProgramReady: boolean
-  workspaceReady: boolean
-  tsPropagationCancel: (() => void) | null
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
-  setProject(project: Project): void
-  readonly ready: Promise<void>
-  resolveReady(): void
-  resolveContent(path: string): string | null
-
   readonly identity: ResourceIdentity
   readonly docManager: DocumentManager
   readonly diagManager: DiagnosticsManager
   readonly changeProcessor: ChangeProcessor
   readonly tsService: TsService
+  readonly ready: Promise<void>
+  resolveReady(): void
+  resolveContent(path: string): string | null
+  tsPropagationCancel: (() => void) | null
+
+  // --- Lifecycle phase (discriminated union) ---
+  phase: LifecyclePhase
+  /** Transition to Running phase when project is created. */
+  setProject(project: Project): void
+
+  // --- Deprecated accessors (thin wrappers over phase for migration) ---
+  /** @deprecated Read from context.phase instead */
+  get project(): Project | null
+  /** @deprecated Read from context.phase instead */
+  get handlerCtx(): FeatureHandlerContext | null
+  /** @deprecated Read from context.phase instead */
+  get fileIndex(): FileIndex | null
+  /** @deprecated Read from context.phase instead */
+  get tailwindValidator(): TailwindValidator | null
+  /** @deprecated Read from context.phase instead */
+  get externalCustomProperties(): ReadonlySet<string> | undefined
+  /** @deprecated Read from context.phase instead */
+  get watchProgramReady(): boolean
+  /** @deprecated Read from context.phase instead */
+  get workspaceReady(): boolean
+  /** @deprecated Mutate context.phase instead */
+  set fileIndex(value: FileIndex | null)
+  /** @deprecated Mutate context.phase instead */
+  set tailwindValidator(value: TailwindValidator | null)
+  /** @deprecated Mutate context.phase instead */
+  set externalCustomProperties(value: ReadonlySet<string> | undefined)
+  /** @deprecated Mutate context.phase instead */
+  set watchProgramReady(value: boolean)
+  /** @deprecated Mutate context.phase instead */
+  set workspaceReady(value: boolean)
+  /** @deprecated Mutate context.phase instead */
+  set project(value: Project | null)
+  /** @deprecated Mutate context.phase instead */
+  set handlerCtx(value: FeatureHandlerContext | null)
 }
 
 /** Options for server creation. */
@@ -185,19 +213,22 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   if (options?.warningsAsErrors) config.warningsAsErrors = true;
   const serverState = createServerState(config);
 
+  // Mutable phase-specific state — backing storage for the phase union + compat getters
+  let _project: Project | null = null;
+  let _handlerCtx: FeatureHandlerContext | null = null;
+  let _fileIndex: FileIndex | null = null;
+  let _tailwindValidator: TailwindValidator | null = null;
+  let _externalCustomProperties: ReadonlySet<string> | undefined = undefined;
+  let _watchProgramReady = false;
+  let _workspaceReady = false;
+
   const context: ServerContext = {
     connection,
     documents,
     log,
     serverState,
-    handlerCtx: null,
-    project: null,
-    fileIndex: null,
     diagCache,
     graphCache,
-    tailwindValidator: null,
-    watchProgramReady: false,
-    workspaceReady: false,
     tsPropagationCancel: null,
     gcTimer,
     memoryWatcher,
@@ -216,10 +247,48 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     ready,
     resolveReady() { resolveReady(); },
 
+    // Lifecycle phase
+    phase: { tag: "initializing" },
+
     setProject(project) {
-      context.project = project;
-      context.handlerCtx = createFeatureHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
+      _project = project;
+      _handlerCtx = createFeatureHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
+      context.phase = {
+        tag: "running",
+        project,
+        handlerCtx: _handlerCtx,
+        fileIndex: _fileIndex,
+      };
     },
+
+    // Deprecated compat getters/setters — thin wrappers over backing state
+    get project() { return _project },
+    set project(v) { _project = v },
+    get handlerCtx() { return _handlerCtx },
+    set handlerCtx(v) { _handlerCtx = v },
+    get fileIndex() { return _fileIndex },
+    set fileIndex(v) {
+      _fileIndex = v;
+      // Auto-transition to enriched when fileIndex is set with project available
+      if (v !== null && _project !== null && _handlerCtx !== null) {
+        context.phase = {
+          tag: "enriched",
+          project: _project,
+          handlerCtx: _handlerCtx,
+          fileIndex: v,
+          tailwindValidator: _tailwindValidator,
+          externalCustomProperties: _externalCustomProperties,
+        };
+      }
+    },
+    get tailwindValidator() { return _tailwindValidator },
+    set tailwindValidator(v) { _tailwindValidator = v },
+    get externalCustomProperties() { return _externalCustomProperties },
+    set externalCustomProperties(v) { _externalCustomProperties = v },
+    get watchProgramReady() { return _watchProgramReady },
+    set watchProgramReady(v) { _watchProgramReady = v },
+    get workspaceReady() { return _workspaceReady },
+    set workspaceReady(v) { _workspaceReady = v },
 
     resolveContent(path) {
       const tracked = docManager.getByPath(path);

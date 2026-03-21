@@ -25,5 +25,5 @@ export { ResourceMap } from "./resource-map";
 export { type ResourceIdentity, createResourceIdentity } from "./resource-identity";
 export { DiagnosticsManager, DiagnosticKind } from "./diagnostics-manager";
 export { DocumentManager, DocumentStatus, type TrackedDocument } from "./document-manager";
-export { type GankoServerState, ServerPhase, requirePhase, isReady } from "./server-state";
+export { type LifecyclePhase, type PhaseInitializing, type PhaseRunning, type PhaseEnriched, type PhaseShuttingDown, isRunningOrEnriched } from "./server-state";
 export { ChangeProcessor, type FileChangeEvent } from "./change-processor";
