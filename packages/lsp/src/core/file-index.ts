@@ -185,6 +185,14 @@ function scanDir(
     }
 
     if (entry.isDirectory()) {
+      if (entry.name === "node_modules") {
+        // Scan top-level entries inside node_modules for symlinked workspace
+        // packages. Symlinks indicate workspace dependencies whose source files
+        // (including co-located CSS) must be in the analysis set. Non-symlink
+        // directories (actual node_modules dependencies) are not traversed.
+        scanWorkspaceSymlinks(join(dir, entry.name), rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
+        continue;
+      }
       if (SKIP_DIRS.has(entry.name)) {
         if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: skip dir (built-in): ${join(dir, entry.name)}`);
         continue;
@@ -213,6 +221,72 @@ function scanDir(
   /* Pop the nested gitignore when leaving this directory. */
   if (nestedIgnore !== null) {
     gitignoreStack.pop();
+  }
+}
+
+/**
+ * Scans a node_modules directory for symlinked workspace packages and
+ * recursively indexes their contents. Only follows symlinked directories
+ * (workspace packages) — non-symlink directories (installed dependencies)
+ * are skipped. Handles scoped packages (@scope/name) by scanning one
+ * level deeper for scope directories.
+ */
+function scanWorkspaceSymlinks(
+  nodeModulesDir: string,
+  rootPath: string,
+  excludes: readonly string[],
+  solidFiles: Set<string>,
+  cssFiles: Set<string>,
+  visited: Set<string>,
+  gitignoreStack: ScopedIgnore[],
+  log?: Logger,
+): void {
+  let entries;
+  try {
+    entries = readdirSync(nodeModulesDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    if (entry.name.startsWith(".")) continue;
+
+    // Scoped packages: @scope directories contain the actual package symlinks
+    if (entry.isDirectory() && entry.name.startsWith("@")) {
+      const scopeDir = join(nodeModulesDir, entry.name);
+      let scopeEntries;
+      try {
+        scopeEntries = readdirSync(scopeDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (let j = 0; j < scopeEntries.length; j++) {
+        const scopeEntry = scopeEntries[j];
+        if (!scopeEntry) continue;
+        if (!scopeEntry.isSymbolicLink()) continue;
+        const linkPath = join(scopeDir, scopeEntry.name);
+        const resolved = resolveSymlink(linkPath, log);
+        if (resolved === null || !resolved.isDir) continue;
+        if (visited.has(resolved.realPath)) continue;
+        visited.add(resolved.realPath);
+        if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: workspace package (scoped): ${entry.name}/${scopeEntry.name} → ${resolved.realPath}`);
+        scanDir(resolved.realPath, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
+      }
+      continue;
+    }
+
+    // Unscoped packages: direct symlinks are workspace packages
+    if (entry.isSymbolicLink()) {
+      const linkPath = join(nodeModulesDir, entry.name);
+      const resolved = resolveSymlink(linkPath, log);
+      if (resolved === null || !resolved.isDir) continue;
+      if (visited.has(resolved.realPath)) continue;
+      visited.add(resolved.realPath);
+      if (log?.isLevelEnabled(Level.Trace)) log.trace(`fileIndex: workspace package: ${entry.name} → ${resolved.realPath}`);
+      scanDir(resolved.realPath, rootPath, excludes, solidFiles, cssFiles, visited, gitignoreStack, log);
+    }
   }
 }
 
