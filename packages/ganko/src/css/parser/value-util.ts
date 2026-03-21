@@ -91,27 +91,37 @@ function tryEvalConstantCalc(raw: string, contextFontSize: number): number | nul
   if (values.length === 0 || values.length !== operators.length + 1) return null
 
   // Two-pass evaluation: * and / first, then + and -
-  const reducedValues: number[] = [values[0]!]
+  const firstValue = values[0]
+  if (firstValue === undefined) return null
+  const reducedValues: number[] = [firstValue]
   const reducedOps: string[] = []
 
   for (let i = 0; i < operators.length; i++) {
-    const op = operators[i]!
-    const right = values[i + 1]!
+    const op = operators[i]
+    const right = values[i + 1]
+    if (op === undefined || right === undefined) return null
     if (op === "*") {
-      reducedValues[reducedValues.length - 1]! *= right
+      const last = reducedValues[reducedValues.length - 1]
+      if (last === undefined) return null
+      reducedValues[reducedValues.length - 1] = last * right
     } else if (op === "/") {
       if (right === 0) return null
-      reducedValues[reducedValues.length - 1]! /= right
+      const last = reducedValues[reducedValues.length - 1]
+      if (last === undefined) return null
+      reducedValues[reducedValues.length - 1] = last / right
     } else {
       reducedValues.push(right)
       reducedOps.push(op)
     }
   }
 
-  let result = reducedValues[0]!
+  const base = reducedValues[0]
+  if (base === undefined) return null
+  let result = base
   for (let i = 0; i < reducedOps.length; i++) {
-    const op = reducedOps[i]!
-    const right = reducedValues[i + 1]!
+    const op = reducedOps[i]
+    const right = reducedValues[i + 1]
+    if (op === undefined || right === undefined) return null
     if (op === "+") result += right
     else if (op === "-") result -= right
     else return null
