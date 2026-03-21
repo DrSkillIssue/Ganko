@@ -54,6 +54,11 @@ import { type ServerState, createServerState } from "./handlers/lifecycle";
 import { type DocumentState, createDocumentState, getOpenDocumentPaths } from "./handlers/document";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "./diagnostics-push";
 
+import { createResourceIdentity, type ResourceIdentity } from "./resource-identity";
+import { DocumentManager } from "./document-manager";
+import { DiagnosticsManager } from "./diagnostics-manager";
+import { ChangeProcessor } from "./change-processor";
+
 import { setupLifecycleHandlers } from "./routing/lifecycle";
 import { setupDocumentHandlers } from "./routing/document";
 import { setupFeatureHandlers } from "./routing/feature";
@@ -188,6 +193,12 @@ export interface ServerContext {
   evictFileCache(path: string): void
   rediagnoseAffected(changed: readonly string[], exclude?: ReadonlySet<string>): void
   rediagnoseAll(clearTsCache?: boolean): void
+
+  // --- New architecture modules (Phase 3+ migration) ---
+  readonly identity: ResourceIdentity
+  readonly docManager: DocumentManager
+  readonly diagManager: DiagnosticsManager
+  readonly changeProcessor: ChangeProcessor
 }
 
 /** Options for server creation. */
@@ -232,6 +243,15 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 
+  // New architecture modules
+  const identity = createResourceIdentity();
+  const docManager = new DocumentManager(identity);
+  const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
+    connection.sendDiagnostics({ uri, diagnostics: [...diags] });
+  });
+  // ChangeProcessor wired after context is created (needs rediagnose callbacks)
+  let changeProcessor: ChangeProcessor;
+
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
 
@@ -259,6 +279,10 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     tsPropagationCancel: null,
     gcTimer,
     memoryWatcher,
+    identity,
+    docManager,
+    diagManager,
+    get changeProcessor() { return changeProcessor },
     ready,
     resolveReady() { resolveReady(); },
 
@@ -321,6 +345,16 @@ export function createServer(options?: CreateServerOptions): ServerContext {
       propagateTsDiagnostics(context, project, new Set());
     },
   };
+
+  // Wire ChangeProcessor now that context exists (callbacks reference context)
+  changeProcessor = new ChangeProcessor(
+    diagManager,
+    graphCache,
+    docManager,
+    prefixLogger(log, "changes"),
+    (path) => { if (context.project) publishFileDiagnostics(context, context.project, path) },
+    (exclude) => { if (context.project) propagateTsDiagnostics(context, context.project, exclude) },
+  );
 
   setupLifecycleHandlers(context);
   setupDocumentHandlers(context);
