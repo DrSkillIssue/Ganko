@@ -4,7 +4,7 @@
  * Delegates to ts.LanguageService.findReferences().
  */
 import type { ReferenceParams, Location } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
 import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
@@ -13,7 +13,7 @@ import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
  */
 export function handleReferences(
   params: ReferenceParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): Location[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

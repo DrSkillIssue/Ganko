@@ -3,7 +3,7 @@
  *
  * Handles LSP lifecycle events: initialize, initialized, shutdown, exit.
  * On initialized, creates the Project using ganko plugins and
- * wires it into the HandlerContext for all handlers.
+ * wires it into the FeatureHandlerContext for all handlers.
  */
 
 import type {
@@ -13,55 +13,40 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties, type TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
-import { createFileIndex } from "../../core/file-index";
+import { createFileIndex, type FileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
+import type { PhaseEnriched } from "../server-state";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
-import { type DocumentState, getOpenDocumentPaths } from "./document";
 import type { Logger } from "../../core/logger";
 
 
-/**
- * Server state tracked during lifecycle.
- */
-export interface ServerState {
-  /** Root URI of the workspace */
-  rootUri: string | null
-  /** Root path of the workspace */
-  rootPath: string | null
-  /** Whether server is fully ready */
-  initialized: boolean
-  /** Whether server is shutting down */
-  shuttingDown: boolean
-  /** Capabilities negotiated with client */
-  clientCapabilities: InitializeParams["capabilities"] | null
-  /** Active Project instance */
-  project: Project | null
-  /** Rule severity overrides from VS Code settings */
+export interface ServerConfig {
   vscodeOverrides: RuleOverrides
-  /** Rule severity overrides from ESLint config file */
   eslintOverrides: RuleOverrides
-  /** Merged overrides (VS Code wins over ESLint config) applied to the runner */
   ruleOverrides: RuleOverrides
-  /** Whether to read rules from ESLint config */
   useESLintConfig: boolean
-  /** User-specified ESLint config path */
   eslintConfigPath: string | undefined
-  /** Glob patterns to exclude from file indexing and analysis */
   exclude: readonly string[]
-  /** Global ignore patterns extracted from ESLint config file */
   eslintIgnores: readonly string[]
-  /** Whether TypeScript diagnostics are enabled */
   enableTsDiagnostics: boolean
-  /** Promote all warning-severity diagnostics to errors in LSP output */
   warningsAsErrors: boolean
-  /** Accessibility policy from VS Code settings (wins over ESLint config) */
   vscodePolicy: AccessibilityPolicy
+}
+
+export interface ServerState {
+  rootUri: string | null
+  rootPath: string | null
+  initialized: boolean
+  shuttingDown: boolean
+  clientCapabilities: InitializeParams["capabilities"] | null
+  project: Project | null
+  readonly config: ServerConfig
 }
 
 /**
@@ -69,14 +54,8 @@ export interface ServerState {
  *
  * @returns Empty server state
  */
-export function createServerState(): ServerState {
+export function createServerConfig(): ServerConfig {
   return {
-    rootUri: null,
-    rootPath: null,
-    initialized: false,
-    shuttingDown: false,
-    clientCapabilities: null,
-    project: null,
     vscodeOverrides: {},
     eslintOverrides: {},
     ruleOverrides: {},
@@ -87,6 +66,18 @@ export function createServerState(): ServerState {
     enableTsDiagnostics: false,
     warningsAsErrors: false,
     vscodePolicy: "wcag-aa",
+  };
+}
+
+export function createServerState(config?: ServerConfig): ServerState {
+  return {
+    rootUri: null,
+    rootPath: null,
+    initialized: false,
+    shuttingDown: false,
+    clientCapabilities: null,
+    project: null,
+    config: config ?? createServerConfig(),
   };
 }
 
@@ -126,16 +117,16 @@ export function handleInitialize(
     log.warning(`Invalid initialization options: ${parsed.error.message}`);
   }
   const options = parsed.success ? parsed.data : undefined;
-  state.vscodeOverrides = options?.rules ?? {};
-  state.useESLintConfig = options?.useESLintConfig ?? true;
-  state.eslintConfigPath = options?.eslintConfigPath;
-  state.exclude = options?.exclude ?? [];
-  state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? state.enableTsDiagnostics;
+  state.config.vscodeOverrides = options?.rules ?? {};
+  state.config.useESLintConfig = options?.useESLintConfig ?? true;
+  state.config.eslintConfigPath = options?.eslintConfigPath;
+  state.config.exclude = options?.exclude ?? [];
+  state.config.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? state.config.enableTsDiagnostics;
 
-  state.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
-  setActivePolicy(state.vscodePolicy);
+  state.config.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
+  setActivePolicy(state.config.vscodePolicy);
 
-  const capabilities = buildServerCapabilities(state.warningsAsErrors);
+  const capabilities = buildServerCapabilities(state.config.warningsAsErrors);
 
   return {
     capabilities,
@@ -186,26 +177,26 @@ export async function handleInitialized(
      rule overrides applied. Without this, Tier 1 diagnostics would run
      without overrides, then flicker when Tier 3 applies them. */
 
-  if (state.useESLintConfig) {
-    const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
+  if (state.config.useESLintConfig) {
+    const eslintResult = await loadESLintConfig(rootPath, state.config.eslintConfigPath, log)
       .catch((err: unknown) => {
         if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
         return EMPTY_ESLINT_RESULT;
       });
-    state.eslintOverrides = eslintResult.overrides;
-    state.eslintIgnores = eslintResult.globalIgnores;
-    state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+    state.config.eslintOverrides = eslintResult.overrides;
+    state.config.eslintIgnores = eslintResult.globalIgnores;
+    state.config.ruleOverrides = mergeOverrides(state.config.eslintOverrides, state.config.vscodeOverrides);
   }
 
   const project = createProject({
     rootPath,
     plugins: [SolidPlugin, CSSPlugin],
-    rules: state.ruleOverrides,
+    rules: state.config.ruleOverrides,
     log,
   });
 
   state.project = project;
-  context.setProject(project);
+  const handlerCtx = context.setProject(project);
   state.initialized = true;
   context.resolveReady();
 
@@ -218,13 +209,13 @@ export async function handleInitialized(
      synchronous program build blocks the event loop. */
 
   await project.watchProgramReady();
-  context.watchProgramReady = true;
+  context.phase = { tag: "running", project, handlerCtx, fileIndex: null };
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
   /* Re-diagnose open files with full program (no cross-file yet — workspace
      enrichment hasn't run). */
-  const openPaths = getOpenDocumentPaths(context.documentState);
+  const openPaths = context.docManager.openPaths() as string[];
   for (let i = 0, len = openPaths.length; i < len; i++) {
     const p = openPaths[i];
     if (!p) continue;
@@ -233,8 +224,16 @@ export async function handleInitialized(
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
-  await enrichWorkspace(rootPath, state, context);
-  context.workspaceReady = true;
+  const enrichment = await enrichWorkspace(rootPath, state, context);
+  const enrichedPhase: PhaseEnriched = {
+    tag: "enriched",
+    project,
+    handlerCtx,
+    fileIndex: enrichment.fileIndex,
+    tailwindValidator: enrichment.tailwindValidator,
+    externalCustomProperties: enrichment.externalCustomProperties,
+  };
+  context.phase = enrichedPhase;
 
   /* Invalidate any cross-file results that may have been cached during the
      enrichment window. Even though fileIndex is set atomically after tailwind
@@ -249,7 +248,7 @@ export async function handleInitialized(
      (5-10s of async work). Using the stale Phase B snapshot would miss
      any file opened after line 218, leaving it with single-file-only
      diagnostics permanently. */
-  const currentOpenPaths = getOpenDocumentPaths(context.documentState);
+  const currentOpenPaths = context.docManager.openPaths() as string[];
   for (let i = 0, len = currentOpenPaths.length; i < len; i++) {
     const p = currentOpenPaths[i];
     if (!p) continue;
@@ -266,46 +265,41 @@ export async function handleInitialized(
  * is available. These operations are needed for cross-file diagnostics
  * but not for single-file Tier 1/2 analysis.
  */
+interface EnrichmentResult {
+  readonly fileIndex: FileIndex
+  readonly tailwindValidator: TailwindValidator | null
+  readonly externalCustomProperties: ReadonlySet<string> | undefined
+}
+
 async function enrichWorkspace(
   rootPath: string,
   state: ServerState,
   context: ServerContext,
-): Promise<void> {
+): Promise<EnrichmentResult> {
   const { log } = context;
 
-  /* File index — uses ESLint ignores loaded in Phase A.
-     Built first but NOT exposed on context until all enrichment (Tailwind,
-     external props) is complete. Otherwise a didOpen event firing between
-     fileIndex assignment and tailwind resolution runs cross-file analysis
-     with a null tailwind validator, caches the wrong results, and the stale
-     cache persists even after tailwind resolves. */
   const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
   if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
-  /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
+  let tailwindValidator: TailwindValidator | null = null;
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    context.tailwindValidator = await resolveTailwindValidator(cssFiles, log)
+    tailwindValidator = await resolveTailwindValidator(cssFiles, log)
       .catch((err) => {
         if (log.isLevelEnabled(Level.Warning)) log.warning(`tailwind validator: uncaught error: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
-    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${tailwindValidator !== null ? "resolved" : "not found"}`);
   }
 
-  /* Library analysis: scan installed dependencies for CSS custom properties
-     they inject at runtime (e.g., Kobalte's --kb-* properties set via inline
-     style attributes in JSX). */
   const externalProps = scanDependencyCustomProperties(rootPath);
+  let externalCustomProperties: ReadonlySet<string> | undefined;
   if (externalProps.size > 0) {
-    context.externalCustomProperties = externalProps;
+    externalCustomProperties = externalProps;
     if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
 
-  /* NOW expose the file index — all enrichment is complete, so any cross-file
-     analysis triggered by concurrent didOpen events will see both the file
-     index AND the resolved tailwind validator atomically. */
-  context.fileIndex = fileIndex;
+  return { fileIndex, tailwindValidator, externalCustomProperties };
 }
 
 /**
@@ -317,30 +311,21 @@ async function enrichWorkspace(
  */
 export function handleShutdown(
   state: ServerState,
-  documentState: DocumentState,
   log: Logger,
   context?: ServerContext,
 ): void {
   state.shuttingDown = true;
 
-  if (documentState.debounceTimer !== null) {
-    clearTimeout(documentState.debounceTimer);
-    documentState.debounceTimer = null;
+  if (context) {
+    context.docManager.flush();
+    context.tsPropagationCancel?.();
+    context.tsPropagationCancel = null;
+    context.phase = { tag: "shutdown" };
   }
 
   if (state.project) {
     state.project.dispose();
     state.project = null;
-  }
-
-  /* Null out context references so that any in-flight debounce callback
-     (setTimeout that fired before clearTimeout ran) finds a null project
-     and exits harmlessly. */
-  if (context) {
-    context.tsPropagationCancel?.();
-    context.tsPropagationCancel = null;
-    context.project = null;
-    context.handlerCtx = null;
   }
 
   log.info("Solid LSP shutting down");
@@ -388,21 +373,21 @@ export function handleConfigurationChange(
   if (!settings) return NO_CHANGE;
 
   const eslintSettingChanged =
-    settings.useESLintConfig !== state.useESLintConfig ||
-    settings.eslintConfigPath !== state.eslintConfigPath;
+    settings.useESLintConfig !== state.config.useESLintConfig ||
+    settings.eslintConfigPath !== state.config.eslintConfigPath;
 
-  const excludeChanged = !arraysEqual(settings.exclude ?? [], state.exclude);
-  const tsDiagsChanged = (settings.enableTypeScriptDiagnostics ?? false) !== state.enableTsDiagnostics;
+  const excludeChanged = !arraysEqual(settings.exclude ?? [], state.config.exclude);
+  const tsDiagsChanged = (settings.enableTypeScriptDiagnostics ?? false) !== state.config.enableTsDiagnostics;
 
-  state.vscodeOverrides = settings.rules;
-  state.useESLintConfig = settings.useESLintConfig;
-  state.eslintConfigPath = settings.eslintConfigPath;
-  state.exclude = settings.exclude ?? [];
-  state.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
-  state.vscodePolicy = settings.accessibilityPolicy;
+  state.config.vscodeOverrides = settings.rules;
+  state.config.useESLintConfig = settings.useESLintConfig;
+  state.config.eslintConfigPath = settings.eslintConfigPath;
+  state.config.exclude = settings.exclude ?? [];
+  state.config.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
+  state.config.vscodePolicy = settings.accessibilityPolicy;
   setActivePolicy(settings.accessibilityPolicy);
 
-  const next = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+  const next = mergeOverrides(state.config.eslintOverrides, state.config.vscodeOverrides);
   const overridesChanged = applyOverridesIfChanged(state, next);
 
   return {
@@ -445,20 +430,20 @@ export async function reloadESLintConfig(
   log: Logger,
 ): Promise<ESLintReloadOutcome> {
   const noChange: ESLintReloadOutcome = { overridesChanged: false, ignoresChanged: false };
-  if (!state.useESLintConfig || !state.rootPath) return noChange;
+  if (!state.config.useESLintConfig || !state.rootPath) return noChange;
 
-  const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
+  const eslintResult = await loadESLintConfig(state.rootPath, state.config.eslintConfigPath, log)
     .catch((err: unknown) => {
       if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to reload ESLint config: ${err instanceof Error ? err.message : String(err)}`);
       return EMPTY_ESLINT_RESULT;
     });
 
-  const prevIgnores = state.eslintIgnores;
-  state.eslintOverrides = eslintResult.overrides;
-  state.eslintIgnores = eslintResult.globalIgnores;
-  setActivePolicy(state.vscodePolicy);
+  const prevIgnores = state.config.eslintIgnores;
+  state.config.eslintOverrides = eslintResult.overrides;
+  state.config.eslintIgnores = eslintResult.globalIgnores;
+  setActivePolicy(state.config.vscodePolicy);
 
-  const next = mergeOverrides(eslintResult.overrides, state.vscodeOverrides);
+  const next = mergeOverrides(eslintResult.overrides, state.config.vscodeOverrides);
   const overridesChanged = applyOverridesIfChanged(state, next);
   const ignoresChanged = !arraysEqual(prevIgnores, eslintResult.globalIgnores);
 
@@ -480,7 +465,7 @@ export async function reloadESLintConfig(
  * @returns Whether overrides actually changed
  */
 function applyOverridesIfChanged(state: ServerState, next: RuleOverrides): boolean {
-  const prev = state.ruleOverrides;
+  const prev = state.config.ruleOverrides;
   const prevKeys = Object.keys(prev);
   const nextKeys = Object.keys(next);
 
@@ -492,7 +477,7 @@ function applyOverridesIfChanged(state: ServerState, next: RuleOverrides): boole
     if (same) return false;
   }
 
-  state.ruleOverrides = next;
+  state.config.ruleOverrides = next;
   state.project?.setRuleOverrides(next);
   return true;
 }
@@ -515,6 +500,6 @@ export function isServerReady(state: ServerState): boolean {
  * @returns Combined exclude patterns (user excludes + eslint ignores)
  */
 export function effectiveExclude(state: ServerState): readonly string[] {
-  if (state.eslintIgnores.length === 0) return state.exclude;
-  return [...state.exclude, ...state.eslintIgnores];
+  if (state.config.eslintIgnores.length === 0) return state.config.exclude;
+  return [...state.config.exclude, ...state.config.eslintIgnores];
 }

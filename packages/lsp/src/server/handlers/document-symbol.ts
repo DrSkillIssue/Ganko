@@ -8,7 +8,7 @@ import type {
   DocumentSymbol,
 } from "vscode-languageserver";
 import { SymbolKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
@@ -18,7 +18,7 @@ import type ts from "typescript";
  */
 export function handleDocumentSymbol(
   params: DocumentSymbolParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): DocumentSymbol[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

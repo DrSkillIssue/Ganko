@@ -8,7 +8,7 @@
 import type { FoldingRangeParams, FoldingRange } from "vscode-languageserver";
 import { FoldingRangeKind } from "vscode-languageserver";
 import ts from "typescript";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
 /** Folding kind constants. */
@@ -125,7 +125,7 @@ function getNodeLines(node: ts.Node, sf: ts.SourceFile): [number, number] {
  */
 export function handleFoldingRanges(
   params: FoldingRangeParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): FoldingRange[] | null {
   const filePath = uriToPath(params.textDocument.uri);
   const sf = ctx.getAST(filePath);

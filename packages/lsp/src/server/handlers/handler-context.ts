@@ -1,41 +1,38 @@
-/**
- * HandlerContext - Minimal interface for LSP handlers.
- *
- * Replaces the old ProjectContext from ganko-workspace.
- * Handlers use ts.LanguageService for cross-file features,
- * ganko diagnostics for linting, and ts.SourceFile for
- * structural handlers (folding, selection, linked-editing).
- */
 import type ts from "typescript";
 import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
-import type { Logger } from "@drskillissue/ganko-shared";
+import type { Logger, LeveledLogger } from "@drskillissue/ganko-shared";
+import type { Connection } from "vscode-languageserver/node";
+import type { ResourceIdentity } from "../resource-identity";
+import type { DocumentManager } from "../document-manager";
+import type { DiagnosticsManager } from "../diagnostics-manager";
+import type { LifecyclePhase } from "../server-state";
 
-/** Combined result from a single TS service lookup. */
 export interface TSFileInfo {
   readonly ls: ts.LanguageService
   readonly sf: ts.SourceFile
 }
 
-/** Context passed to all LSP handlers */
-export interface HandlerContext {
-  /** Scoped logger for handler-level tracing. */
+export interface FeatureHandlerContext {
   readonly log: Logger
-  /** Get TypeScript language service for a file */
   getLanguageService(path: string): ts.LanguageService | null
-  /** Get TypeScript source file */
   getSourceFile(path: string): ts.SourceFile | null
-  /**
-   * Get LanguageService + SourceFile in a single lookup.
-   * Avoids the redundant TS service chain that happens when
-   * calling getLanguageService and getSourceFile separately.
-   */
   getTSFileInfo(path: string): TSFileInfo | null
-  /** Get TypeScript SourceFile for a file (for folding/selection/linked-editing) */
   getAST(path: string): ts.SourceFile | null
-  /** Get ganko diagnostics for a file */
   getDiagnostics(path: string): readonly Diagnostic[]
-  /** Get raw file content for offset-to-position conversion */
   getContent(path: string): string | null
-  /** Get the SolidGraph for a file (cached, returns null for non-Solid files) */
   getSolidGraph(path: string): SolidGraph | null
+}
+
+export interface DocumentHandlerContext {
+  readonly identity: ResourceIdentity
+  readonly documents: DocumentManager
+  readonly diagnostics: DiagnosticsManager
+  readonly log: Logger
+  runDiagnostics(path: string): void
+}
+
+export interface LifecycleHandlerContext {
+  readonly connection: Connection
+  readonly log: LeveledLogger
+  transitionPhase(phase: LifecyclePhase): void
 }

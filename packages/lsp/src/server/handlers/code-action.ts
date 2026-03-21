@@ -15,7 +15,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import type { Diagnostic, Fix, FixOperation } from "@drskillissue/ganko";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { toLSPDiagnostic } from "./diagnostics";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
@@ -29,7 +29,7 @@ const KIND_SUPPRESS = `${CodeActionKind.QuickFix}.suppress`;
  */
 export function handleCodeAction(
   params: CodeActionParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): CodeAction[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

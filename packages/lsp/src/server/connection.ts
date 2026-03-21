@@ -12,87 +12,79 @@
  * Diagnostic push is in diagnostics-push.ts:
  * - publishFileDiagnostics, propagateTsDiagnostics (exported for lifecycle.ts)
  *
- * Cache invalidation is centralised in three ServerContext methods:
- * - evictFileCache(path)     — pure cache invalidation, no side effects
- * - rediagnoseAffected(paths) — re-diagnoses open files depending on changed kinds
- * - rediagnoseAll()          — workspace-level invalidation + full re-diagnosis
+ * Cache invalidation is handled by ChangeProcessor — callers invoke
+ * changeProcessor.processChanges() or changeProcessor.processWorkspaceChange()
+ * instead of manual evict-then-rediagnose sequences.
  */
 
 import {
   createConnection,
   ProposedFeatures,
   type Connection,
-  type Diagnostic as LSPDiagnostic,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import ts from "typescript";
 import { GraphCache } from "@drskillissue/ganko";
-import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
 import {
-  canonicalPath,
   classifyFile,
   contentHash,
   isToolingConfig,
-  CROSS_FILE_DEPENDENTS,
   ALL_EXTENSIONS,
   prefixLogger,
   createLogger,
-  Level,
 } from "@drskillissue/ganko-shared";
-import type { FileKind } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
-import type { FileIndex } from "../core/file-index";
-import type { HandlerContext } from "./handlers/handler-context";
+import type { FeatureHandlerContext } from "./handlers/handler-context";
+import type { LifecyclePhase } from "./server-state";
 import { readFileSync } from "node:fs";
 import { buildSolidGraphForPath } from "../core/analyze";
 import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
+import { ResourceMap } from "./resource-map";
 
-import { type ServerState, createServerState } from "./handlers/lifecycle";
-import { type DocumentState, createDocumentState, getOpenDocumentPaths } from "./handlers/document";
+import { type ServerState, createServerState, createServerConfig } from "./handlers/lifecycle";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "./diagnostics-push";
+
+import { createResourceIdentity, type ResourceIdentity } from "./resource-identity";
+import { DocumentManager } from "./document-manager";
+import { DiagnosticsManager } from "./diagnostics-manager";
+import { ChangeProcessor } from "./change-processor";
+import { createTsService, type TsService } from "../core/ts-service";
 
 import { setupLifecycleHandlers } from "./routing/lifecycle";
 import { setupDocumentHandlers } from "./routing/document";
 import { setupFeatureHandlers } from "./routing/feature";
 
-/**
- * Create a HandlerContext from a Project.
- *
- * getAST returns the TypeScript SourceFile directly from the project.
- * getDiagnostics delegates to the diagCache (populated by runDiagnostics).
- */
-function createHandlerContext(
+function createFeatureHandlerContext(
+  tsService: TsService,
   project: Project,
   graphCache: GraphCache,
-  diagCache: Map<string, readonly Diagnostic[]>,
+  diagCache: ResourceMap<readonly Diagnostic[]>,
   handlerLog: Logger,
-): HandlerContext {
-  /* All HandlerContext methods receive paths already canonicalized by
-     uriToPath() in the caller. No redundant canonicalPath() calls. */
+): FeatureHandlerContext {
   return {
     log: handlerLog,
 
     getLanguageService(_path) {
-      return project.getLanguageService();
+      return tsService.getLanguageService();
     },
 
     getSourceFile(path) {
-      return project.getSourceFile(path) ?? null;
+      return tsService.getSourceFile(path);
     },
 
     getTSFileInfo(path) {
-      const ls = project.getLanguageService();
+      const ls = tsService.getLanguageService();
       if (!ls) return null;
-      const sf = project.getSourceFile(path);
+      const sf = tsService.getSourceFile(path);
       if (!sf) return null;
       return { ls, sf };
     },
 
     getAST(path) {
-      return project.getSourceFile(path) ?? null;
+      return tsService.getSourceFile(path);
     },
 
     getDiagnostics(path) {
@@ -100,12 +92,12 @@ function createHandlerContext(
     },
 
     getContent(path) {
-      return project.getSourceFile(path)?.text ?? null;
+      return tsService.getSourceFile(path)?.text ?? null;
     },
 
     getSolidGraph(path) {
       if (classifyFile(path) !== "solid") return null;
-      const sourceFile = project.getSourceFile(path);
+      const sourceFile = tsService.getSourceFile(path);
       if (!sourceFile) return null;
       const version = contentHash(sourceFile.text);
       return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
@@ -113,81 +105,31 @@ function createHandlerContext(
   };
 }
 
-/**
- * Collect open file paths whose cross-file diagnostics are affected
- * by a batch of changed paths.
- *
- * Unions the dependent-kind sets for each changed path's kind via
- * `CROSS_FILE_DEPENDENTS`, then returns open files matching those kinds
- * (minus any in `exclude`).
- */
-function collectAffectedPaths(
-  changed: readonly string[],
-  state: DocumentState,
-  exclude?: ReadonlySet<string>,
-  logger?: Logger,
-): string[] {
-  const needed = new Set<FileKind>();
-  for (let i = 0, len = changed.length; i < len; i++) {
-    const changedPath = changed[i];
-    if (!changedPath) continue;
-    const deps = CROSS_FILE_DEPENDENTS[classifyFile(changedPath)];
-    for (const dep of deps) needed.add(dep);
-  }
-  if (needed.size === 0) return [];
 
-  const open = getOpenDocumentPaths(state);
-  const out: string[] = [];
-  for (let i = 0, len = open.length; i < len; i++) {
-    const p = open[i];
-    if (!p) continue;
-    if (exclude !== undefined && exclude.has(p)) continue;
-    if (needed.has(classifyFile(p))) out.push(p);
-  }
-  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`collectAffectedPaths: ${changed.length} changed → kinds=[${[...needed].join(",")}] → ${out.length} affected`);
-  return out;
-}
-
-/**
- * Server context containing all state.
- *
- * Cache invalidation and dependent re-diagnosis are centralised in
- * `evictFileCache`, `rediagnoseAffected`, and `rediagnoseAll`.
- * Call sites evict per-file in a loop, then call `rediagnoseAffected`
- * once after the batch to avoid redundant re-diagnosis.
- */
 export interface ServerContext {
+  // --- Infrastructure (always available) ---
   readonly connection: Connection
   readonly documents: FilteredTextDocuments
   readonly log: LeveledLogger
   readonly serverState: ServerState
-  readonly documentState: DocumentState
-  handlerCtx: HandlerContext | null
-  project: Project | null
-  fileIndex: FileIndex | null
-  readonly diagCache: Map<string, readonly Diagnostic[]>
+  readonly diagCache: ResourceMap<readonly Diagnostic[]>
   readonly graphCache: GraphCache
-  tailwindValidator: TailwindValidator | null
-  externalCustomProperties?: ReadonlySet<string>
-  cachedCompilerOptions: ts.CompilerOptions | null
-  cachedTier1Host: ts.CompilerHost | null
-  watchProgramReady: boolean
-  workspaceReady: boolean
-  readonly tsDiagCache: Map<string, readonly LSPDiagnostic[]>
-  tsPropagationCancel: (() => void) | null
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
-  setProject(project: Project): void
-  /**
-   * Resolves when handleInitialized completes and the project is wired.
-   * Document handlers must await this before accessing the project.
-   */
+  readonly identity: ResourceIdentity
+  readonly docManager: DocumentManager
+  readonly diagManager: DiagnosticsManager
+  readonly changeProcessor: ChangeProcessor
+  readonly tsService: TsService
   readonly ready: Promise<void>
   resolveReady(): void
   resolveContent(path: string): string | null
-  evictFileCache(path: string): void
-  rediagnoseAffected(changed: readonly string[], exclude?: ReadonlySet<string>): void
-  rediagnoseAll(clearTsCache?: boolean): void
+  tsPropagationCancel: (() => void) | null
+
+  // --- Lifecycle phase (discriminated union) ---
+  phase: LifecyclePhase
+  /** Create FeatureHandlerContext for the project (phase stays unchanged). */
+  setProject(project: Project): FeatureHandlerContext
 }
 
 /** Options for server creation. */
@@ -197,12 +139,6 @@ interface CreateServerOptions {
   readonly warningsAsErrors?: boolean | undefined
 }
 
-/**
- * Create the LSP server.
- *
- * @param options - Optional server configuration
- * @returns Server context
- */
 export function createServer(options?: CreateServerOptions): ServerContext {
   const connection = createConnection(ProposedFeatures.all);
 
@@ -226,51 +162,70 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     return supportedExtensions.has(uri.slice(dotIdx));
   });
 
-  const diagCache = new Map<string, readonly Diagnostic[]>();
-  const tsDiagCache = new Map<string, readonly LSPDiagnostic[]>();
+  const diagCache = new ResourceMap<readonly Diagnostic[]>();
   const graphCache = new GraphCache(prefixLogger(log, "cache"));
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 
+  const identity = createResourceIdentity();
+  const docManager = new DocumentManager(identity);
+  const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
+    const tracked = docManager.getByUri(uri);
+    connection.sendDiagnostics(
+      tracked?.version !== undefined
+        ? { uri, diagnostics: [...diags], version: tracked.version }
+        : { uri, diagnostics: [...diags] },
+    );
+  });
+  // eslint-disable-next-line prefer-const -- assigned after context construction due to circular reference
+  let changeProcessor: ChangeProcessor;
+  let tsService: TsService | null = null;
+
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
 
-  const serverState = createServerState();
-  if (options?.enableTsDiagnostics) serverState.enableTsDiagnostics = true;
-  if (options?.warningsAsErrors) serverState.warningsAsErrors = true;
+  const config = createServerConfig();
+  if (options?.enableTsDiagnostics) config.enableTsDiagnostics = true;
+  if (options?.warningsAsErrors) config.warningsAsErrors = true;
+  const serverState = createServerState(config);
 
   const context: ServerContext = {
     connection,
     documents,
     log,
     serverState,
-    documentState: createDocumentState(),
-    handlerCtx: null,
-    project: null,
-    fileIndex: null,
     diagCache,
     graphCache,
-    tailwindValidator: null,
-    cachedCompilerOptions: null,
-    cachedTier1Host: null,
-    watchProgramReady: false,
-    workspaceReady: false,
-    tsDiagCache,
     tsPropagationCancel: null,
     gcTimer,
     memoryWatcher,
+    identity,
+    docManager,
+    diagManager,
+    get changeProcessor() { return changeProcessor; },
+    get tsService(): TsService {
+      if (tsService === null) {
+        const rootPath = context.serverState.rootPath;
+        if (!rootPath) throw new Error("tsService accessed before rootPath is set");
+        tsService = createTsService(rootPath);
+      }
+      return tsService;
+    },
     ready,
     resolveReady() { resolveReady(); },
 
+    // Lifecycle phase
+    phase: { tag: "initializing" },
+
     setProject(project) {
-      context.project = project;
-      context.handlerCtx = createHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
+      context.tsService.setProject(project);
+      return createFeatureHandlerContext(context.tsService, project, graphCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
-      const uri = context.documentState.pathIndex.get(canonicalPath(path));
-      if (uri !== undefined) {
-        const doc = documents.get(uri);
+      const tracked = docManager.getByPath(path);
+      if (tracked !== null) {
+        const doc = documents.get(tracked.uri);
         if (doc) return doc.getText();
       }
       try {
@@ -279,48 +234,16 @@ export function createServer(options?: CreateServerOptions): ServerContext {
         return null;
       }
     },
-
-    evictFileCache(path) {
-      const key = canonicalPath(path);
-      if (log.isLevelEnabled(Level.Debug)) log.debug(`evictFileCache: ${key}`);
-      diagCache.delete(key);
-      tsDiagCache.delete(key);
-      graphCache.invalidate(key);
-    },
-
-    rediagnoseAffected(changed, exclude) {
-      const project = context.project;
-      if (!project) return;
-      if (changed.length === 0) return;
-
-      const affected = collectAffectedPaths(changed, context.documentState, exclude, log);
-      if (affected.length > 0) {
-        if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAffected: ${affected.length} files affected by ${changed.length} changes`);
-      }
-      for (let i = 0, len = affected.length; i < len; i++) {
-        const affectedPath = affected[i];
-        if (!affectedPath) continue;
-        publishFileDiagnostics(context, project, affectedPath);
-      }
-    },
-
-    rediagnoseAll(clearTsCache = false) {
-      const project = context.project;
-      if (!project) return;
-
-      graphCache.invalidateAll();
-      diagCache.clear();
-      if (clearTsCache) tsDiagCache.clear();
-      const paths = getOpenDocumentPaths(context.documentState);
-      if (log.isLevelEnabled(Level.Debug)) log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
-      for (let i = 0, len = paths.length; i < len; i++) {
-        const p = paths[i];
-        if (!p) continue;
-        publishFileDiagnostics(context, project, p);
-      }
-      propagateTsDiagnostics(context, project, new Set());
-    },
   };
+
+  changeProcessor = new ChangeProcessor(
+    diagManager,
+    graphCache,
+    docManager,
+    prefixLogger(log, "changes"),
+    (path) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") publishFileDiagnostics(context, p.project, path); },
+    (exclude) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") propagateTsDiagnostics(context, p.project, exclude); },
+  );
 
   setupLifecycleHandlers(context);
   setupDocumentHandlers(context);
@@ -329,19 +252,11 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   return context;
 }
 
-/**
- * Start the server.
- *
- * @param context - Server context
- */
 export function startServer(context: ServerContext): void {
   context.documents.listen(context.connection);
   context.connection.listen();
 }
 
-/**
- * CLI entry point — create and start the server.
- */
 export function main(): void {
   const args = process.argv.slice(2);
   let logFile: string | undefined;

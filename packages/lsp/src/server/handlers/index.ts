@@ -4,10 +4,12 @@
  * Re-exports all surviving LSP handlers from a single module.
  */
 
-export type { HandlerContext } from "./handler-context";
+export type { FeatureHandlerContext, DocumentHandlerContext, LifecycleHandlerContext } from "./handler-context";
 
 export {
+  type ServerConfig,
   type ServerState,
+  createServerConfig,
   createServerState,
   handleInitialize,
   handleInitialized,
@@ -16,23 +18,6 @@ export {
   isServerReady,
 } from "./lifecycle";
 
-export {
-  type DocumentState,
-  type DocumentInfo,
-  type PendingChange,
-  createDocumentState,
-  handleDidOpen,
-  handleDidChange,
-  handleDidSave,
-  handleDidClose,
-  getPendingChanges,
-  clearPendingChanges,
-  flushPendingChanges,
-  isDebouncing,
-  getDocumentInfo,
-  getDocumentByPath,
-  getOpenDocumentPaths,
-} from "./document";
 
 export {
   toLSPDiagnostic,

@@ -50,7 +50,7 @@ export {
   handleSelectionRange,
 } from "./server/handlers";
 
-export type { HandlerContext } from "./server/handlers";
+export type { FeatureHandlerContext } from "./server/handlers";
 
 // Logger
 export { createLspLogger, createCliLogger, noopLogger, type Logger, type LeveledLogger } from "./core/logger";

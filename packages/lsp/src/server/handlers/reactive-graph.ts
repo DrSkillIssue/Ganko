@@ -6,7 +6,7 @@
  * entities and dependency/ownership edges, then serializes them
  * as Mermaid and DOT diagrams for the VS Code webview.
  */
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import type { SolidGraph, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
@@ -48,7 +48,7 @@ interface ReactiveGraphParams {
  */
 export function handleReactiveGraph(
   params: ReactiveGraphParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): ReactiveGraphResult | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

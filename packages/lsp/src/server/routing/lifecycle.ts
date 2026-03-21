@@ -27,15 +27,22 @@ import {
 } from "../handlers/lifecycle";
 import { createFileIndex } from "../../core/file-index";
 import { clearDiagnostics } from "../handlers/diagnostics";
-import { getOpenDocumentPaths } from "../handlers/document";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
+import type { LifecyclePhase } from "../server-state";
 import type { ServerContext } from "../connection";
+import type { LifecycleHandlerContext } from "../handlers/handler-context";
+import { evictCachesForPath } from "../change-processor";
 
-/**
- * Wire lifecycle handlers onto the LSP connection.
- */
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
+
+  const lifecycleCtx: LifecycleHandlerContext = {
+    connection: context.connection,
+    log: context.log,
+    transitionPhase(phase: LifecyclePhase) {
+      context.phase = phase;
+    },
+  };
 
   connection.onInitialize((params) => {
     const rawLevel = params.initializationOptions?.logLevel;
@@ -56,7 +63,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
   connection.onShutdown(() => {
     context.gcTimer.dispose();
     context.memoryWatcher.stop();
-    handleShutdown(serverState, context.documentState, context.log, context);
+    handleShutdown(serverState, context.log, context);
   });
 
   connection.onExit(() => {
@@ -66,50 +73,54 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
   connection.onDidChangeWatchedFiles(async (params) => {
     await context.ready;
-    /* External file changes during Tier 1 are deferred — the full program
-       isn't built yet, and Tier 2/3 re-diagnosis will pick up disk changes. */
-    if (!context.watchProgramReady) return;
+    const watchPhase = context.phase;
+    if (watchPhase.tag !== "running" && watchPhase.tag !== "enriched") return;
     let eslintConfigChanged = false;
     const changes = params.changes;
-    const paths: string[] = new Array(changes.length);
+    const paths: string[] = [];
+    const fileIndex = watchPhase.tag === "enriched" ? watchPhase.fileIndex : watchPhase.fileIndex;
 
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       const path = uriToPath(change.uri);
-      paths[i] = path;
+      paths.push(path);
 
       if (path.endsWith("eslint.config.mjs") || path.endsWith("eslint.config.js") || path.endsWith("eslint.config.cjs")) {
         eslintConfigChanged = true;
       }
 
       if (change.type === FileChangeType.Created) {
-        context.fileIndex?.add(path);
-        context.evictFileCache(path);
+        fileIndex?.add(path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
       if (change.type === FileChangeType.Changed) {
-        context.evictFileCache(path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
       if (change.type === FileChangeType.Deleted) {
-        context.fileIndex?.remove(path);
+        fileIndex?.remove(path);
         clearDiagnostics(connection, change.uri);
-        context.evictFileCache(path);
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
       }
     }
 
-    if (eslintConfigChanged && context.project) {
+    if (eslintConfigChanged) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
+        const newFileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
+        const curPhase = context.phase;
+        if (curPhase.tag === "enriched") {
+          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
+        } else if (curPhase.tag === "running") {
+          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
+        }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
-        context.rediagnoseAll();
+        context.changeProcessor.processWorkspaceChange();
         return;
       }
     }
 
-    /** Collect which open files rediagnoseAffected will already cover,
-     * so we avoid publishing diagnostics twice for the same file. */
     const alreadyDiagnosed = new Set<string>();
     {
       const needed = new Set<FileKind>();
@@ -120,7 +131,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         for (const dep of deps) needed.add(dep);
       }
       if (needed.size > 0) {
-        const open = getOpenDocumentPaths(context.documentState);
+        const open = context.docManager.openPaths();
         for (let i = 0, len = open.length; i < len; i++) {
           const p = open[i];
           if (!p) continue;
@@ -129,22 +140,21 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       }
     }
 
-    context.rediagnoseAffected(paths);
+    context.changeProcessor.processChanges(
+      paths.map(p => ({ path: p, kind: "changed" as const })),
+    );
 
-    /** Re-diagnose any changed files that are currently open but were NOT
-     * already covered by rediagnoseAffected. Without this, an AI coder that
-     * writes to disk triggers didChangeWatchedFiles but the changed file
-     * itself is never re-diagnosed — cross-file diagnostics go missing. */
-    if (context.project) {
-      const project = context.project;
+    const rediagPhase = context.phase;
+    if (rediagPhase.tag === "running" || rediagPhase.tag === "enriched") {
+      const project = rediagPhase.project;
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         if (!path) continue;
         const key = canonicalPath(path);
         if (alreadyDiagnosed.has(key)) continue;
-        const uri = context.documentState.pathIndex.get(key);
+        const uri = context.docManager.uriForPath(key);
         if (uri === undefined) continue;
-        if (!context.documentState.openDocuments.has(uri)) continue;
+        if (context.docManager.getByUri(uri) === null) continue;
 
         const doc = context.documents.get(uri);
         const content = doc !== undefined ? doc.getText() : undefined;
@@ -161,9 +171,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       context.log.setLevel(parseLogLevel(rawLevel, "info"));
     }
 
-    /* Configuration changes during Tier 1 are deferred — ESLint config
-       was loaded in Phase A, and full re-diagnosis happens in Phase B/C. */
-    if (!context.watchProgramReady) return;
+    if (context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
 
     const result = handleConfigurationChange(params, serverState);
     if (!result.rebuildIndex && !result.reloadEslint && !result.rediagnose) return;
@@ -172,19 +180,30 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
     if (result.rebuildIndex && serverState.rootPath) {
       const excludes = effectiveExclude(serverState);
-      const fileIndex = createFileIndex(serverState.rootPath, excludes, context.log);
-      context.fileIndex = fileIndex;
-      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
+      const newIdx = createFileIndex(serverState.rootPath, excludes, context.log);
+      const cfgPhase = context.phase;
+      if (cfgPhase.tag === "enriched") {
+        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
+      } else if (cfgPhase.tag === "running") {
+        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
+      }
+      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${newIdx.solidFiles.size} solid, ${newIdx.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
 
     if (result.reloadEslint) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
+        const newIdx = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
+        const eslintPhase = context.phase;
+        if (eslintPhase.tag === "enriched") {
+          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
+        } else if (eslintPhase.tag === "running") {
+          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
+        }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
     }
 
-    if (needRediagnose) context.rediagnoseAll(result.rediagnose);
+    if (needRediagnose) context.changeProcessor.processWorkspaceChange(result.rediagnose);
   });
 }

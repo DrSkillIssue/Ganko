@@ -11,7 +11,7 @@ import type {
   Position,
 } from "vscode-languageserver";
 import ts from "typescript";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
@@ -184,7 +184,7 @@ function addNodeRange(node: ts.Node): void {
  */
 export function handleSelectionRange(
   params: SelectionRangeParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): SelectionRange[] | null {
   const filePath = uriToPath(params.textDocument.uri);
   const sf = ctx.getAST(filePath);

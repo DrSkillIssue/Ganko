@@ -11,7 +11,7 @@ import type {
   TextEdit,
 } from "vscode-languageserver";
 import ts from "typescript";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
 import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
@@ -20,7 +20,7 @@ import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
  */
 export function handlePrepareRename(
   params: PrepareRenameParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): { range: Range; placeholder: string } | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
@@ -52,7 +52,7 @@ export function handlePrepareRename(
  */
 export function handleRename(
   params: RenameParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): WorkspaceEdit | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);
