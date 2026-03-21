@@ -21,6 +21,7 @@ import { createFileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
+import type { PhaseEnriched } from "../server-state";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import type { Logger } from "../../core/logger";
 
@@ -195,7 +196,7 @@ export async function handleInitialized(
   });
 
   state.project = project;
-  context.setProject(project);
+  const handlerCtx = context.setProject(project);
   state.initialized = true;
   context.resolveReady();
 
@@ -208,7 +209,7 @@ export async function handleInitialized(
      synchronous program build blocks the event loop. */
 
   await project.watchProgramReady();
-  context.watchProgramReady = true;
+  context.phase = { tag: "running", project, handlerCtx, fileIndex: null };
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
@@ -223,8 +224,16 @@ export async function handleInitialized(
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
-  await enrichWorkspace(rootPath, state, context);
-  context.workspaceReady = true;
+  const enrichment = await enrichWorkspace(rootPath, state, context);
+  const enrichedPhase: PhaseEnriched = {
+    tag: "enriched",
+    project,
+    handlerCtx,
+    fileIndex: enrichment.fileIndex,
+    tailwindValidator: enrichment.tailwindValidator,
+    externalCustomProperties: enrichment.externalCustomProperties,
+  };
+  context.phase = enrichedPhase;
 
   /* Invalidate any cross-file results that may have been cached during the
      enrichment window. Even though fileIndex is set atomically after tailwind
@@ -256,46 +265,41 @@ export async function handleInitialized(
  * is available. These operations are needed for cross-file diagnostics
  * but not for single-file Tier 1/2 analysis.
  */
+interface EnrichmentResult {
+  readonly fileIndex: import("../../core/file-index").FileIndex
+  readonly tailwindValidator: import("@drskillissue/ganko").TailwindValidator | null
+  readonly externalCustomProperties: ReadonlySet<string> | undefined
+}
+
 async function enrichWorkspace(
   rootPath: string,
   state: ServerState,
   context: ServerContext,
-): Promise<void> {
+): Promise<EnrichmentResult> {
   const { log } = context;
 
-  /* File index — uses ESLint ignores loaded in Phase A.
-     Built first but NOT exposed on context until all enrichment (Tailwind,
-     external props) is complete. Otherwise a didOpen event firing between
-     fileIndex assignment and tailwind resolution runs cross-file analysis
-     with a null tailwind validator, caches the wrong results, and the stale
-     cache persists even after tailwind resolves. */
   const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
   if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
-  /* Resolve Tailwind validator from CSS files (non-blocking — failure is fine). */
+  let tailwindValidator: import("@drskillissue/ganko").TailwindValidator | null = null;
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    context.tailwindValidator = await resolveTailwindValidator(cssFiles, log)
+    tailwindValidator = await resolveTailwindValidator(cssFiles, log)
       .catch((err) => {
         if (log.isLevelEnabled(Level.Warning)) log.warning(`tailwind validator: uncaught error: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
-    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${context.tailwindValidator !== null ? "resolved" : "not found"}`);
+    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${tailwindValidator !== null ? "resolved" : "not found"}`);
   }
 
-  /* Library analysis: scan installed dependencies for CSS custom properties
-     they inject at runtime (e.g., Kobalte's --kb-* properties set via inline
-     style attributes in JSX). */
   const externalProps = scanDependencyCustomProperties(rootPath);
+  let externalCustomProperties: ReadonlySet<string> | undefined;
   if (externalProps.size > 0) {
-    context.externalCustomProperties = externalProps;
+    externalCustomProperties = externalProps;
     if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
 
-  /* NOW expose the file index — all enrichment is complete, so any cross-file
-     analysis triggered by concurrent didOpen events will see both the file
-     index AND the resolved tailwind validator atomically. */
-  context.fileIndex = fileIndex;
+  return { fileIndex, tailwindValidator, externalCustomProperties };
 }
 
 /**
@@ -316,8 +320,7 @@ export function handleShutdown(
     context.docManager.flush();
     context.tsPropagationCancel?.();
     context.tsPropagationCancel = null;
-    context.project = null;
-    context.handlerCtx = null;
+    context.phase = { tag: "shutdown" };
   }
 
   if (state.project) {

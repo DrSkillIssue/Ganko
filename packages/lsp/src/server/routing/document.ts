@@ -21,6 +21,7 @@ import {
   republishMergedDiagnostics,
   propagateTsDiagnostics,
 } from "../diagnostics-push";
+import { isRunningOrEnriched } from "../server-state";
 import type { ServerContext } from "../connection";
 import type { Project } from "../../core/project";
 import { evictCachesForPath } from "../change-processor";
@@ -33,8 +34,8 @@ function refreshCrossFileCache(
   project: Project,
   changed: readonly { readonly path: string }[],
 ): void {
-  const fileIndex = context.fileIndex;
-  if (!fileIndex) return;
+  const phase = context.phase;
+  if (phase.tag !== "enriched") return;
 
   let seedPath: string | null = null;
   for (let i = 0, len = changed.length; i < len; i++) {
@@ -47,13 +48,13 @@ function refreshCrossFileCache(
 
   runCrossFileDiagnostics(
     seedPath,
-    fileIndex,
+    phase.fileIndex,
     project,
     context.graphCache,
-    context.tailwindValidator,
+    phase.tailwindValidator,
     context.resolveContent,
     context.serverState.config.ruleOverrides,
-    context.externalCustomProperties,
+    phase.externalCustomProperties,
   );
 }
 
@@ -64,13 +65,14 @@ export function setupDocumentHandlers(context: ServerContext): void {
   const { documents, serverState, docManager } = context;
 
   function processChangesCallback(): void {
-    const project = context.project;
+    const phase = context.phase;
+    const project = isRunningOrEnriched(phase) ? phase.project : context.serverState.project;
     if (!project) return;
 
     const changes = docManager.drainPendingChanges();
     if (changes.length === 0) return;
 
-    if (!context.watchProgramReady) {
+    if (!isRunningOrEnriched(phase)) {
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];
         if (!change) continue;
@@ -128,13 +130,13 @@ export function setupDocumentHandlers(context: ServerContext): void {
     await context.ready;
 
     const key = canonicalPath(path);
+    const openPhase = context.phase;
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
-      `didOpen: uri=${event.document.uri} path=${key} hasProject=${!!context.project} `
-      + `version=${event.document.version} openDocs=${docManager.openCount} `
-      + `watchReady=${context.watchProgramReady}`,
+      `didOpen: uri=${event.document.uri} path=${key} phase=${openPhase.tag} `
+      + `version=${event.document.version} openDocs=${docManager.openCount}`,
     );
 
-    if (!context.watchProgramReady) {
+    if (!isRunningOrEnriched(openPhase)) {
       const kind = classifyFile(key);
       if (kind === "solid") {
         publishTier1Diagnostics(context, key, event.document.getText());
@@ -142,17 +144,14 @@ export function setupDocumentHandlers(context: ServerContext): void {
       return;
     }
 
-    const project = context.project;
-    if (project) {
-      publishFileDiagnostics(context, project, key, event.document.getText());
-    }
+    publishFileDiagnostics(context, openPhase.project, key, event.document.getText());
   });
 
   documents.onDidChangeContent(async (event) => {
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
     await context.ready;
     const queued = docManager.change(event);
-    if (!queued || !context.project) return;
+    if (!queued || !isRunningOrEnriched(context.phase)) return;
     context.tsPropagationCancel?.();
   });
 
@@ -161,12 +160,13 @@ export function setupDocumentHandlers(context: ServerContext): void {
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave ENTER: uri=${event.document.uri} version=${event.document.version}`);
     if (!isServerReady(serverState)) return;
 
-    const project = context.project;
+    const savePhase = context.phase;
+    const project = isRunningOrEnriched(savePhase) ? savePhase.project : context.serverState.project;
     if (!project) return;
 
     docManager.save(event);
 
-    if (!context.watchProgramReady) {
+    if (!isRunningOrEnriched(savePhase)) {
       const changes = docManager.drainPendingChanges();
       for (let i = 0, len = changes.length; i < len; i++) {
         const change = changes[i];

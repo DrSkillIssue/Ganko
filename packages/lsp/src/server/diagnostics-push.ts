@@ -24,6 +24,7 @@ import type { Project } from "../core/project";
 import { collectTsDiagnosticsForFile, tsDiagsEqual, convertTsDiagnostic } from "./handlers/ts-diagnostics";
 import { convertDiagnostics } from "./handlers/diagnostics";
 import type { Logger } from "../core/logger";
+import { isRunningOrEnriched } from "./server-state";
 import type { ServerContext } from "./connection";
 import { DiagnosticKind } from "./diagnostics-manager";
 import type { ResourceMap } from "./resource-map";
@@ -133,8 +134,10 @@ export function publishFileDiagnostics(
 ): void {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
+  const phase = context.phase;
+  const handlerCtx = isRunningOrEnriched(phase) ? phase.handlerCtx : null;
   const resolved = content
-    ?? (kind !== "unknown" ? context.handlerCtx?.getContent(key) ?? undefined : undefined)
+    ?? (kind !== "unknown" ? handlerCtx?.getContent(key) ?? undefined : undefined)
     ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
   if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics ENTER: ${key} kind=${kind} content=${resolved !== undefined ? `${resolved.length} chars` : "from disk"} includeCrossFile=${includeCrossFile}`);
   const t0 = performance.now();
@@ -142,9 +145,9 @@ export function publishFileDiagnostics(
   if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: ${key} singleFile=${singleFile.length} in ${(performance.now() - t0).toFixed(1)}ms`);
 
   let crossFile: readonly Diagnostic[];
-  if (includeCrossFile && context.fileIndex && context.project) {
-    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${context.fileIndex.solidFiles.size} cssFiles=${context.fileIndex.cssFiles.size})`);
-    crossFile = runCrossFileDiagnostics(key, context.fileIndex, context.project, context.graphCache, context.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, context.externalCustomProperties);
+  if (includeCrossFile && phase.tag === "enriched") {
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${phase.fileIndex.solidFiles.size} cssFiles=${phase.fileIndex.cssFiles.size})`);
+    crossFile = runCrossFileDiagnostics(key, phase.fileIndex, phase.project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties);
   } else {
     crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
     if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);
@@ -161,7 +164,7 @@ export function publishFileDiagnostics(
     context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
   }
 
-  if (context.serverState.config.enableTsDiagnostics && context.watchProgramReady && kind === "solid") {
+  if (context.serverState.config.enableTsDiagnostics && isRunningOrEnriched(phase) && kind === "solid") {
     if (content !== undefined) {
       const ls = project.getLanguageService();
       const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
@@ -223,7 +226,7 @@ export function propagateTsDiagnostics(
   project: Project,
   exclude: ReadonlySet<string>,
 ): void {
-  if (!context.serverState.config.enableTsDiagnostics || !context.watchProgramReady) return;
+  if (!context.serverState.config.enableTsDiagnostics || !isRunningOrEnriched(context.phase)) return;
 
   const ls = project.getLanguageService();
   const allOpen = (context.docManager.openPaths() as string[]).filter(p =>
