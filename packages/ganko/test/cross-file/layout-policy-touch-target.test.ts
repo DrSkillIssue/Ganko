@@ -168,6 +168,11 @@ const IDX_CALC_SHORTHAND_BTN = batch.add(`
   export function App() { return <button class="calc-sh-btn">Click</button> }
 `, "/project/touch_calc_sh_btn.tsx")
 
+const IDX_COND_SHADOW_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="cond-shadow" data-size="md">Click</button> }
+`, "/project/touch_cond_shadow.tsx")
+
 function runRule(
   solidIdx: number,
   css: string | readonly CssFixture[] = "",
@@ -950,6 +955,32 @@ describe("jsx-layout-policy-touch-target", () => {
       // padding: 0 calc(2px + 2px) should expand correctly with parenthesis-aware tokenizer
       expect(padDiags.length).toBeGreaterThanOrEqual(1)
       expect(first(padDiags).message).toContain("4")
+    })
+
+    it("preserves unconditional padding when conditional selector shadows it", () => {
+      setActivePolicy("wcag-aaa")
+      // Simulates the real-world pattern:
+      // * { padding: 0; } — global reset (unconditional, low specificity)
+      // .btn[data-size="md"] { padding: 0 8px; } — component sizing (unconditional, medium specificity)
+      // .btn[data-size="md"][data-icon] { padding: 0 10px 0 6px; } — icon variant (conditional, high specificity)
+      //
+      // data-icon is dynamic (null) so [data-icon] matches conditionally.
+      // Without the fix: conditional icon variant wins cascade → readKnownPx rejects → 0px from reset.
+      // With the fix: unconditional 8px from [data-size="md"] is preserved as fallback.
+      const ds = runRule(IDX_COND_SHADOW_BTN, `
+        * { padding: 0; }
+        .cond-shadow[data-size="md"] { padding: 0 8px; height: 32px; width: 44px; }
+        .cond-shadow[data-size="md"][data-icon] { padding: 0 10px 0 6px; }
+      `)
+      const padDiags = byMessageId(ds, "paddingTooSmall")
+      // Both padding-left and padding-right should report 8px from the unconditional rule,
+      // NOT 0px from global reset, and NOT the conditional 10px/6px from [data-icon].
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      for (const d of padDiags) {
+        expect(d.message).not.toContain("`0px`")
+        expect(d.message).toContain("8")
+      }
+      setActivePolicy("wcag-aa")
     })
   })
 })

@@ -110,6 +110,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
       selector,
       resolveRuleLayerOrder(selector.rule, css),
       guard,
+      css.variablesByName,
     )
 
     selectorsById.set(selector.id, selector)
@@ -307,7 +308,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     const mutableEdges = appliesByElementNodeMutable.get(node)
     if (mutableEdges) mutableEdges.sort(compareLayoutEdge)
     const edges: readonly LayoutMatchEdge[] = mutableEdges ?? EMPTY_EDGE_LIST
-    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind, css.variablesByName)
+    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
 
     if (trace && cascade.size > 0) {
       const displayDecl = cascade.get("display")

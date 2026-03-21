@@ -15,13 +15,18 @@ import {
   type LayoutElementNode,
   type LayoutGraph,
   type LayoutSignalSnapshot,
+  type LayoutSignalName,
   collectSignalSnapshot,
   readKnownPx,
   readKnownNormalized,
+  readKnownSignalWithGuard,
   readElementRef,
   readReservedSpaceFact,
+  readConditionalSignalDeltaFact,
+  LayoutSignalGuard,
 } from "../layout"
 import { getActivePolicy, getActivePolicyName } from "../../css/policy"
+import { parsePxValue } from "../../css/parser/value-util"
 import { emitLayoutDiagnostic, formatRounded } from "./rule-runtime"
 import { getJSXAttributeEntity } from "../../solid/queries/jsx"
 import { getStaticStringFromJSXValue } from "../../solid/util/static-value"
@@ -232,7 +237,20 @@ function checkDimension(
   tag: string,
   policyName: string,
 ): void {
-  const px = readKnownPx(snapshot, signal)
+  let px = readKnownPx(snapshot, signal)
+
+  // When readKnownPx returns null because a conditional selector (higher
+  // specificity) shadowed the unconditional value, fall back to the guaranteed
+  // unconditional base value from the delta fact system. This prevents false
+  // 0px reports when component CSS has a conditional variant (e.g., [data-icon])
+  // that shadows the base sizing (e.g., [data-size="md"]).
+  if (px === null) {
+    const signalValue = readKnownSignalWithGuard(snapshot, signal)
+    if (signalValue !== null && signalValue.guard.kind === LayoutSignalGuard.Conditional) {
+      px = resolveUnconditionalFallbackPx(layout, node, signal)
+    }
+  }
+
   if (px === null) return
   if (px >= min) return
 
@@ -248,4 +266,34 @@ function checkDimension(
       policy: policyName,
     },
   )
+}
+
+/**
+ * Resolves the best unconditional px value for a signal from the conditional
+ * delta fact system. When a conditional selector shadows the unconditional
+ * cascade winner, the delta fact's `unconditionalValues` retains the guaranteed
+ * base values (already var()-substituted at declaration collection time).
+ */
+function resolveUnconditionalFallbackPx(
+  layout: LayoutGraph,
+  node: LayoutElementNode,
+  signal: LayoutSignalName,
+): number | null {
+  const delta = readConditionalSignalDeltaFact(layout, node, signal)
+  if (!delta.hasConditional) return null
+
+  const values = delta.unconditionalValues
+  let bestPx: number | null = null
+
+  for (let i = 0; i < values.length; i++) {
+    const raw = values[i]
+    if (!raw) continue
+    const px = parsePxValue(raw)
+    if (px === null) continue
+    // Use the largest unconditional value — it's the highest-specificity
+    // unconditional declaration that would have won without conditional shadowing
+    if (bestPx === null || px > bestPx) bestPx = px
+  }
+
+  return bestPx
 }
