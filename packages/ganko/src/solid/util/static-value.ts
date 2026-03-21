@@ -204,6 +204,13 @@ export function getStaticStringFromJSXValue(node: ts.Node | null): string | null
     if (ts.isTemplateExpression(expression) && expression.templateSpans.length === 0) {
       return expression.head.text;
     }
+    /* `x ?? <literal>` — the result is always a string when the fallback is a
+       string literal. We return the fallback value which represents the
+       guaranteed default when the left operand is nullish. */
+    if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+      const fallback = getStaticStringFromJSXValue(expression.right);
+      if (fallback !== null) return fallback;
+    }
   }
   return null;
 }

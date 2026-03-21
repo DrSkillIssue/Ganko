@@ -22,6 +22,10 @@ const BLOCK_EXPANSIONS: ReadonlyMap<string, readonly [LayoutSignalName, LayoutSi
   ["inset-block", ["inset-block-start", "inset-block-end"]],
 ])
 
+const INLINE_EXPANSIONS: ReadonlyMap<string, readonly [LayoutSignalName, LayoutSignalName]> = new Map([
+  ["padding-inline", ["padding-left", "padding-right"]],
+])
+
 /**
  * Expand a CSS shorthand property into its longhand components.
  * Returns null if the property is not a recognized shorthand or the value cannot be parsed.
@@ -50,6 +54,16 @@ export function expandShorthand(
     return [
       { name: blockTarget[0], value: parsed.start },
       { name: blockTarget[1], value: parsed.end },
+    ]
+  }
+
+  const inlineTarget = INLINE_EXPANSIONS.get(property)
+  if (inlineTarget !== undefined) {
+    const parsed = parseBlockShorthand(value)
+    if (parsed === null) return null
+    return [
+      { name: inlineTarget[0], value: parsed.start },
+      { name: inlineTarget[1], value: parsed.end },
     ]
   }
 
@@ -97,10 +111,12 @@ export function getShorthandLonghandNames(property: string): readonly string[] |
   if (quad !== undefined) return [...quad]
   const block = BLOCK_EXPANSIONS.get(property)
   if (block !== undefined) return [...block]
+  const inline = INLINE_EXPANSIONS.get(property)
+  if (inline !== undefined) return [...inline]
   if (property === "flex-flow") return ["flex-direction", "flex-wrap"]
   return null
 }
 
 export function isShorthandProperty(property: string): boolean {
-  return QUAD_EXPANSIONS.has(property) || BLOCK_EXPANSIONS.has(property) || property === "flex-flow"
+  return QUAD_EXPANSIONS.has(property) || BLOCK_EXPANSIONS.has(property) || INLINE_EXPANSIONS.has(property) || property === "flex-flow"
 }

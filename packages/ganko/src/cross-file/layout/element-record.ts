@@ -210,7 +210,7 @@ export function collectLayoutElementRecordsForSolid(
     const localAttributes = selectorRequirements.needsAttributes
       ? collectStaticAttributes(element)
       : EMPTY_ATTRIBUTES
-    const attributes = mergeAttributes(localAttributes, meta.resolvedHost?.descriptor.staticAttributes)
+    const attributes = mergeAttributes(localAttributes, meta.resolvedHost?.descriptor.staticAttributes, meta.resolvedHost?.descriptor.attributePropBindings)
     const selectorDispatchKeys = buildSelectorDispatchKeys(attributes, classTokens)
     const inlineStyleValues = inlineStyleValuesByElementId.get(element.id) ?? EMPTY_INLINE_STYLE_VALUES
     const textualContent = getTextualContentState(element, textContentMemo, compositionMetaByElementId, logger)
@@ -282,7 +282,87 @@ function resolveHostForElement(
 ): ResolvedComponentHost | null {
   if (element.tag === null) return null
   if (element.isDomElement) return null
-  return componentHostResolver.resolveHost(solidFile, element.tag)
+
+  const defaultHost = componentHostResolver.resolveHost(solidFile, element.tag)
+
+  // Polymorphic `as={Component}` override: when the call-site provides an `as`
+  // prop referencing a component, that component becomes the host element.
+  // This handles patterns like `<Select.Trigger as={Button}>` where the outer
+  // component delegates rendering to the `as` component.
+  const asTag = extractPolymorphicAsTag(element)
+  if (asTag !== null) {
+    const asHost = componentHostResolver.resolveHost(solidFile, asTag)
+    if (asHost !== null) return composePolymorphicHost(defaultHost, asHost)
+  }
+
+  return defaultHost
+}
+
+/**
+ * Extracts the component tag name from a polymorphic `as` prop.
+ * Handles `as={Button}`, `as={IconButton}`, and dotted `as={Comp.Sub}`.
+ * Returns null for `as="button"` (static strings are handled by
+ * resolveTagNameFromPolymorphicProp in the host resolution chain).
+ */
+function extractPolymorphicAsTag(element: JSXElementEntity): string | null {
+  for (let i = 0; i < element.attributes.length; i++) {
+    const attr = element.attributes[i]
+    if (!attr) continue
+    if (attr.name !== "as") continue
+    if (attr.valueNode === null) continue
+    if (!ts.isJsxExpression(attr.valueNode)) continue
+    const expression = attr.valueNode.expression
+    if (!expression) continue
+    if (ts.isIdentifier(expression)) return expression.text
+    if (ts.isPropertyAccessExpression(expression)) return expression.getText()
+    return null
+  }
+  return null
+}
+
+/**
+ * Composes a polymorphic host from the `as` component's host and the outer
+ * component's default host. The `as` component provides the tagName and its
+ * own structural attributes/classes/bindings. The outer component's host
+ * attributes are merged underneath (lower precedence).
+ */
+function composePolymorphicHost(
+  outerHost: ResolvedComponentHost | null,
+  asHost: ResolvedComponentHost,
+): ResolvedComponentHost {
+  if (outerHost === null) return asHost
+
+  const outerDesc = outerHost.descriptor
+  const asDesc = asHost.descriptor
+
+  // as component is primary: its tagName, attributes, classes, and bindings take precedence
+  const staticAttributes = new Map<string, string | null>()
+  for (const [name, value] of outerDesc.staticAttributes) staticAttributes.set(name, value)
+  for (const [name, value] of asDesc.staticAttributes) staticAttributes.set(name, value)
+
+  const classTokenSet = new Set<string>()
+  const staticClassTokens: string[] = []
+  for (const token of outerDesc.staticClassTokens) {
+    if (!classTokenSet.has(token)) { classTokenSet.add(token); staticClassTokens.push(token) }
+  }
+  for (const token of asDesc.staticClassTokens) {
+    if (!classTokenSet.has(token)) { classTokenSet.add(token); staticClassTokens.push(token) }
+  }
+
+  const attributePropBindings = new Map<string, string>()
+  for (const [name, value] of outerDesc.attributePropBindings) attributePropBindings.set(name, value)
+  for (const [name, value] of asDesc.attributePropBindings) attributePropBindings.set(name, value)
+
+  return {
+    descriptor: {
+      tagName: asDesc.tagName ?? outerDesc.tagName,
+      staticAttributes,
+      staticClassTokens,
+      forwardsChildren: asDesc.forwardsChildren || outerDesc.forwardsChildren,
+      attributePropBindings,
+    },
+    hostElementRef: asHost.hostElementRef ?? outerHost.hostElementRef,
+  }
 }
 
 function resolveTransparentPrimitiveStatus(
@@ -357,13 +437,29 @@ function mergeClassTokens(
 function mergeAttributes(
   localAttributes: ReadonlyMap<string, string | null>,
   hostAttributes: ReadonlyMap<string, string | null> | undefined,
+  propBindings: ReadonlyMap<string, string> | undefined,
 ): ReadonlyMap<string, string | null> {
   if (hostAttributes === undefined || hostAttributes.size === 0) return localAttributes
-  if (localAttributes.size === 0) return hostAttributes
+  if (localAttributes.size === 0 && (propBindings === undefined || propBindings.size === 0)) return hostAttributes
 
   const out = new Map<string, string | null>()
 
   for (const [name, value] of hostAttributes) {
+    // When a prop binding exists for this attribute, resolve the attribute value
+    // from the call-site's corresponding prop. This overrides both null (dynamic)
+    // and fallback values (from ?? operator) with the actual call-site prop value.
+    // e.g., host has data-size: "sm" (fallback) with binding data-size → size,
+    // and call-site has size: "md" → resolves to data-size: "md".
+    if (propBindings !== undefined) {
+      const propName = propBindings.get(name)
+      if (propName !== undefined) {
+        const callSiteValue = localAttributes.get(propName)
+        if (callSiteValue !== undefined && callSiteValue !== null) {
+          out.set(name, callSiteValue)
+          continue
+        }
+      }
+    }
     out.set(name, value)
   }
 

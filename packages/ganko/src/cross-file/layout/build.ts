@@ -74,7 +74,7 @@ import {
 
 const EMPTY_NUMBER_LIST: readonly number[] = []
 const EMPTY_EDGE_LIST: readonly LayoutMatchEdge[] = Object.freeze([])
-const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch"])
+const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch", "inherit", "initial", "unset", "revert", "revert-layer"])
 const BLOCK_LEVEL_DISPLAY_VALUES = new Set(["block", "flex", "grid", "table", "list-item", "flow-root", "table-row", "table-cell", "table-caption", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"])
 
 export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, logger: Logger = noopLogger): LayoutGraph {
@@ -307,7 +307,7 @@ export function buildLayoutGraph(solids: readonly SolidGraph[], css: CSSGraph, l
     const mutableEdges = appliesByElementNodeMutable.get(node)
     if (mutableEdges) mutableEdges.sort(compareLayoutEdge)
     const edges: readonly LayoutMatchEdge[] = mutableEdges ?? EMPTY_EDGE_LIST
-    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind)
+    const cascade = buildCascadeMapForElement(node, edges, monitoredDeclarationsBySelectorId, tailwind, css.variablesByName)
 
     if (trace && cascade.size > 0) {
       const displayDecl = cascade.get("display")
@@ -679,6 +679,7 @@ function computeReservedSpaceFact(snapshot: LayoutSignalSnapshot): LayoutReserve
     hasDeclaredInlineDimension: hasDeclaredDimension(snapshot, "width")
       || hasDeclaredDimension(snapshot, "inline-size")
       || hasDeclaredDimension(snapshot, "min-width")
+      || hasDeclaredDimension(snapshot, "flex-basis")
       || isBlockLevelDisplay(snapshot),
   }
 }
@@ -693,6 +694,7 @@ function hasDeclaredDimension(
     | "block-size"
     | "min-height"
     | "min-block-size"
+    | "flex-basis"
     | "contain-intrinsic-size",
 ): boolean {
   const signal = snapshot.signals.get(property)

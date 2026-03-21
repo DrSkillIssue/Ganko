@@ -128,6 +128,46 @@ const IDX_AAA_BARE_BTN = batch.add(`
   export function App() { return <button class="aaa-bare-btn">Click</button> }
 `, "/project/touch_aaa_bare_btn.tsx")
 
+const IDX_SR_INPUT = batch.add(`
+  import "./style.css"
+  export function App() { return <input class="sr-input" type="checkbox" /> }
+`, "/project/touch_sr_input.tsx")
+
+const IDX_CALC_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="calc-btn">Click</button> }
+`, "/project/touch_calc_btn.tsx")
+
+const IDX_INITIAL_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="initial-btn">Click</button> }
+`, "/project/touch_initial_btn.tsx")
+
+const IDX_MIN_FN_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="min-fn-btn">Click</button> }
+`, "/project/touch_min_fn_btn.tsx")
+
+const IDX_CLAMP_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="clamp-btn">Click</button> }
+`, "/project/touch_clamp_btn.tsx")
+
+const IDX_MAX_CONSTRAINED = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="max-constrained">Click</button> }
+`, "/project/touch_max_constrained.tsx")
+
+const IDX_FLEX_BASIS_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="flex-basis-btn">Click</button> }
+`, "/project/touch_flex_basis_btn.tsx")
+
+const IDX_CALC_SHORTHAND_BTN = batch.add(`
+  import "./style.css"
+  export function App() { return <button class="calc-sh-btn">Click</button> }
+`, "/project/touch_calc_sh_btn.tsx")
+
 function runRule(
   solidIdx: number,
   css: string | readonly CssFixture[] = "",
@@ -373,6 +413,543 @@ describe("jsx-layout-policy-touch-target", () => {
       expect(noBlock).toHaveLength(1)
       expect(first(noBlock).message).toContain("44")
       setActivePolicy("wcag-aa")
+    })
+  })
+
+  // --- Cross-component CSS scope propagation (Gap 1) ---
+
+  describe("cross-component CSS scope", () => {
+    it("resolves CSS co-located with imported component file into call-site cascade", () => {
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button class="btn" data-component="button">{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         export function App() {
+           return <Button class="my-btn">Click</Button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, appGraph],
+          css: {
+            files: [
+              // Component's co-located CSS — should be in scope for app.tsx
+              { path: "/project/ui/button.css", content: `[data-component="button"] { height: 16px; padding: 0 4px; }` },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // Component CSS should be in scope and matched — report actual values from component CSS.
+      // Both the component definition's <button> and the call-site element produce diagnostics.
+      expect(heightDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(heightDiags).message).toContain("16")
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("4")
+    })
+
+    it("does not report false 0px when component CSS provides padding", () => {
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button class="btn" data-component="button">{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         export function App() {
+           return <Button class="my-btn">Click</Button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, appGraph],
+          css: {
+            files: [
+              { path: "/project/ui/button.css", content: `[data-component="button"] { height: 44px; padding: 0 12px; }` },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      // With sufficient padding and height, no warnings
+      expect(padDiags).toHaveLength(0)
+      expect(heightDiags).toHaveLength(0)
+    })
+  })
+
+  // --- Cross-component attribute value propagation (Gap 2) ---
+
+  describe("cross-component attribute prop bindings", () => {
+    it("resolves dynamic data-* attribute from call-site prop for CSS selector matching", () => {
+      setActivePolicy("wcag-aaa")
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button data-component="button" data-size={props.size ?? "sm"}>{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         export function App() {
+           return <Button size="md">Click</Button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/ui/button.css",
+                content: `
+                  [data-component="button"] { display: inline-flex; }
+                  [data-component="button"][data-size="md"] { height: 32px; padding: 0 8px; }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // Should resolve data-size="md" from call-site prop, match the CSS selector,
+      // and report the actual 32px height and 8px padding — not 0px
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("32")
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("8")
+      setActivePolicy("wcag-aa")
+    })
+
+    it("uses fallback value when call-site does not pass the prop", () => {
+      setActivePolicy("wcag-aaa")
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button data-component="button" data-size={props.size ?? "sm"}>{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         export function App() {
+           return <Button>Click</Button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/ui/button.css",
+                content: `
+                  [data-component="button"][data-size="sm"] { height: 28px; padding: 0 6px; }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      // Should use fallback "sm" from ?? operator, match [data-size="sm"], report 28px.
+      // Both component definition and call-site may produce diagnostics.
+      expect(heightDiags.length).toBeGreaterThanOrEqual(1)
+      expect(heightDiags.some((d: Diagnostic) => d.message.includes("28"))).toBe(true)
+      setActivePolicy("wcag-aa")
+    })
+  })
+
+  // --- Polymorphic as={Component} resolution (E2) ---
+
+  describe("polymorphic as={Component}", () => {
+    it("resolves as={Button} to Button's host element with its CSS", () => {
+      setActivePolicy("wcag-aaa")
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button data-component="button" data-size={props.size ?? "sm"}>{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const triggerComponent = parseCode(
+        `export function Trigger(props: any) {
+          return <button>{props.children}</button>;
+        }`,
+        "/project/ui/trigger.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         import { Trigger } from "./ui/trigger";
+         export function App() {
+           return <Trigger as={Button} size="md">Click</Trigger>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, triggerComponent, appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/ui/button.css",
+                content: `
+                  [data-component="button"][data-size="md"] { height: 32px; padding: 0 8px; }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE && d.file?.includes("app.tsx"))
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // as={Button} should resolve through Button's host to <button> with its CSS
+      expect(heightDiags.length).toBeGreaterThanOrEqual(1)
+      expect(heightDiags.some((d: Diagnostic) => d.message.includes("32"))).toBe(true)
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(padDiags.some((d: Diagnostic) => d.message.includes("8"))).toBe(true)
+      setActivePolicy("wcag-aa")
+    })
+
+    it("does not emit false 0px padding when as={Component} provides sizing", () => {
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button data-component="button">{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const triggerComponent = parseCode(
+        `export function Trigger(props: any) {
+          return <button>{props.children}</button>;
+        }`,
+        "/project/ui/trigger.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         import { Trigger } from "./ui/trigger";
+         export function App() {
+           return <Trigger as={Button}>Click</Trigger>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, triggerComponent, appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/ui/button.css",
+                content: `[data-component="button"] { height: 44px; padding: 0 16px; }`,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE && d.file?.includes("app.tsx"))
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      // Sufficient sizing from Button CSS — no false 0px warnings
+      expect(padDiags).toHaveLength(0)
+      expect(heightDiags).toHaveLength(0)
+    })
+  })
+
+  // --- CSS custom property var() resolution (Gap 3) ---
+
+  describe("CSS var() resolution", () => {
+    it("resolves var() references to concrete values from custom property definitions", () => {
+      setActivePolicy("wcag-aaa")
+      const appGraph = parseCode(
+        `import "./style.css";
+         export function App() {
+           return <button class="themed-btn">Click</button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/style.css",
+                content: `
+                  :root { --btn-height: 32px; --btn-padding-x: 8px; }
+                  .themed-btn { height: var(--btn-height); padding: 0 var(--btn-padding-x); }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // Should resolve var(--btn-height) → 32px, var(--btn-padding-x) → 8px
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("32")
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("8")
+      setActivePolicy("wcag-aa")
+    })
+
+    it("does not warn when var() resolves to values meeting thresholds", () => {
+      const appGraph = parseCode(
+        `import "./style.css";
+         export function App() {
+           return <button class="ok-themed-btn">Click</button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/style.css",
+                content: `
+                  :root { --btn-h: 44px; --btn-px: 12px; }
+                  .ok-themed-btn { height: var(--btn-h); padding: 0 var(--btn-px); }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      expect(heightDiags).toHaveLength(0)
+      expect(padDiags).toHaveLength(0)
+    })
+
+    it("resolves nested var() references (var referencing another var)", () => {
+      setActivePolicy("wcag-aaa")
+      const appGraph = parseCode(
+        `import "./style.css";
+         export function App() {
+           return <button class="nested-var-btn">Click</button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/style.css",
+                content: `
+                  :root { --spacing-sm: 6px; --btn-pad: var(--spacing-sm); }
+                  .nested-var-btn { height: 32px; padding: 0 var(--btn-pad); }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // Should resolve var(--btn-pad) → var(--spacing-sm) → 6px
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("6")
+      setActivePolicy("wcag-aa")
+    })
+
+    it("uses fallback value when var() references undefined custom property", () => {
+      const appGraph = parseCode(
+        `import "./style.css";
+         export function App() {
+           return <button class="fallback-btn">Click</button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/style.css",
+                content: `.fallback-btn { height: var(--undefined-var, 20px); }`,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      // Should use fallback 20px when --undefined-var doesn't exist
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("20")
+    })
+  })
+
+  // --- Combined: all three gaps together (real-world component pattern) ---
+
+  describe("full component pipeline", () => {
+    it("resolves component with data-* prop bindings, co-located CSS, and var() values", () => {
+      setActivePolicy("wcag-aaa")
+      const buttonComponent = parseCode(
+        `export function Button(props: any) {
+          return <button data-component="button" data-size={props.size ?? "sm"}>{props.children}</button>;
+        }`,
+        "/project/ui/button.tsx",
+      )
+      const appGraph = parseCode(
+        `import { Button } from "./ui/button";
+         export function App() {
+           return <Button size="md">Click</Button>;
+         }`,
+        "/project/app.tsx",
+      )
+      const diagnostics: Diagnostic[] = []
+      analyzeCrossFileInput(
+        {
+          solid: [buttonComponent, appGraph],
+          css: {
+            files: [
+              {
+                path: "/project/ui/button.css",
+                content: `
+                  :root { --size-height-md: 32px; --size-padding-x-md: 8px; }
+                  [data-component="button"][data-size="md"] {
+                    height: var(--size-height-md);
+                    padding: 0 var(--size-padding-x-md);
+                  }
+                `,
+              },
+            ],
+          },
+        },
+        (d) => diagnostics.push(d),
+      )
+      const hits = diagnostics.filter((d) => d.rule === RULE)
+      const heightDiags = byMessageId(hits, "heightTooSmall")
+      const padDiags = byMessageId(hits, "paddingTooSmall")
+      // Full pipeline: Gap 1 (CSS scope) + Gap 2 (prop binding) + Gap 3 (var() resolution)
+      // Should report 32px height and 8px padding — not 0px, not Unknown
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("32")
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("8")
+      setActivePolicy("wcag-aa")
+    })
+  })
+
+  // --- Additional false-positive coverage ---
+
+  describe("false-positive prevention", () => {
+    it("resolves padding-inline shorthand to padding-left and padding-right", () => {
+      const ds = runRule(IDX_TIGHT_BTN, `.tight-btn { padding-inline: 4px; }`)
+      const padDiags = byMessageId(ds, "paddingTooSmall")
+      // padding-inline: 4px should expand to padding-left: 4px, padding-right: 4px
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("4")
+    })
+
+    it("does not flag padding-inline that meets the threshold", () => {
+      const ds = runRule(IDX_TIGHT_BTN, `.tight-btn { padding-inline: 12px; height: 44px; width: 44px; }`)
+      const padDiags = byMessageId(ds, "paddingTooSmall")
+      expect(padDiags).toHaveLength(0)
+    })
+
+    it("skips sr-only inputs with position:absolute + 1px dimensions", () => {
+      const ds = runRule(IDX_SR_INPUT, `.sr-input { position: absolute; width: 1px; height: 1px; overflow: hidden; }`)
+      expect(ds).toHaveLength(0)
+    })
+
+    it("resolves static calc() expressions to concrete px values", () => {
+      const ds = runRule(IDX_CALC_BTN, `.calc-btn { height: calc(20px + 4px); padding-left: calc(2px + 2px); padding-right: calc(2px + 2px); }`)
+      const heightDiags = byMessageId(ds, "heightTooSmall")
+      const padDiags = byMessageId(ds, "paddingTooSmall")
+      // calc(20px + 4px) = 24px, calc(2px + 2px) = 4px
+      expect(heightDiags).toHaveLength(0) // 24px meets wcag-aa minimum
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("4")
+    })
+
+    it("does not treat width:initial as reserving space", () => {
+      const ds = runRule(IDX_INITIAL_BTN, `.initial-btn { width: initial; height: initial; }`)
+      const noBlock = byMessageId(ds, "noReservedBlockSize")
+      const noInline = byMessageId(ds, "noReservedInlineSize")
+      // initial resets to auto which is non-reserving
+      expect(noBlock).toHaveLength(1)
+      expect(noInline).toHaveLength(1)
+    })
+
+    it("evaluates min() with all-static arguments", () => {
+      const ds = runRule(IDX_MIN_FN_BTN, `.min-fn-btn { height: min(20px, 30px); }`)
+      const heightDiags = byMessageId(ds, "heightTooSmall")
+      // min(20px, 30px) = 20px < 24px threshold
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("20")
+    })
+
+    it("evaluates clamp() with all-static arguments", () => {
+      const ds = runRule(IDX_CLAMP_BTN, `.clamp-btn { height: clamp(16px, 20px, 28px); }`)
+      const heightDiags = byMessageId(ds, "heightTooSmall")
+      // clamp(16px, 20px, 28px) = 20px < 24px threshold
+      expect(heightDiags).toHaveLength(1)
+      expect(first(heightDiags).message).toContain("20")
+    })
+
+    it("flags max-width below minimum as constraining touch target", () => {
+      const ds = runRule(IDX_MAX_CONSTRAINED, `.max-constrained { width: 100px; max-width: 16px; height: 44px; }`)
+      const widthDiags = byMessageId(ds, "widthTooSmall")
+      // max-width: 16px constrains width below 24px threshold
+      expect(widthDiags.length).toBeGreaterThanOrEqual(1)
+      expect(widthDiags.some((d: Diagnostic) => d.message.includes("16"))).toBe(true)
+    })
+
+    it("counts flex-basis as declared inline dimension", () => {
+      const ds = runRule(IDX_FLEX_BASIS_BTN, `.flex-basis-btn { flex-basis: 100px; height: 44px; }`)
+      const noInline = byMessageId(ds, "noReservedInlineSize")
+      // flex-basis reserves inline space — no false "no declared width"
+      expect(noInline).toHaveLength(0)
+    })
+
+    it("expands padding shorthand with calc() inside parenthesized groups", () => {
+      const ds = runRule(IDX_CALC_SHORTHAND_BTN, `.calc-sh-btn { padding: 0 calc(2px + 2px); height: 44px; width: 44px; }`)
+      const padDiags = byMessageId(ds, "paddingTooSmall")
+      // padding: 0 calc(2px + 2px) should expand correctly with parenthesis-aware tokenizer
+      expect(padDiags.length).toBeGreaterThanOrEqual(1)
+      expect(first(padDiags).message).toContain("4")
     })
   })
 })

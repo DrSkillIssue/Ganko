@@ -108,7 +108,7 @@ export function splitWhitespaceTokens(value: string): readonly string[] {
 export function parseQuadShorthand(
   raw: string,
 ): { top: string; right: string; bottom: string; left: string } | null {
-  const parts = splitWhitespaceTokens(raw)
+  const parts = splitTopLevelWhitespace(raw)
   if (parts.length === 1) {
     const p0 = parts[0]
     if (!p0) return null
@@ -137,7 +137,7 @@ export function parseQuadShorthand(
 }
 
 export function parseBlockShorthand(raw: string): { start: string; end: string } | null {
-  const parts = splitWhitespaceTokens(raw)
+  const parts = splitTopLevelWhitespace(raw)
   if (parts.length === 1) {
     const p0 = parts[0]
     if (!p0) return null

@@ -26,6 +26,7 @@ const MONITORED_SHORTHAND_SET = new Set<string>([
   "border-width",
   "margin-block",
   "padding-block",
+  "padding-inline",
   "inset-block",
   "flex-flow",
 ])
@@ -39,6 +40,9 @@ const LENGTH_SIGNAL_SET = new Set<LayoutSignalName>([
   "min-width",
   "min-block-size",
   "min-height",
+  "max-width",
+  "max-height",
+  "flex-basis",
   "top",
   "bottom",
   "margin-top",
@@ -295,6 +299,7 @@ function parseLineHeight(
 
 const DIMENSION_KEYWORD_SET: ReadonlySet<string> = new Set([
   "auto", "none", "fit-content", "min-content", "max-content", "stretch",
+  "inherit", "initial", "unset", "revert", "revert-layer",
 ])
 
 function parseLength(
@@ -373,13 +378,13 @@ function parseTranslateProperty(
 }
 
 function hasDynamicExpression(raw: string): boolean {
+  // var() references should have been substituted by the cascade builder's
+  // resolveVarReferencesInCascade step. Any remaining var() is unresolvable.
   if (raw.includes("var(")) return true
-  if (raw.includes("calc(")) return true
   if (raw.includes("env(")) return true
   if (raw.includes("attr(")) return true
-  if (raw.includes("min(")) return true
-  if (raw.includes("max(")) return true
-  if (raw.includes("clamp(")) return true
+  // calc(), min(), max(), clamp() are NOT considered dynamic — parsePxValue
+  // evaluates constant expressions and returns null for truly dynamic ones.
   return false
 }
 
