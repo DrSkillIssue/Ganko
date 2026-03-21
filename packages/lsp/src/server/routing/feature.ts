@@ -21,7 +21,7 @@ import { convertDiagnostics } from "../handlers/diagnostics";
 import { collectTsDiagnosticsForFile } from "../handlers/ts-diagnostics";
 import { isServerReady } from "../handlers/lifecycle";
 import { DiagnosticKind } from "../diagnostics-manager";
-import type { HandlerContext } from "../handlers/handler-context";
+import type { FeatureHandlerContext } from "../handlers/handler-context";
 import type { GcTimer } from "../gc-timer";
 import type { Logger } from "../../core/logger";
 import type { ServerContext } from "../connection";
@@ -51,11 +51,11 @@ import { handleReactiveGraph } from "../handlers/reactive-graph";
  * handlers that take longer than 1ms.
  */
 function createGuardedHandler<P, R>(
-  getCtx: () => HandlerContext | null,
+  getCtx: () => FeatureHandlerContext | null,
   isReady: () => boolean,
   log: Logger,
   handlerName: string,
-  handler: (params: P, ctx: HandlerContext) => R,
+  handler: (params: P, ctx: FeatureHandlerContext) => R,
   fallback: R,
   gc: GcTimer,
 ): (params: P) => R {
@@ -84,7 +84,7 @@ function createGuardedHandler<P, R>(
 export function setupFeatureHandlers(context: ServerContext): void {
   const { connection } = context;
 
-  function getCtx(): HandlerContext | null {
+  function getCtx(): FeatureHandlerContext | null {
     return context.handlerCtx;
   }
 
@@ -205,32 +205,34 @@ export function setupFeatureHandlers(context: ServerContext): void {
     const existing = project.getSourceFile(key)?.text;
     if (content !== undefined && content !== existing) {
       project.updateFile(key, content);
-      context.evictFileCache(key);
+      context.diagCache.delete(key);
+      context.diagManager.evict(key);
+      context.graphCache.invalidate(key);
     }
 
     const contentUnchanged = content === undefined || content === existing;
     const cachedSingle = contentUnchanged ? context.diagCache.get(key) : undefined;
     const singleFile = cachedSingle
-      ?? runDiagnostics(project, context.diagCache, key, content, context.serverState.ruleOverrides, context.log);
+      ?? runDiagnostics(project, context.diagCache, key, content, context.serverState.config.ruleOverrides, context.log);
 
     const crossFile: readonly Diagnostic[] = context.fileIndex
       ? (contentUnchanged
         ? context.graphCache.getCachedCrossFileDiagnostics(key)
-        : runCrossFileDiagnostics(key, context.fileIndex, project, context.graphCache, context.tailwindValidator, context.resolveContent, context.serverState.ruleOverrides, context.externalCustomProperties))
+        : runCrossFileDiagnostics(key, context.fileIndex, project, context.graphCache, context.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, context.externalCustomProperties))
       : [];
 
     const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-    const items = convertDiagnostics(rawDiagnostics, context.serverState.warningsAsErrors);
+    const items = convertDiagnostics(rawDiagnostics, context.serverState.config.warningsAsErrors);
 
     // Update diagManager so push path stays in sync
-    context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.warningsAsErrors));
+    context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors));
     if (crossFile.length > 0) {
-      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.warningsAsErrors));
+      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
     }
 
-    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | fileIndex=${!!context.fileIndex} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
+    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.config.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | fileIndex=${!!context.fileIndex} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
 
-    if (context.serverState.enableTsDiagnostics && kind === "solid") {
+    if (context.serverState.config.enableTsDiagnostics && kind === "solid") {
       const ls = project.getLanguageService();
       const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
       context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);

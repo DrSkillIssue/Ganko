@@ -25,42 +25,27 @@ import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-p
 import type { Logger } from "../../core/logger";
 
 
-/**
- * Server state tracked during lifecycle.
- */
-export interface ServerState {
-  /** Root URI of the workspace */
-  rootUri: string | null
-  /** Root path of the workspace */
-  rootPath: string | null
-  /** Whether server is fully ready */
-  initialized: boolean
-  /** Whether server is shutting down */
-  shuttingDown: boolean
-  /** Capabilities negotiated with client */
-  clientCapabilities: InitializeParams["capabilities"] | null
-  /** Active Project instance */
-  project: Project | null
-  /** Rule severity overrides from VS Code settings */
+export interface ServerConfig {
   vscodeOverrides: RuleOverrides
-  /** Rule severity overrides from ESLint config file */
   eslintOverrides: RuleOverrides
-  /** Merged overrides (VS Code wins over ESLint config) applied to the runner */
   ruleOverrides: RuleOverrides
-  /** Whether to read rules from ESLint config */
   useESLintConfig: boolean
-  /** User-specified ESLint config path */
   eslintConfigPath: string | undefined
-  /** Glob patterns to exclude from file indexing and analysis */
   exclude: readonly string[]
-  /** Global ignore patterns extracted from ESLint config file */
   eslintIgnores: readonly string[]
-  /** Whether TypeScript diagnostics are enabled */
   enableTsDiagnostics: boolean
-  /** Promote all warning-severity diagnostics to errors in LSP output */
   warningsAsErrors: boolean
-  /** Accessibility policy from VS Code settings (wins over ESLint config) */
   vscodePolicy: AccessibilityPolicy
+}
+
+export interface ServerState {
+  rootUri: string | null
+  rootPath: string | null
+  initialized: boolean
+  shuttingDown: boolean
+  clientCapabilities: InitializeParams["capabilities"] | null
+  project: Project | null
+  readonly config: ServerConfig
 }
 
 /**
@@ -68,14 +53,8 @@ export interface ServerState {
  *
  * @returns Empty server state
  */
-export function createServerState(): ServerState {
+export function createServerConfig(): ServerConfig {
   return {
-    rootUri: null,
-    rootPath: null,
-    initialized: false,
-    shuttingDown: false,
-    clientCapabilities: null,
-    project: null,
     vscodeOverrides: {},
     eslintOverrides: {},
     ruleOverrides: {},
@@ -86,6 +65,18 @@ export function createServerState(): ServerState {
     enableTsDiagnostics: false,
     warningsAsErrors: false,
     vscodePolicy: "wcag-aa",
+  };
+}
+
+export function createServerState(config?: ServerConfig): ServerState {
+  return {
+    rootUri: null,
+    rootPath: null,
+    initialized: false,
+    shuttingDown: false,
+    clientCapabilities: null,
+    project: null,
+    config: config ?? createServerConfig(),
   };
 }
 
@@ -125,16 +116,16 @@ export function handleInitialize(
     log.warning(`Invalid initialization options: ${parsed.error.message}`);
   }
   const options = parsed.success ? parsed.data : undefined;
-  state.vscodeOverrides = options?.rules ?? {};
-  state.useESLintConfig = options?.useESLintConfig ?? true;
-  state.eslintConfigPath = options?.eslintConfigPath;
-  state.exclude = options?.exclude ?? [];
-  state.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? state.enableTsDiagnostics;
+  state.config.vscodeOverrides = options?.rules ?? {};
+  state.config.useESLintConfig = options?.useESLintConfig ?? true;
+  state.config.eslintConfigPath = options?.eslintConfigPath;
+  state.config.exclude = options?.exclude ?? [];
+  state.config.enableTsDiagnostics = options?.enableTypeScriptDiagnostics ?? state.config.enableTsDiagnostics;
 
-  state.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
-  setActivePolicy(state.vscodePolicy);
+  state.config.vscodePolicy = options?.accessibilityPolicy ?? "wcag-aa";
+  setActivePolicy(state.config.vscodePolicy);
 
-  const capabilities = buildServerCapabilities(state.warningsAsErrors);
+  const capabilities = buildServerCapabilities(state.config.warningsAsErrors);
 
   return {
     capabilities,
@@ -185,21 +176,21 @@ export async function handleInitialized(
      rule overrides applied. Without this, Tier 1 diagnostics would run
      without overrides, then flicker when Tier 3 applies them. */
 
-  if (state.useESLintConfig) {
-    const eslintResult = await loadESLintConfig(rootPath, state.eslintConfigPath, log)
+  if (state.config.useESLintConfig) {
+    const eslintResult = await loadESLintConfig(rootPath, state.config.eslintConfigPath, log)
       .catch((err: unknown) => {
         if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to load ESLint config: ${err instanceof Error ? err.message : String(err)}`);
         return EMPTY_ESLINT_RESULT;
       });
-    state.eslintOverrides = eslintResult.overrides;
-    state.eslintIgnores = eslintResult.globalIgnores;
-    state.ruleOverrides = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+    state.config.eslintOverrides = eslintResult.overrides;
+    state.config.eslintIgnores = eslintResult.globalIgnores;
+    state.config.ruleOverrides = mergeOverrides(state.config.eslintOverrides, state.config.vscodeOverrides);
   }
 
   const project = createProject({
     rootPath,
     plugins: [SolidPlugin, CSSPlugin],
-    rules: state.ruleOverrides,
+    rules: state.config.ruleOverrides,
     log,
   });
 
@@ -379,21 +370,21 @@ export function handleConfigurationChange(
   if (!settings) return NO_CHANGE;
 
   const eslintSettingChanged =
-    settings.useESLintConfig !== state.useESLintConfig ||
-    settings.eslintConfigPath !== state.eslintConfigPath;
+    settings.useESLintConfig !== state.config.useESLintConfig ||
+    settings.eslintConfigPath !== state.config.eslintConfigPath;
 
-  const excludeChanged = !arraysEqual(settings.exclude ?? [], state.exclude);
-  const tsDiagsChanged = (settings.enableTypeScriptDiagnostics ?? false) !== state.enableTsDiagnostics;
+  const excludeChanged = !arraysEqual(settings.exclude ?? [], state.config.exclude);
+  const tsDiagsChanged = (settings.enableTypeScriptDiagnostics ?? false) !== state.config.enableTsDiagnostics;
 
-  state.vscodeOverrides = settings.rules;
-  state.useESLintConfig = settings.useESLintConfig;
-  state.eslintConfigPath = settings.eslintConfigPath;
-  state.exclude = settings.exclude ?? [];
-  state.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
-  state.vscodePolicy = settings.accessibilityPolicy;
+  state.config.vscodeOverrides = settings.rules;
+  state.config.useESLintConfig = settings.useESLintConfig;
+  state.config.eslintConfigPath = settings.eslintConfigPath;
+  state.config.exclude = settings.exclude ?? [];
+  state.config.enableTsDiagnostics = settings.enableTypeScriptDiagnostics ?? false;
+  state.config.vscodePolicy = settings.accessibilityPolicy;
   setActivePolicy(settings.accessibilityPolicy);
 
-  const next = mergeOverrides(state.eslintOverrides, state.vscodeOverrides);
+  const next = mergeOverrides(state.config.eslintOverrides, state.config.vscodeOverrides);
   const overridesChanged = applyOverridesIfChanged(state, next);
 
   return {
@@ -436,20 +427,20 @@ export async function reloadESLintConfig(
   log: Logger,
 ): Promise<ESLintReloadOutcome> {
   const noChange: ESLintReloadOutcome = { overridesChanged: false, ignoresChanged: false };
-  if (!state.useESLintConfig || !state.rootPath) return noChange;
+  if (!state.config.useESLintConfig || !state.rootPath) return noChange;
 
-  const eslintResult = await loadESLintConfig(state.rootPath, state.eslintConfigPath, log)
+  const eslintResult = await loadESLintConfig(state.rootPath, state.config.eslintConfigPath, log)
     .catch((err: unknown) => {
       if (log.isLevelEnabled(Level.Warning)) log.warning(`Failed to reload ESLint config: ${err instanceof Error ? err.message : String(err)}`);
       return EMPTY_ESLINT_RESULT;
     });
 
-  const prevIgnores = state.eslintIgnores;
-  state.eslintOverrides = eslintResult.overrides;
-  state.eslintIgnores = eslintResult.globalIgnores;
-  setActivePolicy(state.vscodePolicy);
+  const prevIgnores = state.config.eslintIgnores;
+  state.config.eslintOverrides = eslintResult.overrides;
+  state.config.eslintIgnores = eslintResult.globalIgnores;
+  setActivePolicy(state.config.vscodePolicy);
 
-  const next = mergeOverrides(eslintResult.overrides, state.vscodeOverrides);
+  const next = mergeOverrides(eslintResult.overrides, state.config.vscodeOverrides);
   const overridesChanged = applyOverridesIfChanged(state, next);
   const ignoresChanged = !arraysEqual(prevIgnores, eslintResult.globalIgnores);
 
@@ -471,7 +462,7 @@ export async function reloadESLintConfig(
  * @returns Whether overrides actually changed
  */
 function applyOverridesIfChanged(state: ServerState, next: RuleOverrides): boolean {
-  const prev = state.ruleOverrides;
+  const prev = state.config.ruleOverrides;
   const prevKeys = Object.keys(prev);
   const nextKeys = Object.keys(next);
 
@@ -483,7 +474,7 @@ function applyOverridesIfChanged(state: ServerState, next: RuleOverrides): boole
     if (same) return false;
   }
 
-  state.ruleOverrides = next;
+  state.config.ruleOverrides = next;
   state.project?.setRuleOverrides(next);
   return true;
 }
@@ -506,6 +497,6 @@ export function isServerReady(state: ServerState): boolean {
  * @returns Combined exclude patterns (user excludes + eslint ignores)
  */
 export function effectiveExclude(state: ServerState): readonly string[] {
-  if (state.eslintIgnores.length === 0) return state.exclude;
-  return [...state.exclude, ...state.eslintIgnores];
+  if (state.config.eslintIgnores.length === 0) return state.config.exclude;
+  return [...state.config.exclude, ...state.config.eslintIgnores];
 }

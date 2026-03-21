@@ -11,7 +11,7 @@ import type {
   SemanticTokensParams,
   SemanticTokens,
 } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import type ts from "typescript";
 import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
@@ -89,7 +89,7 @@ interface RawToken {
  */
 export function handleSemanticTokens(
   params: SemanticTokensParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): SemanticTokens | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

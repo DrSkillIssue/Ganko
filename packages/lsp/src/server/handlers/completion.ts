@@ -5,7 +5,7 @@
  */
 import type { CompletionParams, CompletionItem } from "vscode-languageserver";
 import { CompletionItemKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
@@ -57,7 +57,7 @@ const KIND_MAP: Record<string, CompletionItemKind> = {
  */
 export function handleCompletion(
   params: CompletionParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): CompletionItem[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

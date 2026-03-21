@@ -8,7 +8,7 @@ import type {
   InlayHint,
 } from "vscode-languageserver";
 import { InlayHintKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
@@ -17,7 +17,7 @@ import { uriToPath, Level } from "@drskillissue/ganko-shared";
  */
 export function handleInlayHint(
   params: InlayHintParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): InlayHint[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

@@ -13,7 +13,7 @@ import type {
 } from "vscode-languageserver";
 import ts from "typescript";
 
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
@@ -148,7 +148,7 @@ const SOLID_SIGNATURES: ReadonlyMap<string, SignatureInformation> = new Map([
  */
 export function handleSignatureHelp(
   params: SignatureHelpParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): SignatureHelp | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

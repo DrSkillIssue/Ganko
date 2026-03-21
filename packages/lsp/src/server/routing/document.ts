@@ -25,12 +25,15 @@ import type { ServerContext } from "../connection";
 import type { Project } from "../../core/project";
 
 
+function evictCachesForPath(context: ServerContext, path: string): void {
+  const key = canonicalPath(path);
+  context.diagCache.delete(key);
+  context.diagManager.evict(key);
+  context.graphCache.invalidate(key);
+}
+
 /**
  * Rebuild workspace cross-file results once for the current cache state.
- *
- * The debounce flow publishes changed files with single-file diagnostics first,
- * then merges fresh cross-file results. That merge must not depend on some
- * other open file triggering a cross-file run as a side effect.
  */
 function refreshCrossFileCache(
   context: ServerContext,
@@ -56,7 +59,7 @@ function refreshCrossFileCache(
     context.graphCache,
     context.tailwindValidator,
     context.resolveContent,
-    context.serverState.ruleOverrides,
+    context.serverState.config.ruleOverrides,
     context.externalCustomProperties,
   );
 }
@@ -95,7 +98,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       if (!change) continue;
       paths[i] = change.path;
       project.updateFile(change.path, change.content);
-      context.evictFileCache(change.path);
+      evictCachesForPath(context, change.path);
     }
 
     const diagnosed = new Set<string>();
@@ -107,7 +110,10 @@ export function setupDocumentHandlers(context: ServerContext): void {
     }
 
     refreshCrossFileCache(context, project, changes);
-    context.rediagnoseAffected(paths, diagnosed);
+    context.changeProcessor.processChanges(
+      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+      diagnosed,
+    );
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];
@@ -121,7 +127,6 @@ export function setupDocumentHandlers(context: ServerContext): void {
     propagateTsDiagnostics(context, project, diagnosed);
   }
 
-  // Register the debounced changes callback on docManager
   docManager.onDebouncedChanges(() => processChangesCallback());
 
   documents.onDidOpen(async (event) => {
@@ -156,7 +161,6 @@ export function setupDocumentHandlers(context: ServerContext): void {
     const queued = docManager.change(event);
     if (!queued || !context.project) return;
     context.tsPropagationCancel?.();
-    // Debounce is handled internally by docManager
   });
 
   documents.onDidSave(async (event) => {
@@ -187,9 +191,9 @@ export function setupDocumentHandlers(context: ServerContext): void {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
-      context.evictFileCache(change.path);
+      evictCachesForPath(context, change.path);
     }
-    context.evictFileCache(savedPath);
+    evictCachesForPath(context, savedPath);
 
     const savedContent = event.document.getText();
     const diagnosed = new Set<string>();
@@ -212,7 +216,10 @@ export function setupDocumentHandlers(context: ServerContext): void {
     }
     paths[changes.length] = savedPath;
 
-    context.rediagnoseAffected(paths, diagnosed);
+    context.changeProcessor.processChanges(
+      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+      diagnosed,
+    );
     propagateTsDiagnostics(context, project, new Set([savedPath]));
   });
 

@@ -1,10 +1,3 @@
-/**
- * Unit tests for handleConfigurationChange structured result.
- *
- * Verifies that the ConfigChangeResult flags are set correctly
- * for all combinations of settings changes.
- */
-
 import { describe, it, expect } from "vitest";
 import { handleConfigurationChange, createServerState } from "../../src/server/handlers/lifecycle";
 import type { ConfigurationChangePayload } from "@drskillissue/ganko-shared";
@@ -37,38 +30,38 @@ describe("handleConfigurationChange", () => {
 
   it("returns rediagnose when TS diagnostics toggle changes", () => {
     const state = createServerState();
-    state.enableTsDiagnostics = false;
+    state.config.enableTsDiagnostics = false;
     const result = handleConfigurationChange(makePayload({ enableTypeScriptDiagnostics: true }), state);
     expect(result.rediagnose).toBe(true);
-    expect(state.enableTsDiagnostics).toBe(true);
+    expect(state.config.enableTsDiagnostics).toBe(true);
   });
 
   it("returns rebuildIndex when exclude changes", () => {
     const state = createServerState();
-    state.exclude = [];
+    state.config.exclude = [];
     const result = handleConfigurationChange(makePayload({ exclude: ["dist/**"] }), state);
     expect(result.rebuildIndex).toBe(true);
   });
 
   it("returns reloadEslint when useESLintConfig changes", () => {
     const state = createServerState();
-    state.useESLintConfig = true;
+    state.config.useESLintConfig = true;
     const result = handleConfigurationChange(makePayload({ useESLintConfig: false }), state);
     expect(result.reloadEslint).toBe(true);
   });
 
   it("returns reloadEslint when eslintConfigPath changes", () => {
     const state = createServerState();
-    state.eslintConfigPath = undefined;
+    state.config.eslintConfigPath = undefined;
     const result = handleConfigurationChange(makePayload({ eslintConfigPath: "./eslint.config.js" }), state);
     expect(result.reloadEslint).toBe(true);
   });
 
   it("returns multiple flags when multiple things change simultaneously", () => {
     const state = createServerState();
-    state.exclude = [];
-    state.useESLintConfig = true;
-    state.enableTsDiagnostics = false;
+    state.config.exclude = [];
+    state.config.useESLintConfig = true;
+    state.config.enableTsDiagnostics = false;
     const result = handleConfigurationChange(makePayload({
       exclude: ["dist/**"],
       useESLintConfig: false,
@@ -85,7 +78,7 @@ describe("handleConfigurationChange", () => {
       rules: { "signal-call": "off" as const },
     }), state);
     expect(result.rediagnose).toBe(true);
-    expect(state.vscodeOverrides).toEqual({ "signal-call": "off" });
+    expect(state.config.vscodeOverrides).toEqual({ "signal-call": "off" });
   });
 
   it("returns all-false for null payload", () => {
@@ -98,9 +91,9 @@ describe("handleConfigurationChange", () => {
 
   it("TS toggle ON→OFF sets enableTsDiagnostics to false", () => {
     const state = createServerState();
-    state.enableTsDiagnostics = true;
+    state.config.enableTsDiagnostics = true;
     const result = handleConfigurationChange(makePayload({ enableTypeScriptDiagnostics: false }), state);
     expect(result.rediagnose).toBe(true);
-    expect(state.enableTsDiagnostics).toBe(false);
+    expect(state.config.enableTsDiagnostics).toBe(false);
   });
 });

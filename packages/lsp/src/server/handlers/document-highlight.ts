@@ -8,7 +8,7 @@ import type {
   DocumentHighlight,
 } from "vscode-languageserver";
 import { DocumentHighlightKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 
@@ -17,7 +17,7 @@ import { uriToPath, Level } from "@drskillissue/ganko-shared";
  */
 export function handleDocumentHighlight(
   params: DocumentHighlightParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): DocumentHighlight[] | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

@@ -30,9 +30,30 @@ import { clearDiagnostics } from "../handlers/diagnostics";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import type { ServerContext } from "../connection";
 
-/**
- * Wire lifecycle handlers onto the LSP connection.
- */
+function evictCachesForPath(context: ServerContext, path: string): void {
+  const key = canonicalPath(path);
+  context.diagCache.delete(key);
+  context.diagManager.evict(key);
+  context.graphCache.invalidate(key);
+}
+
+function rediagnoseAll(context: ServerContext, clearTsCache = false): void {
+  const project = context.project;
+  if (!project) return;
+
+  context.graphCache.invalidateAll();
+  context.diagCache.clear();
+  context.diagManager.clear();
+  const paths = context.docManager.openPaths();
+  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`rediagnoseAll: re-diagnosing ${paths.length} open files (clearTsCache=${clearTsCache})`);
+  for (let i = 0, len = paths.length; i < len; i++) {
+    const p = paths[i];
+    if (!p) continue;
+    publishFileDiagnostics(context, project, p);
+  }
+  propagateTsDiagnostics(context, project, new Set());
+}
+
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
 
@@ -65,8 +86,6 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
   connection.onDidChangeWatchedFiles(async (params) => {
     await context.ready;
-    /* External file changes during Tier 1 are deferred — the full program
-       isn't built yet, and Tier 2/3 re-diagnosis will pick up disk changes. */
     if (!context.watchProgramReady) return;
     let eslintConfigChanged = false;
     const changes = params.changes;
@@ -84,15 +103,15 @@ export function setupLifecycleHandlers(context: ServerContext): void {
 
       if (change.type === FileChangeType.Created) {
         context.fileIndex?.add(path);
-        context.evictFileCache(path);
+        evictCachesForPath(context, path);
       }
       if (change.type === FileChangeType.Changed) {
-        context.evictFileCache(path);
+        evictCachesForPath(context, path);
       }
       if (change.type === FileChangeType.Deleted) {
         context.fileIndex?.remove(path);
         clearDiagnostics(connection, change.uri);
-        context.evictFileCache(path);
+        evictCachesForPath(context, path);
       }
     }
 
@@ -102,13 +121,11 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         context.fileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
-        context.rediagnoseAll();
+        rediagnoseAll(context);
         return;
       }
     }
 
-    /** Collect which open files rediagnoseAffected will already cover,
-     * so we avoid publishing diagnostics twice for the same file. */
     const alreadyDiagnosed = new Set<string>();
     {
       const needed = new Set<FileKind>();
@@ -128,12 +145,10 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       }
     }
 
-    context.rediagnoseAffected(paths);
+    context.changeProcessor.processChanges(
+      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+    );
 
-    /** Re-diagnose any changed files that are currently open but were NOT
-     * already covered by rediagnoseAffected. Without this, an AI coder that
-     * writes to disk triggers didChangeWatchedFiles but the changed file
-     * itself is never re-diagnosed — cross-file diagnostics go missing. */
     if (context.project) {
       const project = context.project;
       for (let i = 0; i < paths.length; i++) {
@@ -160,8 +175,6 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       context.log.setLevel(parseLogLevel(rawLevel, "info"));
     }
 
-    /* Configuration changes during Tier 1 are deferred — ESLint config
-       was loaded in Phase A, and full re-diagnosis happens in Phase B/C. */
     if (!context.watchProgramReady) return;
 
     const result = handleConfigurationChange(params, serverState);
@@ -184,6 +197,6 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
     }
 
-    if (needRediagnose) context.rediagnoseAll(result.rediagnose);
+    if (needRediagnose) rediagnoseAll(context, result.rediagnose);
   });
 }

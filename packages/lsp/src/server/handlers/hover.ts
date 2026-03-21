@@ -4,7 +4,7 @@
  * Delegates to ts.LanguageService.getQuickInfoAtPosition().
  */
 import { type HoverParams, type Hover, MarkupKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import ts from "typescript";
@@ -18,7 +18,7 @@ import ts from "typescript";
  */
 export function handleHover(
   params: HoverParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): Hover | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

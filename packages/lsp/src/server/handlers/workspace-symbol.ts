@@ -8,7 +8,7 @@ import type {
   WorkspaceSymbol,
 } from "vscode-languageserver";
 import { SymbolKind } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
 import { pathToUri, Level } from "@drskillissue/ganko-shared";
 
@@ -19,7 +19,7 @@ import { pathToUri, Level } from "@drskillissue/ganko-shared";
  */
 export function handleWorkspaceSymbol(
   params: WorkspaceSymbolParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
   seedPath: string,
 ): WorkspaceSymbol[] | null {
   const { log } = ctx;

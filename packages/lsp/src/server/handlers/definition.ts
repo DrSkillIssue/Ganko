@@ -4,7 +4,7 @@
  * Delegates to ts.LanguageService.getDefinitionAtPosition().
  */
 import type { DefinitionParams, Definition } from "vscode-languageserver";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
 import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
@@ -13,7 +13,7 @@ import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
  */
 export function handleDefinition(
   params: DefinitionParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): Definition | null {
   const { log } = ctx;
   const path = uriToPath(params.textDocument.uri);

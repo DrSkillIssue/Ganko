@@ -11,7 +11,7 @@ import type {
 } from "vscode-languageserver";
 
 import ts from "typescript";
-import type { HandlerContext } from "./handler-context";
+import type { FeatureHandlerContext } from "./handler-context";
 import { uriToPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
@@ -24,7 +24,7 @@ import { packPos } from "./ts-utils";
  */
 export function handleLinkedEditingRanges(
   params: LinkedEditingRangeParams,
-  ctx: HandlerContext,
+  ctx: FeatureHandlerContext,
 ): LinkedEditingRanges | null {
   const { log } = ctx;
   const filePath = uriToPath(params.textDocument.uri);
