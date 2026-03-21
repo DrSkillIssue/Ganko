@@ -48,9 +48,9 @@ function testLogPath(projectRoot: string): string {
   return resolve(ipcDir(), `ganko-${hash}-${LSP_VERSION}.log`);
 }
 
-/** Cleanup registry — all dirs/pids registered here are cleaned in afterAll/afterEach as appropriate. */
-const globalCleanupDirs: string[] = [];
-const globalCleanupPids: number[] = [];
+/** Cleanup registry — drained in afterAll at end of test suite. */
+const globalCleanupDirs: string[] = []; // eslint-disable-line solid/unbounded-collection -- test cleanup, drained in afterAll
+const globalCleanupPids: number[] = []; // eslint-disable-line solid/unbounded-collection -- test cleanup, drained in afterAll
 
 function createTempProject(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "ganko-daemon-test-"));
