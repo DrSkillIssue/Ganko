@@ -139,7 +139,7 @@
 - **Tier 0** (3 rules): CSS syntax only. Queries touch only CSS syntax trees. No cross-file binding.
 - **Tier 1** (11 rules): Solid + CSS syntax. Light symbol table lookups (hasClassName).
 - **Tier 2** (2 rules): Element resolution + component hosts. No cascade.
-- **Tier 3** (12 rules): Selective layout facts. Cascade computed for queried elements only. Each rule needs 1-3 fact types.
+- **Tier 3** (9 rules): Selective layout facts. Cascade computed for queried elements only. Each rule needs 1-3 fact types.
 - **Tier 4** (5 rules): Full cascade + signal snapshots + conditional delta.
 - **Tier 5** (1 rule): Alignment model with Bayesian evidence scoring.
 
@@ -376,7 +376,7 @@ Each tier is computed ONLY when queried. If no Tier 4+ rules are active, cascade
 - `compilation/dispatch/tier-resolver.ts` — Max tier computation from active rules
 - `compilation/dispatch/rule.ts` — `AnalysisRule` interface + `defineAnalysisRule` helper
 
-**Dependencies**: Phase 5 (semantic model).
+**Dependencies**: Phase 5 (semantic model), Phase 7 (all computation tiers must be available for full dispatch).
 
 **Old code still needed**: `cross-file/rule.ts` (old CrossRule interface — unmigrated rules still use it). All rule files in `cross-file/rules/`.
 
@@ -393,7 +393,7 @@ Each tier is computed ONLY when queried. If no Tier 4+ rules are active, cascade
 
 ### Phase 9: Rule Migration
 
-**Goal**: All 33+ rules migrated to `AnalysisRule` interface. Both systems produce identical diagnostics.
+**Goal**: All 31 rules migrated to `AnalysisRule` interface. Both systems produce identical diagnostics.
 
 **No new files** — rules re-targeted in place within `cross-file/rules/`.
 
@@ -405,7 +405,7 @@ Each tier is computed ONLY when queried. If no Tier 4+ rules are active, cascade
 
 **Tier 2** (2 rules): `jsx-no-duplicate-class-token-class-classlist`, `jsx-style-policy`.
 
-**Tier 3** (12 rules): `jsx-layout-fill-image-parent-must-be-sized`, `css-layout-unsized-replaced-element`, `css-layout-dynamic-slot-no-reserved-space`, `css-layout-overflow-anchor-instability`, `css-layout-scrollbar-gutter-instability`, `css-layout-content-visibility-no-intrinsic-size`, `css-layout-stateful-box-model-shift`, `jsx-layout-unstable-style-toggle`, `jsx-layout-policy-touch-target`, plus 3 others.
+**Tier 3** (9 rules): `jsx-layout-fill-image-parent-must-be-sized`, `css-layout-unsized-replaced-element`, `css-layout-dynamic-slot-no-reserved-space`, `css-layout-overflow-anchor-instability`, `css-layout-scrollbar-gutter-instability`, `css-layout-content-visibility-no-intrinsic-size`, `css-layout-stateful-box-model-shift`, `jsx-layout-unstable-style-toggle`, `jsx-layout-policy-touch-target`, plus 3 others.
 
 **Tier 4** (5 rules): `css-layout-conditional-display-collapse`, `css-layout-conditional-offset-shift`, `css-layout-conditional-white-space-wrap-shift`, `css-layout-overflow-mode-toggle-instability`, `css-layout-box-sizing-toggle-with-chrome`.
 
@@ -415,7 +415,7 @@ Each tier is computed ONLY when queried. If no Tier 4+ rules are active, cascade
 
 **Old code now replaceable**: `cross-file/rule.ts` (CrossRule interface), `cross-file/queries.ts`.
 
-**Estimated scope**: Large (33+ files modified, ~3000 LOC changes).
+**Estimated scope**: Large (31 files modified, ~3000 LOC changes).
 
 ---
 
@@ -518,6 +518,6 @@ Every file in `solid/entities/` (`scope.ts`, `variable.ts`, `function.ts`, `call
 | Diagnostic creation | `diagnostic.ts` | None |
 | Shared constants | `@drskillissue/ganko-shared` | None |
 
-### All 33+ rule implementations — re-targeted, not rewritten
+### All 31 rule implementations — re-targeted, not rewritten
 
 Every rule file in `cross-file/rules/` keeps its detection logic. What changes: the rule's `check(context, emit)` signature becomes `register(registry)` with typed subscriptions. The detection algorithm inside the callback is identical — it just receives narrower, typed arguments instead of a god-object context.

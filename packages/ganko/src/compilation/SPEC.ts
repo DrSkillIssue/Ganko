@@ -80,7 +80,7 @@ export interface SolidSyntaxTree {
   readonly jsxByNode: ReadonlyMap<ts.Node, JSXElementEntity>;
   readonly jsxByTag: ReadonlyMap<string, readonly JSXElementEntity[]>;
   readonly jsxAttributesByElementId: ReadonlyMap<number, ReadonlyMap<string, JSXAttributeEntity>>;
-  readonly jsxAttrsByKind: ReadonlyMap<string, readonly JSXAttributeWithElement[]>;
+  readonly jsxAttrsByKind: ReadonlyMap<JSXAttributeKind, readonly JSXAttributeWithElement[]>;
   readonly jsxClassAttributes: readonly JSXAttributeWithElement[];
   readonly jsxClassListAttributes: readonly JSXAttributeWithElement[];
   readonly jsxStyleAttributes: readonly JSXAttributeWithElement[];
@@ -201,6 +201,8 @@ interface DependencyEdge { /* ... */ }
 interface OwnershipEdge { /* ... */ }
 interface TypeResolver { /* ... */ }
 interface FileEntity { readonly path: string; /* ... */ }
+/** Constraint 9: Preserve exact JSXAttributeKind type, NOT widened to string */
+type JSXAttributeKind = "prop" | "event-handler" | "ref" | "directive" | "spread" | "style" | "class" | "classList";
 interface JSXAttributeWithElement { readonly attr: JSXAttributeEntity; readonly element: JSXElementEntity; }
 interface JSXStaticClassIndex { readonly hasDynamicClass: boolean; readonly tokens: readonly string[]; }
 interface JSXStaticObjectKeyIndex { readonly hasDynamic: boolean; readonly keys: readonly string[]; }
@@ -331,7 +333,8 @@ export type TailwindCandidateDiagnostic =
   | { readonly kind: "unknown-utility"; readonly utility: string }
   | { readonly kind: "invalid-variant"; readonly variant: string }
   | { readonly kind: "theme-token-not-found"; readonly token: string }
-  | { readonly kind: "invalid-arbitrary-value"; readonly value: string };
+  | { readonly kind: "invalid-arbitrary-value"; readonly value: string }
+  | { readonly kind: "incompatible-compound-variant"; readonly variant: string; readonly parent: string };
 
 /**
  * SelectorSymbol — wraps a CSSSelectorEntity with compilation-level identity.
@@ -445,22 +448,56 @@ export interface ThemeTokenSymbol extends StyleSymbol {
  * coexist as peers.
  */
 export interface SymbolTable {
-  // Primary indexes
+  // Primary symbol indexes
   readonly classNames: ReadonlyMap<string, ClassNameSymbol>;
   readonly selectors: ReadonlyMap<number, SelectorSymbol>;
   readonly customProperties: ReadonlyMap<string, CustomPropertySymbol>;
-  readonly componentHosts: ReadonlyMap<string, ComponentHostSymbol>;  // keyed by import specifier
+  readonly componentHosts: ReadonlyMap<string, ComponentHostSymbol>;
   readonly keyframes: ReadonlyMap<string, KeyframesSymbol>;
   readonly fontFaces: ReadonlyMap<string, readonly FontFaceSymbol[]>;
   readonly layers: ReadonlyMap<string, LayerSymbol>;
   readonly containers: ReadonlyMap<string, ContainerSymbol>;
   readonly themeTokens: ReadonlyMap<string, ThemeTokenSymbol>;
 
-  // Derived indexes built incrementally from syntax trees
+  // Selector dispatch indexes
   readonly selectorsByDispatchKey: ReadonlyMap<string, readonly SelectorSymbol[]>;
   readonly selectorsBySubjectTag: ReadonlyMap<string, readonly SelectorSymbol[]>;
   readonly selectorsWithoutSubjectTag: readonly SelectorSymbol[];
+
+  // Declaration indexes
   readonly declarationsByProperty: ReadonlyMap<string, readonly DeclarationSymbol[]>;
+  /** Constraint 13: replaces CSSGraph.declarationsForProperties() */
+  declarationsForProperties(...properties: string[]): readonly CSSDeclarationEntity[];
+
+  // Constraint 10: ALL CSSGraph workspace-wide indexes that CSS-only rules consume
+  readonly duplicateSelectors: ReadonlyMap<string, { readonly selector: string; readonly rules: readonly CSSRuleEntity[] }>;
+  readonly multiDeclarationProperties: ReadonlyMap<string, readonly CSSDeclarationEntity[]>;
+  readonly layoutPropertiesByClassToken: ReadonlyMap<string, readonly string[]>;
+  readonly usedFontFamilies: ReadonlySet<string>;
+  readonly usedFontFamiliesByRule: ReadonlyMap<number, readonly string[]>;
+  readonly idSelectors: readonly CSSSelectorEntity[];
+  readonly attributeSelectors: readonly CSSSelectorEntity[];
+  readonly universalSelectors: readonly CSSSelectorEntity[];
+  readonly selectorsTargetingCheckbox: readonly CSSSelectorEntity[];
+  readonly selectorsTargetingTableCell: readonly CSSSelectorEntity[];
+  readonly importantDeclarations: readonly CSSDeclarationEntity[];
+  readonly emptyRules: readonly CSSRuleEntity[];
+  readonly emptyKeyframes: readonly CSSAtRuleEntity[];
+  readonly deepNestedRules: readonly CSSRuleEntity[];
+  readonly overqualifiedSelectors: readonly CSSSelectorEntity[];
+  readonly unresolvedAnimationRefs: readonly { readonly declaration: CSSDeclarationEntity; readonly name: string }[];
+  readonly unknownContainerQueries: readonly CSSAtRuleEntity[];
+  readonly unusedContainerNames: ReadonlyMap<string, readonly CSSDeclarationEntity[]>;
+  readonly keyframeDeclarations: readonly CSSDeclarationEntity[];
+  readonly tokensByCategory: ReadonlyMap<string, readonly CSSThemeTokenEntity[]>;
+  readonly mixinsByName: ReadonlyMap<string, CSSMixinEntity>;
+  readonly functionsByName: ReadonlyMap<string, CSSFunctionEntity>;
+  readonly placeholdersByName: ReadonlyMap<string, CSSPlaceholderEntity>;
+  readonly unusedVariables: readonly CSSVariableEntity[];
+  readonly unusedKeyframes: readonly CSSAtRuleEntity[];
+  readonly unusedMixins: readonly CSSMixinEntity[];
+  readonly unusedFunctions: readonly CSSFunctionEntity[];
+  readonly unusedPlaceholders: readonly CSSPlaceholderEntity[];
 
   // Aggregate queries
   hasClassName(name: string): boolean;
@@ -896,6 +933,18 @@ export interface FileSemanticModel {
    * Replaces LayoutGraph.statefulSelectorEntriesByRuleId.
    */
   getStatefulSelectorEntries(ruleId: number): readonly StatefulSelectorEntry[];
+
+  /** Constraint 11: Replaces LayoutGraph.statefulNormalizedDeclarationsByRuleId. */
+  getStatefulNormalizedDeclarations(ruleId: number): readonly NormalizedRuleDeclaration[];
+
+  /** Constraint 11: Replaces LayoutGraph.statefulBaseValueIndex. */
+  getStatefulBaseValueIndex(): ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>;
+
+  /** Constraint 11: Replaces LayoutGraph.elementsByKnownSignalValue. Cross-element index. */
+  getElementsByKnownSignalValue(signal: LayoutSignalName, value: string): readonly ElementNode[];
+
+  /** Constraint 11: Replaces LayoutGraph.records[].baselineOffsets. */
+  getBaselineOffsets(elementId: number): ReadonlyMap<LayoutSignalName, readonly number[]> | null;
 }
 
 // ── Element node and cascade types ──
@@ -908,12 +957,14 @@ export interface ElementNode {
   readonly key: string;
   readonly solidFile: string;
   readonly elementId: number;
+  readonly jsxEntity: JSXElementEntity;  // Constraint 7: direct reference, not just ID
   readonly tag: string | null;
   readonly tagName: string | null;
   readonly classTokens: readonly string[];
   readonly classTokenSet: ReadonlySet<string>;
   readonly inlineStyleKeys: readonly string[];
   readonly parentElementNode: ElementNode | null;
+  readonly childElementNodes: readonly ElementNode[];  // Constraint 8: direct children
   readonly previousSiblingNode: ElementNode | null;
   readonly siblingIndex: number;
   readonly siblingCount: number;
@@ -964,31 +1015,77 @@ export interface ScopedSelectorIndex {
 
 export type ReactiveKind = "signal" | "props" | "store" | "resource" | "memo" | "derived";
 
-// Forward references to signal/fact types (mirroring existing signal-model.ts)
+// ── Signal model types (full fidelity — Table 1D constraints) ──
+
+/** The 55 monitored CSS properties (Constraint 3: string literal union, NOT string) */
+export const layoutSignalNames = [
+  "line-height", "font-size", "width", "inline-size", "height", "block-size",
+  "min-width", "min-block-size", "min-height", "max-width", "max-height",
+  "aspect-ratio", "vertical-align", "display", "white-space", "object-fit",
+  "overflow", "overflow-y", "overflow-anchor", "scrollbar-gutter", "scrollbar-width",
+  "contain-intrinsic-size", "content-visibility", "align-items", "align-self",
+  "justify-items", "place-items", "place-self", "flex-direction", "flex-basis",
+  "grid-auto-flow", "appearance", "box-sizing", "padding-top", "padding-left",
+  "padding-right", "padding-bottom", "border-top-width", "border-left-width",
+  "border-right-width", "border-bottom-width", "position", "top", "bottom",
+  "margin-top", "margin-bottom", "transform", "translate", "inset-block-start",
+  "inset-block-end", "writing-mode", "direction", "contain",
+] as const;
+
+export type LayoutSignalName = (typeof layoutSignalNames)[number];
+
 export interface SignalSnapshot {
   readonly node: ElementNode;
-  readonly signals: ReadonlyMap<string, SignalValue>;
+  readonly signals: ReadonlyMap<LayoutSignalName, SignalValue>;
   readonly knownSignalCount: number;
   readonly unknownSignalCount: number;
   readonly conditionalSignalCount: number;
 }
 
-export interface SignalValue {
-  readonly kind: number;  // SignalValueKind
-  readonly name: string;
+/** Constraint 2: Discriminated union preserved — Known vs Unknown */
+export type SignalValue = KnownSignalValue | UnknownSignalValue;
+
+export interface KnownSignalValue {
+  readonly kind: SignalValueKind.Known;
+  readonly name: LayoutSignalName;
   readonly normalized: string;
   readonly source: SignalSource;
   readonly guard: RuleGuard;
-  readonly unit: number;  // SignalUnit
+  readonly unit: SignalUnit;
   readonly px: number | null;
-  readonly quality: number;  // SignalQuality
+  readonly quality: SignalQuality;
 }
 
+export interface UnknownSignalValue {
+  readonly kind: SignalValueKind.Unknown;
+  readonly name: LayoutSignalName;
+  readonly source: SignalSource | null;
+  readonly guard: RuleGuard;
+  readonly reason: string;  // Constraint 2: reason field preserved
+}
+
+export const enum SignalValueKind { Known = 0, Unknown = 1 }
 export const enum SignalSource { Selector = 0, InlineStyle = 1 }
+export const enum SignalUnit { Px = 0, Unitless = 1, Keyword = 2, Unknown = 3 }
+export const enum SignalQuality { Exact = 0, Estimated = 1 }
 
-export interface RuleGuard {
-  readonly kind: number;  // Guard kind enum
+/**
+ * Constraint 1: RuleGuard preserves full conditions chain and key.
+ * NOT collapsed to `kind: number`.
+ */
+export type GuardConditionKind = "media" | "supports" | "container" | "dynamic-attribute";
+
+export interface GuardConditionProvenance {
+  readonly kind: GuardConditionKind;
+  readonly query: string | null;
+  readonly key: string;
 }
+
+export const enum SignalGuardKind { Unconditional = 0, Conditional = 1 }
+
+export type RuleGuard =
+  | { readonly kind: SignalGuardKind.Unconditional; readonly conditions: readonly GuardConditionProvenance[]; readonly key: "always" }
+  | { readonly kind: SignalGuardKind.Conditional; readonly conditions: readonly GuardConditionProvenance[]; readonly key: string };
 
 export type LayoutFactKind =
   | "reservedSpace"
@@ -1044,20 +1141,71 @@ export interface ConditionalSignalDelta {
   readonly hasUnconditionalNonScrollValue: boolean;
 }
 
-export interface AlignmentContext {
-  readonly kind: string;
-  readonly certainty: string;
-  readonly crossAxisIsBlockAxis: boolean;
-  readonly baselineRelevance: string;
-  readonly parentDisplay: string | null;
-  readonly parentAlignItems: string | null;
+/** Constraint 4: ALL 16+ fields from context-model.ts preserved */
+export type AlignmentContextKind = "inline-formatting" | "table-cell" | "flex-cross-axis" | "grid-cross-axis" | "block-flow" | "positioned-offset";
+export type LayoutAxisModel = "horizontal-tb" | "vertical-rl" | "vertical-lr";
+export type InlineDirectionModel = "ltr" | "rtl";
+export type LayoutContextContainerKind = "table" | "flex" | "grid" | "inline" | "block";
+export const enum ContextCertainty { Resolved = 0, Conditional = 1, Unknown = 2 }
+export type BaselineRelevance = "relevant" | "irrelevant";
+
+export interface LayoutContextEvidence {
+  readonly containerKind: LayoutContextContainerKind;
+  readonly containerKindCertainty: ContextCertainty;
+  readonly hasTableSemantics: boolean;
+  readonly hasPositionedOffset: boolean;
+  readonly positionedOffsetCertainty: ContextCertainty;
 }
 
+export interface AlignmentContext {
+  readonly kind: AlignmentContextKind;
+  readonly certainty: ContextCertainty;
+  readonly parentSolidFile: string;
+  readonly parentElementId: number;
+  readonly parentElementKey: string;
+  readonly parentTag: string | null;
+  readonly axis: LayoutAxisModel;
+  readonly axisCertainty: ContextCertainty;
+  readonly inlineDirection: InlineDirectionModel;
+  readonly inlineDirectionCertainty: ContextCertainty;
+  readonly parentDisplay: string | null;
+  readonly parentAlignItems: string | null;
+  readonly parentPlaceItems: string | null;
+  readonly hasPositionedOffset: boolean;
+  readonly crossAxisIsBlockAxis: boolean;
+  readonly crossAxisIsBlockAxisCertainty: ContextCertainty;
+  readonly baselineRelevance: BaselineRelevance;
+  readonly evidence: LayoutContextEvidence;
+}
+
+/** Constraint 5: ALL fields from LayoutCohortStats preserved */
 export interface CohortStats {
   readonly profile: CohortProfile;
   readonly snapshots: readonly SignalSnapshot[];
+  readonly factSummary: CohortFactSummary;
+  readonly provenance: EvidenceProvenance;
+  readonly conditionalSignalCount: number;
+  readonly totalSignalCount: number;
   readonly subjectsByElementKey: ReadonlyMap<string, CohortSubjectStats>;
   readonly excludedElementKeys: ReadonlySet<string>;
+}
+
+export interface CohortFactSummary {
+  readonly exact: number;
+  readonly interval: number;
+  readonly unknown: number;
+  readonly conditional: number;
+  readonly total: number;
+  readonly exactShare: number;
+  readonly intervalShare: number;
+  readonly unknownShare: number;
+  readonly conditionalShare: number;
+}
+
+export interface EvidenceProvenance {
+  readonly reason: string;
+  readonly guardKey: string;
+  readonly guards: readonly GuardConditionProvenance[];
 }
 
 export interface CohortProfile {
@@ -1072,13 +1220,69 @@ export interface CohortProfile {
   readonly unimodal: boolean;
 }
 
+/** Constraint 6: contentComposition and signals preserved */
+export const enum EvidenceValueKind { Exact = 0, Interval = 1, Conditional = 2, Unknown = 3 }
+export interface EvidenceWitness<T> { readonly value: T | null; readonly kind: EvidenceValueKind; }
+export type NumericEvidenceValue = EvidenceWitness<number>;
+
+export const enum AlignmentTextContrast { Different = 0, Same = 1, Unknown = 2 }
+export const enum SignalConflictValue { Conflict = 0, Aligned = 1, Unknown = 2 }
+export interface SignalConflictEvidence { readonly value: SignalConflictValue; readonly kind: EvidenceValueKind; }
+
+export interface AlignmentCohortSignals {
+  readonly verticalAlign: SignalConflictEvidence;
+  readonly alignSelf: SignalConflictEvidence;
+  readonly placeSelf: SignalConflictEvidence;
+  readonly hasControlOrReplacedPeer: boolean;
+  readonly textContrastWithPeers: AlignmentTextContrast;
+}
+
+export const enum CohortSubjectMembership { Dominant = 0, Nondominant = 1, Ambiguous = 2, Insufficient = 3 }
+export interface CohortIdentifiability {
+  readonly dominantShare: number;
+  readonly subjectExcludedDominantShare: number;
+  readonly subjectMembership: CohortSubjectMembership;
+  readonly ambiguous: boolean;
+  readonly kind: EvidenceValueKind;
+}
+
+export const enum ContentCompositionClassification {
+  TextOnly = 0, ReplacedOnly = 1, MixedUnmitigated = 2,
+  MixedMitigated = 3, BlockSegmented = 4, Unknown = 5,
+}
+export type InlineReplacedKind = "intrinsic" | "container";
+
+export interface ContentCompositionFingerprint {
+  readonly hasTextContent: boolean;
+  readonly hasInlineReplaced: boolean;
+  readonly inlineReplacedKind: InlineReplacedKind | null;
+  readonly hasHeightContributingDescendant: boolean;
+  readonly wrappingContextMitigates: boolean;
+  readonly hasVerticalAlignMitigation: boolean;
+  readonly mixedContentDepth: number;
+  readonly classification: ContentCompositionClassification;
+  readonly analyzableChildCount: number;
+  readonly totalChildCount: number;
+  readonly hasOnlyBlockChildren: boolean;
+}
+
 export interface CohortSubjectStats {
-  readonly element: { readonly solidFile: string; readonly elementKey: string; readonly elementId: number; readonly tag: string | null; readonly snapshot: SignalSnapshot };
-  readonly declaredOffset: { value: number | null; kind: number };
-  readonly effectiveOffset: { value: number | null; kind: number };
-  readonly lineHeight: { value: number | null; kind: number };
+  readonly element: AlignmentElementEvidence;
+  readonly declaredOffset: NumericEvidenceValue;
+  readonly effectiveOffset: NumericEvidenceValue;
+  readonly lineHeight: NumericEvidenceValue;
   readonly baselineProfile: CohortProfile;
-  readonly identifiability: { dominantShare: number; subjectMembership: number; ambiguous: boolean; kind: number };
+  readonly signals: AlignmentCohortSignals;
+  readonly identifiability: CohortIdentifiability;
+  readonly contentComposition: ContentCompositionFingerprint;
+}
+
+export interface AlignmentElementEvidence {
+  readonly solidFile: string;
+  readonly elementKey: string;
+  readonly elementId: number;
+  readonly tag: string | null;
+  readonly snapshot: SignalSnapshot;
 }
 
 export type TextualContentState = 0 | 1 | 2 | 3;  // Yes | No | Unknown | DynamicText
@@ -1093,6 +1297,106 @@ export interface StatefulSelectorEntry {
 
 export interface CompiledSelectorMatcher {
   match(node: ElementNode): boolean;
+}
+
+/** Constraint 12: SnapshotHotSignals — internal to cohort analysis, not on SemanticModel API */
+export interface HotEvidenceWitness<T> extends EvidenceWitness<T> { readonly present: boolean; }
+export type HotNumericSignalEvidence = HotEvidenceWitness<number>;
+export type HotNormalizedSignalEvidence = HotEvidenceWitness<string>;
+
+export interface SnapshotHotSignals {
+  readonly lineHeight: HotNumericSignalEvidence;
+  readonly verticalAlign: HotNormalizedSignalEvidence;
+  readonly alignSelf: HotNormalizedSignalEvidence;
+  readonly placeSelf: HotNormalizedSignalEvidence;
+  readonly flexDirection: HotNormalizedSignalEvidence;
+  readonly gridAutoFlow: HotNormalizedSignalEvidence;
+  readonly writingMode: HotNormalizedSignalEvidence;
+  readonly direction: HotNormalizedSignalEvidence;
+  readonly display: HotNormalizedSignalEvidence;
+  readonly alignItems: HotNormalizedSignalEvidence;
+  readonly placeItems: HotNormalizedSignalEvidence;
+  readonly position: HotNormalizedSignalEvidence;
+  readonly insetBlockStart: HotNumericSignalEvidence;
+  readonly insetBlockEnd: HotNumericSignalEvidence;
+  readonly transform: HotNumericSignalEvidence;
+  readonly translate: HotNumericSignalEvidence;
+  readonly top: HotNumericSignalEvidence;
+  readonly bottom: HotNumericSignalEvidence;
+  readonly marginTop: HotNumericSignalEvidence;
+  readonly marginBottom: HotNumericSignalEvidence;
+}
+
+/** AlignmentCase — input to Bayesian evaluateAlignmentCase() */
+export type AlignmentFactorId = "offset-delta" | "declared-offset-delta" | "baseline-conflict" | "context-conflict" | "replaced-control-risk" | "content-composition-conflict" | "context-certainty";
+export type AlignmentFactorCoverage = Readonly<Record<AlignmentFactorId, number>>;
+export type AlignmentFindingKind = "offset-delta" | "declared-offset-delta" | "baseline-conflict" | "context-conflict" | "replaced-control-risk" | "content-composition-conflict";
+
+export interface AlignmentCohort {
+  readonly parentElementKey: string;
+  readonly parentElementId: number;
+  readonly parentTag: string | null;
+  readonly siblingCount: number;
+}
+
+export interface AlignmentCase {
+  readonly subject: AlignmentElementEvidence;
+  readonly cohort: AlignmentCohort;
+  readonly cohortProfile: CohortProfile;
+  readonly cohortSignals: AlignmentCohortSignals;
+  readonly subjectIdentifiability: CohortIdentifiability;
+  readonly factorCoverage: AlignmentFactorCoverage;
+  readonly cohortSnapshots: readonly SignalSnapshot[];
+  readonly cohortFactSummary: CohortFactSummary;
+  readonly cohortProvenance: EvidenceProvenance;
+  readonly subjectDeclaredOffsetDeviation: NumericEvidenceValue;
+  readonly subjectEffectiveOffsetDeviation: NumericEvidenceValue;
+  readonly subjectLineHeightDeviation: NumericEvidenceValue;
+  readonly context: AlignmentContext;
+  readonly subjectContentComposition: ContentCompositionFingerprint;
+  readonly cohortContentCompositions: readonly ContentCompositionFingerprint[];
+}
+
+export interface LogOddsInterval { readonly min: number; readonly max: number; }
+export interface EvidenceAtom {
+  readonly factorId: AlignmentFactorId;
+  readonly valueKind: EvidenceValueKind;
+  readonly contribution: LogOddsInterval;
+  readonly provenance: EvidenceProvenance;
+  readonly relevanceWeight: number;
+  readonly coverage: number;
+}
+
+export interface PosteriorInterval { readonly lower: number; readonly upper: number; }
+export interface AlignmentSignalFinding {
+  readonly kind: AlignmentFindingKind;
+  readonly message: string;
+  readonly fix: string;
+  readonly weight: number;
+}
+
+export interface AlignmentEvaluation {
+  readonly severity: number;
+  readonly confidence: number;
+  readonly declaredOffsetPx: number | null;
+  readonly estimatedOffsetPx: number | null;
+  readonly contextKind: AlignmentContextKind;
+  readonly contextCertainty: ContextCertainty;
+  readonly posterior: PosteriorInterval;
+  readonly evidenceMass: number;
+  readonly topFactors: readonly AlignmentFactorId[];
+  readonly signalFindings: readonly AlignmentSignalFinding[];
+}
+
+/** NormalizedRuleDeclaration — used by stateful rule analysis */
+export interface NormalizedRuleDeclaration {
+  readonly declarationId: number;
+  readonly property: string;
+  readonly normalizedValue: string;
+  readonly filePath: string;
+  readonly startLine: number;
+  readonly startColumn: number;
+  readonly propertyLength: number;
 }
 
 
@@ -1536,6 +1840,16 @@ export interface CompilationTracker {
    * The previous compilation (for diffing).
    */
   readonly previousCompilation: StyleCompilation | null;
+
+  /**
+   * Constraint 14: Cross-file diagnostic caching.
+   * Replaces GraphCache.crossFileDiagnostics + crossFileResults.
+   * During typing, only single-file analysis reruns; cached cross-file results reused.
+   */
+  getCachedCrossFileDiagnostics(filePath: string): readonly Diagnostic[];
+  setCachedCrossFileDiagnostics(filePath: string, diagnostics: readonly Diagnostic[]): void;
+  getCachedCrossFileResults(): ReadonlyMap<string, readonly Diagnostic[]> | null;
+  setCachedCrossFileResults(allDiagnostics: readonly Diagnostic[]): void;
 }
 
 export declare function createCompilationTracker(
@@ -1661,73 +1975,26 @@ export declare function createCompilationFromLegacy(
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 14. MIGRATION PATH — Phase by phase
+// 14. MIGRATION PATH — 11 phases (see implementation.md for full instructions)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Phase 1: Build compilation/core/
- *   - StyleCompilation shell (withFile, withSolidTree, withCSSTree, withoutFile)
- *   - SolidSyntaxTree wrapping SolidGraph syntax data (solidGraphToSyntaxTree bridge)
- *   - CSSSyntaxTree wrapping CSSGraph per-file parse data (cssGraphToSyntaxTrees bridge)
- *   - Compilation holds trees, returns them via getSolidTree/getCSSTree
- *   - DependencyGraph built from import/co-location edges in syntax trees
- *   Validate: compilation.getSolidTree(path) returns same entity arrays as old SolidGraph.
- *             compilation.dependencyGraph.getCSSScope(path) matches old collectCSSScopeBySolidFile.
+ * Phase 1: Compilation shell (StyleCompilation, SolidSyntaxTree, CSSSyntaxTree)
+ * Phase 2: Symbol hierarchy (SymbolTable, DeclarationTable, all symbol types)
+ * Phase 3: Dependency graph (DependencyGraph, module resolution)
+ * Phase 4: CSS source providers (PlainCSSProvider, SCSSProvider, TailwindProvider)
+ * Phase 5: SemanticModel core — Tier 0-1 queries
+ * Phase 6: Cascade binder — Tier 2-3 (element resolution, layout facts)
+ * Phase 7: Signal + fact analyzers — Tier 4-5 (signals, alignment)
+ * Phase 8: Rule dispatch framework + Tier 0 rule migration
+ *          Dependencies: Phase 7 (Tier 4-5 must be available for full dispatch)
+ * Phase 9: Rule migration — all remaining rules tier-by-tier
+ *          31 total rules: Tier 0 (3), Tier 1 (11), Tier 2 (2), Tier 3 (9), Tier 4 (5), Tier 5 (1)
+ * Phase 10: Incremental updates (CompilationTracker with diagnostic caching)
+ * Phase 11: Cleanup (delete cross-file/, cache.ts, SolidGraph class, CSSGraph class)
  *
- * Phase 2: Build compilation/symbols/
- *   - SymbolTable and DeclarationTable
- *   - ClassNameSymbol, SelectorSymbol, DeclarationSymbol, CustomPropertySymbol
- *   - Populate from CSS syntax trees
- *   Validate: symbolTable.classNames contains same names as old CSSGraph.classNameIndex.
- *             symbolTable.selectors matches old CSSGraph.selectors.
- *             symbolTable.customProperties matches old CSSGraph.variablesByName.
- *
- * Phase 3: Build compilation/providers/
- *   - PlainCSSProvider and SCSSProvider (wrap existing parse phases)
- *   - TailwindProvider (wraps TailwindValidator, adds parsed candidate structure)
- *   Validate: providers produce same symbols as old CSSGraph + TailwindValidator.
- *             tailwindProvider.has(name) matches old tailwind.has(name).
- *             tailwindProvider.resolve(name) produces same CSS as old tailwind.resolve(name).
- *
- * Phase 4: Build compilation/binding/
- *   - FileSemanticModel with lazy cascade binding
- *   - CascadeBinder (replaces cascade-builder.ts)
- *   - Scope resolution (replaces scope.ts)
- *   - Element builder (replaces element-record.ts)
- *   - Component host resolution (replaces component-host.ts)
- *   Validate: semanticModel.getElementCascade(id).declarations matches
- *             old LayoutGraph.records.get(node).cascade for all elements.
- *             semanticModel.getMatchingSelectors(id) matches old LayoutGraph edges.
- *             semanticModel.getComponentHost() matches old component host resolution.
- *
- * Phase 5: Build compilation/analysis/
- *   - Signal builder (replaces signal-collection.ts)
- *   - Layout fact computation (replaces fact computation in build.ts)
- *   - Conditional delta analysis (replaces buildConditionalDeltaIndex)
- *   - Alignment model (replaces context-classification, cohort-index, rule-kit)
- *   Validate: semanticModel.getSignalSnapshot(id) matches old records[].snapshot.
- *             semanticModel.getLayoutFact(id, "reservedSpace") matches old records[].reservedSpace.
- *             semanticModel.getAlignmentContext(parentId) matches old contextByParentNode.
- *             semanticModel.getCohortStats(parentId) matches old cohortStatsByParentNode.
- *
- * Phase 6: Build compilation/dispatch/
- *   - AnalysisDispatcher and AnalysisActionRegistry
- *   - Migrate rules one tier at a time (Tier 0 first, Tier 5 last):
- *     * Tier 0 (3 rules): CSS-only rules that only need CSSSyntaxTree
- *     * Tier 1 (11 rules): Cross-syntax rules needing symbol table lookups
- *     * Tier 2 (2 rules): Element resolution rules
- *     * Tier 3 (12 rules): Layout fact rules
- *     * Tier 4 (5 rules): Full cascade + signal rules
- *     * Tier 5 (1 rule): Alignment model rule
- *   - Run both old and new systems, diff diagnostics per rule
- *   Validate: every migrated rule produces identical diagnostics on the full test suite.
- *
- * Phase 7: Delete old system
- *   - Delete cross-file/ directory
- *   - Remove SolidGraph class (keep parse phases as SolidSyntaxTree construction)
- *   - Remove CSSGraph class (keep parse phases as CSSSyntaxTree construction)
- *   - Delete cache.ts (replaced by CompilationTracker)
- *   - Update packages/lsp/src/core/analyze.ts to use AnalysisDispatcher
+ * Detailed instructions per phase: see implementation.md
+ * Dissolution table contracts: see tables/README.md
  */
 
 
