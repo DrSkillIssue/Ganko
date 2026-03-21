@@ -1,8 +1,10 @@
 import type { CSSGraph } from "../../css/impl"
 import type { TailwindValidator } from "../../css/tailwind"
 import type { SelectorEntity, CascadePosition, RuleEntity } from "../../css/entities"
+import type { VariableEntity } from "../../css/entities/variable"
 import { compareCascadePositions } from "../../css/analysis/cascade"
 import { splitWhitespaceTokens } from "../../css/parser/value-tokenizer"
+import { extractVarReferences } from "../../css/parser/value"
 import { expandShorthand, getShorthandLonghandNames } from "./shorthand-expansion"
 import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
@@ -238,11 +240,94 @@ function augmentCascadeWithTailwind(
   }
 }
 
+const MAX_VAR_SUBSTITUTION_DEPTH = 10
+
+/**
+ * Resolves var() references in cascade declaration values using the CSSGraph's
+ * pre-indexed custom property definitions. Substitutes `var(--name)` with the
+ * concrete value from the best-matching VariableEntity definition.
+ *
+ * Handles recursive resolution (vars referencing other vars) up to a bounded
+ * depth. Unresolvable references remain as-is — signal normalization will
+ * classify them as Unknown.
+ */
+function resolveVarReferencesInCascade(
+  cascade: Map<string, LayoutCascadedDeclaration>,
+  variablesByName: ReadonlyMap<string, readonly VariableEntity[]>,
+): void {
+  for (const [property, declaration] of cascade) {
+    if (!declaration.value.includes("var(")) continue
+    const resolved = substituteVarReferences(declaration.value, variablesByName, 0)
+    if (resolved !== declaration.value) {
+      cascade.set(property, {
+        value: resolved,
+        source: declaration.source,
+        guardProvenance: declaration.guardProvenance,
+      })
+    }
+  }
+}
+
+function substituteVarReferences(
+  value: string,
+  variablesByName: ReadonlyMap<string, readonly VariableEntity[]>,
+  depth: number,
+): string {
+  if (depth >= MAX_VAR_SUBSTITUTION_DEPTH) return value
+  const refs = extractVarReferences(value)
+  if (refs.length === 0) return value
+
+  let result = value
+  // Process refs in reverse order to preserve source indices during replacement
+  for (let i = refs.length - 1; i >= 0; i--) {
+    const ref = refs[i]
+    if (!ref) continue
+    const candidates = variablesByName.get(ref.name)
+    const resolvedValue = candidates !== undefined && candidates.length > 0
+      ? selectBestVariableValue(candidates)
+      : ref.fallback
+    if (resolvedValue === null) continue
+    result = result.slice(0, ref.sourceIndex) + resolvedValue + result.slice(ref.sourceIndex + ref.raw.length)
+  }
+
+  // Recurse for nested var() references in substituted values
+  if (result !== value && result.includes("var(")) {
+    return substituteVarReferences(result, variablesByName, depth + 1)
+  }
+
+  return result
+}
+
+/**
+ * Selects the best variable value from candidates. Prefers global scope
+ * definitions, then falls back to the first available. For variables with
+ * multiple definitions, the last-defined global wins (highest source order).
+ */
+function selectBestVariableValue(candidates: readonly VariableEntity[]): string | null {
+  let bestGlobal: VariableEntity | null = null
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i]
+    if (!candidate) continue
+    if (candidate.scope.type === "global") {
+      if (bestGlobal === null || candidate.declaration.sourceOrder > bestGlobal.declaration.sourceOrder) {
+        bestGlobal = candidate
+      }
+    }
+  }
+
+  if (bestGlobal !== null) return bestGlobal.value
+  // Fall back to first candidate if no global definition exists
+  const first = candidates[0]
+  return first ? first.value : null
+}
+
 export function buildCascadeMapForElement(
   node: LayoutElementNode,
   edges: readonly LayoutMatchEdge[],
   monitoredDeclarationsBySelectorId: ReadonlyMap<number, readonly MonitoredDeclaration[]>,
   tailwind: TailwindValidator | null,
+  variablesByName: ReadonlyMap<string, readonly VariableEntity[]> | null,
 ): ReadonlyMap<string, LayoutCascadedDeclaration> {
   const out = new Map<string, LayoutCascadedDeclaration>()
   const positions = new Map<string, CascadePosition>()
@@ -319,6 +404,13 @@ export function buildCascadeMapForElement(
      inline style declarations already present in the cascade. */
   if (tailwind !== null) {
     augmentCascadeWithTailwind(out, node, tailwind)
+  }
+
+  /* Resolve var() references in cascade values using the CSSGraph's
+     pre-resolved variable index. Substitutes var(--name) with the concrete
+     declared value of the matching custom property definition. */
+  if (variablesByName !== null) {
+    resolveVarReferencesInCascade(out, variablesByName)
   }
 
   return out

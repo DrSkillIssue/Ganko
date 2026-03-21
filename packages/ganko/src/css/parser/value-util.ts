@@ -16,8 +16,18 @@ const NUMERIC_VALUE = /^([0-9]*\.?[0-9]+)(px|rem|em|pt)?$/
 export function parsePxValue(raw: string, contextFontSize = 16): number | null {
   const trimmed = raw.trim().toLowerCase()
   if (trimmed.length === 0) return null
-  if (trimmed.includes("var(") || trimmed.includes("calc(") || trimmed.includes("%")) return null
+  if (trimmed.includes("var(") || trimmed.includes("%")) return null
   if (CSS_WIDE_KEYWORDS.has(trimmed)) return null
+
+  // Attempt to evaluate constant calc() expressions before bailing
+  if (trimmed.includes("calc(")) {
+    return tryEvalConstantCalc(trimmed, contextFontSize)
+  }
+
+  // Evaluate min()/max()/clamp() with all-static arguments
+  if (trimmed.startsWith("min(") || trimmed.startsWith("max(") || trimmed.startsWith("clamp(")) {
+    return tryEvalMathFunction(trimmed, contextFontSize)
+  }
 
   const match = NUMERIC_VALUE.exec(trimmed)
   if (!match) return null
@@ -30,6 +40,164 @@ export function parsePxValue(raw: string, contextFontSize = 16): number | null {
   if (unit === "em") return num * contextFontSize
   if (unit === "pt") return num * 1.333
   return null
+}
+
+const CALC_CONSTANT_RE = /^calc\((.+)\)$/
+const CALC_TOKEN_RE = /([0-9]*\.?[0-9]+)(px|rem|em|pt)?|([+\-*/])/g
+
+/**
+ * Evaluates a `calc()` expression to a px value when all operands are constant
+ * (px, rem, em, pt, unitless). Returns null if the expression contains dynamic
+ * values (var, %, env) or cannot be statically reduced.
+ *
+ * Supports +, -, *, / operators with correct precedence via two-pass evaluation.
+ */
+function tryEvalConstantCalc(raw: string, contextFontSize: number): number | null {
+  const match = CALC_CONSTANT_RE.exec(raw)
+  if (!match || !match[1]) return null
+  const inner = match[1].trim()
+  if (inner.includes("var(") || inner.includes("%") || inner.includes("env(") || inner.includes("calc(")) return null
+
+  const values: number[] = []
+  const operators: string[] = []
+  let lastWasValue = false
+
+  CALC_TOKEN_RE.lastIndex = 0
+  let tokenMatch: RegExpExecArray | null
+  while ((tokenMatch = CALC_TOKEN_RE.exec(inner)) !== null) {
+    const op = tokenMatch[3]
+    if (op !== undefined) {
+      if (!lastWasValue && op === "-") {
+        // Unary minus — negate the next value
+        const nextToken = CALC_TOKEN_RE.exec(inner)
+        if (!nextToken || nextToken[3] !== undefined) return null
+        const px = calcTokenToPx(nextToken, contextFontSize)
+        if (px === null) return null
+        values.push(-px)
+        lastWasValue = true
+        continue
+      }
+      if (!lastWasValue) return null
+      operators.push(op)
+      lastWasValue = false
+      continue
+    }
+    const px = calcTokenToPx(tokenMatch, contextFontSize)
+    if (px === null) return null
+    values.push(px)
+    lastWasValue = true
+  }
+
+  if (values.length === 0 || values.length !== operators.length + 1) return null
+
+  // Two-pass evaluation: * and / first, then + and -
+  const reducedValues: number[] = [values[0]!]
+  const reducedOps: string[] = []
+
+  for (let i = 0; i < operators.length; i++) {
+    const op = operators[i]!
+    const right = values[i + 1]!
+    if (op === "*") {
+      reducedValues[reducedValues.length - 1]! *= right
+    } else if (op === "/") {
+      if (right === 0) return null
+      reducedValues[reducedValues.length - 1]! /= right
+    } else {
+      reducedValues.push(right)
+      reducedOps.push(op)
+    }
+  }
+
+  let result = reducedValues[0]!
+  for (let i = 0; i < reducedOps.length; i++) {
+    const op = reducedOps[i]!
+    const right = reducedValues[i + 1]!
+    if (op === "+") result += right
+    else if (op === "-") result -= right
+    else return null
+  }
+
+  return Number.isFinite(result) ? result : null
+}
+
+function calcTokenToPx(tokenMatch: RegExpExecArray, contextFontSize: number): number | null {
+  const num = Number(tokenMatch[1])
+  if (Number.isNaN(num)) return null
+  const unit = tokenMatch[2] ?? ""
+  if (unit === "px" || unit === "") return num
+  if (unit === "rem") return num * 16
+  if (unit === "em") return num * contextFontSize
+  if (unit === "pt") return num * 1.333
+  return null
+}
+
+const MATH_FN_RE = /^(min|max|clamp)\((.+)\)$/
+
+/**
+ * Evaluates CSS math functions (min, max, clamp) when all arguments are
+ * statically resolvable to px values.
+ *
+ * - `min(a, b, ...)` → smallest value (guaranteed rendered size)
+ * - `max(a, b, ...)` → largest value (guaranteed minimum)
+ * - `clamp(min, val, max)` → val clamped to [min, max]
+ *
+ * Returns null if any argument contains dynamic values (%, var, env, vw, vh).
+ */
+function tryEvalMathFunction(raw: string, contextFontSize: number): number | null {
+  const match = MATH_FN_RE.exec(raw)
+  if (!match || !match[1] || !match[2]) return null
+  const fn = match[1]
+  const inner = match[2]
+
+  // Split arguments on top-level commas (respecting nested parentheses)
+  const args = splitMathArgs(inner)
+  if (args === null) return null
+
+  // Recursively parse each argument — supports nested calc(), min(), max()
+  const values: number[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) return null
+    const px = parsePxValue(arg.trim(), contextFontSize)
+    if (px === null) return null
+    values.push(px)
+  }
+
+  if (values.length === 0) return null
+
+  if (fn === "min") return Math.min(...values)
+  if (fn === "max") return Math.max(...values)
+  if (fn === "clamp") {
+    if (values.length !== 3) return null
+    const [lo, val, hi] = values as [number, number, number]
+    return Math.max(lo, Math.min(val, hi))
+  }
+
+  return null
+}
+
+function splitMathArgs(inner: string): string[] | null {
+  const args: string[] = []
+  let depth = 0
+  let start = 0
+
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]
+    if (ch === "(") depth++
+    else if (ch === ")") { if (depth > 0) depth--; else return null }
+    else if (ch === "," && depth === 0) {
+      const arg = inner.slice(start, i).trim()
+      if (arg.length === 0) return null
+      args.push(arg)
+      start = i + 1
+    }
+  }
+
+  if (depth !== 0) return null
+  const tail = inner.slice(start).trim()
+  if (tail.length === 0) return null
+  args.push(tail)
+  return args
 }
 
 /**

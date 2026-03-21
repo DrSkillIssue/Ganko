@@ -47,25 +47,51 @@ export function collectCSSScopeBySolidFile(
       if (imp.isTypeOnly) continue
 
       const resolvedCssPath = resolver.resolveCss(solid.file, imp.source)
-      if (resolvedCssPath === null) continue
+      if (resolvedCssPath !== null) {
+        const transitiveScope = getOrCollectTransitiveScope(
+          resolvedCssPath,
+          resolver,
+          cssFilesByNormalizedPath,
+          transitiveScopeByEntryPath,
+        )
+        for (let k = 0; k < transitiveScope.length; k++) {
+          const ts = transitiveScope[k]
+          if (!ts) continue
+          scope.add(ts)
+        }
 
-      const transitiveScope = getOrCollectTransitiveScope(
-        resolvedCssPath,
-        resolver,
-        cssFilesByNormalizedPath,
-        transitiveScopeByEntryPath,
-      )
-      for (let k = 0; k < transitiveScope.length; k++) {
-        const ts = transitiveScope[k]
-        if (!ts) continue
-        scope.add(ts)
+        if (imp.specifiers.length === 0) {
+          for (let k = 0; k < transitiveScope.length; k++) {
+            const ts = transitiveScope[k]
+            if (!ts) continue
+            globalSideEffectScope.add(ts)
+          }
+        }
       }
 
-      if (imp.specifiers.length !== 0) continue
-      for (let k = 0; k < transitiveScope.length; k++) {
-        const ts = transitiveScope[k]
-        if (!ts) continue
-        globalSideEffectScope.add(ts)
+      // Cross-component CSS scope: when importing a component file, include
+      // CSS co-located with that component. This ensures that CSS selectors
+      // from component stylesheets (e.g., button.css alongside button.tsx)
+      // are available in the cascade for call-site elements that resolve
+      // through the component's host element.
+      if (imp.specifiers.length !== 0) {
+        const resolvedSolidPath = resolver.resolveSolid(solid.file, imp.source)
+        if (resolvedSolidPath !== null) {
+          const componentCssPath = resolveColocatedCss(resolvedSolidPath, cssFilesByNormalizedPath)
+          if (componentCssPath !== null) {
+            const componentCssScope = getOrCollectTransitiveScope(
+              componentCssPath,
+              resolver,
+              cssFilesByNormalizedPath,
+              transitiveScopeByEntryPath,
+            )
+            for (let k = 0; k < componentCssScope.length; k++) {
+              const cs = componentCssScope[k]
+              if (!cs) continue
+              scope.add(cs)
+            }
+          }
+        }
       }
     }
 

@@ -17,6 +17,7 @@ import { resolveExternalModule } from "./module-resolver"
 import type { LayoutElementRef } from "./graph"
 
 const EMPTY_ATTRIBUTES: ReadonlyMap<string, string | null> = new Map()
+const EMPTY_PROP_BINDINGS: ReadonlyMap<string, string> = new Map()
 
 const TRANSPARENT_SOLID_PRIMITIVES = new Set([
   "For",
@@ -35,6 +36,13 @@ export interface LayoutComponentHostDescriptor {
   readonly staticAttributes: ReadonlyMap<string, string | null>
   readonly staticClassTokens: readonly string[]
   readonly forwardsChildren: boolean
+  /**
+   * Maps host attribute names to the prop member name they derive from.
+   * For `<button data-size={local.size ?? "sm"}>`, this records `data-size → size`.
+   * Used at call-site merge time to substitute null-valued host attributes with
+   * the static prop value from the call site (e.g., `size="md"` → `data-size: "md"`).
+   */
+  readonly attributePropBindings: ReadonlyMap<string, string>
 }
 
 /**
@@ -105,6 +113,7 @@ interface DeferredComponentHostEntry {
   readonly staticAttributes: ReadonlyMap<string, string | null>
   readonly staticClassTokens: readonly string[]
   readonly forwardsChildren: boolean
+  readonly attributePropBindings: ReadonlyMap<string, string>
 }
 
 type ComponentHostEntry = ResolvedComponentHostEntry | DeferredComponentHostEntry
@@ -206,11 +215,14 @@ export function createLayoutComponentHostResolver(
       ? mergeStaticClassTokens(entry.staticClassTokens, innerHost.descriptor.staticClassTokens)
       : entry.staticClassTokens
     const forwardsChildren = entry.forwardsChildren || (innerHost !== null && innerHost.descriptor.forwardsChildren)
+    const attributePropBindings = innerHost !== null
+      ? mergePropBindings(entry.attributePropBindings, innerHost.descriptor.attributePropBindings)
+      : entry.attributePropBindings
 
     if (logger.isLevelEnabled(Level.Trace)) logger.trace(`[component-host]   resolved: tagName=${tagName}, attrs=[${[...staticAttributes.keys()]}], classes=[${staticClassTokens}]`)
 
     return {
-      descriptor: { tagName, staticAttributes, staticClassTokens, forwardsChildren },
+      descriptor: { tagName, staticAttributes, staticClassTokens, forwardsChildren, attributePropBindings },
       hostElementRef: innerHost?.hostElementRef ?? null,
     }
   }
@@ -777,6 +789,7 @@ function resolveHostEntryFromJSXElement(graph: SolidGraph, node: ts.JsxElement |
         staticAttributes: collectStaticAttributes(element),
         staticClassTokens: getStaticClassTokensForElementEntity(graph, element),
         forwardsChildren: detectChildrenForwarding(element),
+        attributePropBindings: collectAttributePropBindings(element),
       },
       hostElementRef: { solid: graph, element },
     }
@@ -797,6 +810,7 @@ function resolveHostEntryFromJSXElement(graph: SolidGraph, node: ts.JsxElement |
     staticAttributes: collectStaticAttributes(element),
     staticClassTokens: getStaticClassTokensForElementEntity(graph, element),
     forwardsChildren: detectChildrenForwarding(element),
+    attributePropBindings: collectAttributePropBindings(element),
   }
 }
 
@@ -1038,6 +1052,65 @@ export function collectStaticAttributes(element: JSXElementEntity): ReadonlyMap<
   return out
 }
 
+/**
+ * Extracts prop member name from a dynamic JSX attribute value expression.
+ * Handles patterns:
+ *   - `props.size` / `local.size` → `"size"`
+ *   - `props.size ?? "sm"` / `local.size ?? "default"` → `"size"` (unwrap nullish coalescing)
+ *   - `props.size()` / `local.size()` → `"size"` (Solid accessor pattern)
+ *
+ * Returns null if the expression doesn't match any recognizable prop reference pattern.
+ */
+function extractPropMemberName(node: ts.Node): string | null {
+  if (!ts.isJsxExpression(node)) return null
+  const expression = node.expression
+  if (!expression) return null
+  return extractMemberNameFromExpression(expression)
+}
+
+function extractMemberNameFromExpression(expression: ts.Expression): string | null {
+  // Direct member access: props.size, local.size
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text
+  }
+  // Accessor call: props.size(), local.size()
+  if (ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) && expression.arguments.length === 0) {
+    return expression.expression.name.text
+  }
+  // Nullish coalescing: props.size ?? "default"
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+    return extractMemberNameFromExpression(expression.left)
+  }
+  return null
+}
+
+/**
+ * Collects attribute-to-prop bindings for a host element.
+ * For each attribute with a dynamic value that references a prop member,
+ * records the mapping (e.g., `data-size → size`).
+ */
+export function collectAttributePropBindings(element: JSXElementEntity): ReadonlyMap<string, string> {
+  let out: Map<string, string> | null = null
+
+  for (let i = 0; i < element.attributes.length; i++) {
+    const attribute = element.attributes[i]
+    if (!attribute) continue
+    if (!ts.isJsxAttribute(attribute.node)) continue
+    if (!attribute.name) continue
+    if (attribute.valueNode === null) continue
+
+    const propName = extractPropMemberName(attribute.valueNode)
+    if (propName === null) continue
+
+    const attrName = attribute.name.toLowerCase()
+    if (out === null) out = new Map<string, string>()
+    out.set(attrName, propName)
+  }
+
+  if (out === null) return EMPTY_PROP_BINDINGS
+  return out
+}
+
 function collectTopLevelVariableInitializers(graph: SolidGraph): ReadonlyMap<string, ts.Expression> {
   const out = new Map<string, ts.Expression>()
 
@@ -1195,7 +1268,12 @@ function areHostDescriptorsEqual(
   if (left.tagName !== right.tagName) return false
   if (left.forwardsChildren !== right.forwardsChildren) return false
   if (!areStringListsEqual(left.staticClassTokens, right.staticClassTokens)) return false
-  return areAttributeMapsEqual(left.staticAttributes, right.staticAttributes)
+  if (!areAttributeMapsEqual(left.staticAttributes, right.staticAttributes)) return false
+  if (left.attributePropBindings.size !== right.attributePropBindings.size) return false
+  for (const [key, value] of left.attributePropBindings) {
+    if (right.attributePropBindings.get(key) !== value) return false
+  }
+  return true
 }
 
 function areComponentHostEntriesEqual(
@@ -1256,6 +1334,30 @@ function mergeStaticAttributes(
   if (outer.size === 0) return inner
 
   const out = new Map<string, string | null>()
+
+  for (const [name, value] of inner) {
+    out.set(name, value)
+  }
+
+  for (const [name, value] of outer) {
+    out.set(name, value)
+  }
+
+  return out
+}
+
+/**
+ * Merges attribute-to-prop bindings from an outer component layer with those of
+ * an inner component layer. Outer bindings take precedence (closer to call site).
+ */
+function mergePropBindings(
+  outer: ReadonlyMap<string, string>,
+  inner: ReadonlyMap<string, string>,
+): ReadonlyMap<string, string> {
+  if (inner.size === 0) return outer
+  if (outer.size === 0) return inner
+
+  const out = new Map<string, string>()
 
   for (const [name, value] of inner) {
     out.set(name, value)

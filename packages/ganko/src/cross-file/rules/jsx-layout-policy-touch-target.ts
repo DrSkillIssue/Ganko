@@ -86,9 +86,12 @@ function classifyInteractive(
 
 /**
  * Detects visually hidden interactive elements — inputs or buttons removed from
- * visual presentation using `position: absolute/fixed` combined with `opacity: 0`.
- * This is the standard accessible hidden input pattern where the actual touch
- * target is a parent `<label>` or sibling control.
+ * visual presentation via known accessible hidden patterns:
+ *
+ * 1. `position: absolute/fixed` + `opacity: 0` — standard hidden input pattern
+ * 2. `position: absolute/fixed` + `width: 1px; height: 1px` — sr-only pattern
+ *    used by Tailwind sr-only, Kobalte, Radix, and most component libraries
+ *    where the actual touch target is a parent `<label>` or sibling control.
  */
 function isVisuallyHidden(snapshot: LayoutSignalSnapshot): boolean {
   const position = readKnownNormalized(snapshot, "position")
@@ -103,6 +106,13 @@ function isVisuallyHidden(snapshot: LayoutSignalSnapshot): boolean {
   // Check if any class token resolves to opacity: 0 via the class token set.
   // Tailwind `opacity-0` class is a common pattern.
   if (node.classTokenSet.has("opacity-0")) return true
+
+  // sr-only pattern: position: absolute + exactly 1px × 1px dimensions.
+  // Used by Kobalte, Radix, Tailwind sr-only, Bootstrap visually-hidden.
+  // Uses exact 1px check — 0px indicates a collapsed element, not sr-only.
+  const width = readKnownPx(snapshot, "width")
+  const height = readKnownPx(snapshot, "height")
+  if (width === 1 && height === 1) return true
 
   return false
 }
@@ -150,6 +160,10 @@ export const jsxLayoutPolicyTouchTarget = defineCrossRule({
         snapshot, "min-height", kind === "button" ? policy.minButtonHeight : policy.minInputHeight,
         layout, node, emit, "heightTooSmall", messages.heightTooSmall, tag, policyName,
       )
+      checkDimension(
+        snapshot, "max-height", kind === "button" ? policy.minButtonHeight : policy.minInputHeight,
+        layout, node, emit, "heightTooSmall", messages.heightTooSmall, tag, policyName,
+      )
 
       // --- Width checks ---
       checkDimension(
@@ -158,6 +172,10 @@ export const jsxLayoutPolicyTouchTarget = defineCrossRule({
       )
       checkDimension(
         snapshot, "min-width", kind === "button" ? policy.minButtonWidth : policy.minTouchTarget,
+        layout, node, emit, "widthTooSmall", messages.widthTooSmall, tag, policyName,
+      )
+      checkDimension(
+        snapshot, "max-width", kind === "button" ? policy.minButtonWidth : policy.minTouchTarget,
         layout, node, emit, "widthTooSmall", messages.widthTooSmall, tag, policyName,
       )
 
@@ -204,7 +222,7 @@ export const jsxLayoutPolicyTouchTarget = defineCrossRule({
 
 function checkDimension(
   snapshot: LayoutSignalSnapshot,
-  signal: "height" | "min-height" | "width" | "min-width" | "padding-left" | "padding-right",
+  signal: "height" | "min-height" | "max-height" | "width" | "min-width" | "max-width" | "padding-left" | "padding-right",
   min: number,
   layout: LayoutGraph,
   node: LayoutElementNode,
