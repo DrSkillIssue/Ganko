@@ -170,7 +170,12 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   const identity = createResourceIdentity();
   const docManager = new DocumentManager(identity);
   const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
-    connection.sendDiagnostics({ uri, diagnostics: [...diags] });
+    const tracked = docManager.getByUri(uri);
+    connection.sendDiagnostics(
+      tracked?.version !== undefined
+        ? { uri, diagnostics: [...diags], version: tracked.version }
+        : { uri, diagnostics: [...diags] },
+    );
   });
   // eslint-disable-next-line prefer-const -- assigned after context construction due to circular reference
   let changeProcessor: ChangeProcessor;

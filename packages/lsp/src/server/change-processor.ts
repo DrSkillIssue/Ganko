@@ -56,21 +56,16 @@ export class ChangeProcessor {
   processChanges(changes: readonly FileChangeEvent[], exclude?: ReadonlySet<string>): void {
     if (changes.length === 0) return;
 
-    // Step 1: Evict caches for changed files
-    for (let i = 0; i < changes.length; i++) {
-      const change = changes[i];
-      if (!change) continue;
-      const key = canonicalPath(change.path);
-      if (this.log.isLevelEnabled(Level.Debug)) this.log.debug(`changeProcessor: evict ${key}`);
-      this.diagnostics.evict(key);
-      this.graphCache.invalidate(key);
-    }
+    // Cache eviction (diagManager + graphCache) is handled by the caller
+    // via evictCachesForPath BEFORE diagnosis. We must not re-evict here —
+    // that would wipe freshly-published diagnostics from the diagManager
+    // and freshly-rebuilt cross-file results from the graphCache.
 
-    // Step 2: Compute affected open files (cross-file dependents)
+    // Step 1: Compute affected open files (cross-file dependents)
     const changedPaths = changes.map((c) => c.path);
     const affected = this.collectAffectedPaths(changedPaths, exclude);
 
-    // Step 3: Re-diagnose affected files
+    // Step 2: Re-diagnose affected files
     for (let i = 0; i < affected.length; i++) {
       const path = affected[i];
       if (path) this.rediagnoseFn(path);

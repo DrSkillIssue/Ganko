@@ -12,7 +12,6 @@
  */
 
 import {
-  type PublishDiagnosticsParams,
   type Diagnostic as LSPDiagnostic,
 } from "vscode-languageserver/node";
 import { createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
@@ -85,27 +84,24 @@ export function publishTier1Diagnostics(
   context.diagCache.set(path, diagnostics);
 
   const converted = convertDiagnostics(diagnostics, context.serverState.config.warningsAsErrors);
-  context.diagManager.update(path, DiagnosticKind.Ganko, converted);
+  context.diagManager.beginBatch();
+  try {
+    context.diagManager.update(path, DiagnosticKind.Ganko, converted);
 
-  if (context.serverState.config.enableTsDiagnostics) {
-    const tsDiags: LSPDiagnostic[] = [];
-    const syntactic = program.getSyntacticDiagnostics(sourceFile);
-    for (let i = 0, len = syntactic.length; i < len; i++) {
-      const d = syntactic[i];
-      if (!d) continue;
-      const lspDiag = convertTsDiagnostic(d);
-      if (lspDiag !== null) tsDiags.push(lspDiag);
+    if (context.serverState.config.enableTsDiagnostics) {
+      const tsDiags: LSPDiagnostic[] = [];
+      const syntactic = program.getSyntacticDiagnostics(sourceFile);
+      for (let i = 0, len = syntactic.length; i < len; i++) {
+        const d = syntactic[i];
+        if (!d) continue;
+        const lspDiag = convertTsDiagnostic(d);
+        if (lspDiag !== null) tsDiags.push(lspDiag);
+      }
+      context.diagManager.update(path, DiagnosticKind.TypeScript, tsDiags);
     }
-    context.diagManager.update(path, DiagnosticKind.TypeScript, tsDiags);
+  } finally {
+    context.diagManager.endBatch();
   }
-
-  const uri = context.docManager.uriForPath(path);
-  const tracked = context.docManager.getByUri(uri);
-
-  const allDiags = context.diagManager.getDiagnostics(path);
-  const params: PublishDiagnosticsParams = { uri, diagnostics: [...allDiags] };
-  if (tracked?.version !== undefined) params.version = tracked.version;
-  context.connection.sendDiagnostics(params);
 
   if (context.log.isLevelEnabled(Level.Info)) {
     context.log.info(`Tier 1: ${path} → ${diagnostics.length} ganko + ${converted.length - diagnostics.length} ts diagnostics in ${(performance.now() - t0).toFixed(0)}ms`);
@@ -158,21 +154,23 @@ export function publishFileDiagnostics(
      in republishMergedDiagnostics and the pull diagnostic handler. */
   const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
 
-  context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors));
-  if (crossFile.length > 0) {
-    context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
-  }
-
-  if (context.serverState.config.enableTsDiagnostics && phase.tag === "running" || phase.tag === "enriched" && kind === "solid") {
-    if (content !== undefined) {
-      const ls = project.getLanguageService();
-      const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
-      context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
+  context.diagManager.beginBatch();
+  try {
+    context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors));
+    if (crossFile.length > 0) {
+      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
     }
-  }
 
-  const uri = context.docManager.uriForPath(key);
-  const tracked = context.docManager.getByUri(uri);
+    if (context.serverState.config.enableTsDiagnostics && (phase.tag === "running" || phase.tag === "enriched") && kind === "solid") {
+      if (content !== undefined) {
+        const ls = project.getLanguageService();
+        const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
+        context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
+      }
+    }
+  } finally {
+    context.diagManager.endBatch();
+  }
 
   const elapsed = (performance.now() - t0).toFixed(1);
   if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
@@ -183,11 +181,6 @@ export function publishFileDiagnostics(
   context.connection.tracer.log(
     `publishFileDiagnostics ${key}: ${rawDiagnostics.length} diagnostics in ${elapsed}ms`,
   );
-
-  const allDiags = context.diagManager.getDiagnostics(key);
-  const params: PublishDiagnosticsParams = { uri, diagnostics: [...allDiags] };
-  if (tracked?.version !== undefined) params.version = tracked.version;
-  context.connection.sendDiagnostics(params);
 }
 
 /**

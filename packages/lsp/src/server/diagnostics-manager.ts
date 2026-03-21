@@ -5,12 +5,14 @@
  * tsDiagCache (Map<string, LSPDiagnostic[]>) with a unified manager that
  * stores diagnostics by kind and publishes merged results per file.
  *
- * Each file has a FileDiagnostics instance that debounces publication
- * to prevent rapid republish when multiple sources update simultaneously.
+ * Each file has a FileDiagnostics instance that publishes immediately
+ * when any diagnostic source updates — unless a batch is active, in which
+ * case publication is deferred until the batch ends. Callers use
+ * `beginBatch()` / `endBatch()` to coalesce multiple kind updates for
+ * the same file into a single publish.
  *
- * Modeled after typescript-language-server's DiagnosticsManager which
- * separates syntax/semantic/suggestion diagnostics per file and debounces
- * publication through FileDiagnostics.
+ * Debouncing is handled upstream by DocumentManager (keystroke coalescing),
+ * so no timer-based debounce is needed here.
  */
 
 import type { Diagnostic as LSPDiagnostic } from "vscode-languageserver";
@@ -28,18 +30,17 @@ export const enum DiagnosticKind {
 
 /**
  * Per-file diagnostic state. Stores diagnostics separated by kind.
- * Debounces publication to prevent rapid republish when multiple
- * diagnostic sources update the same file in quick succession.
+ * Publishes immediately on update unless suppressed by batch mode.
  */
 class FileDiagnostics {
   private readonly byKind = new Map<DiagnosticKind, readonly LSPDiagnostic[]>();
-  private publishTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  suppressPublish = false;
+  dirty = false;
 
   constructor(
     private readonly path: string,
     private readonly publishFn: (path: string, diagnostics: readonly LSPDiagnostic[]) => void,
-    private readonly debounceMs: number,
   ) {}
 
   update(kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[]): void {
@@ -47,19 +48,33 @@ class FileDiagnostics {
     const existing = this.byKind.get(kind);
     if (existing !== undefined && existing.length === 0 && diagnostics.length === 0) return;
     this.byKind.set(kind, diagnostics);
-    this.schedulePublish();
+    if (this.suppressPublish) {
+      this.dirty = true;
+    } else if (!this.closed) {
+      this.publishFn(this.path, this.getDiagnostics());
+    }
   }
 
   clear(kind: DiagnosticKind): void {
     if (!this.byKind.has(kind)) return;
     this.byKind.delete(kind);
-    this.schedulePublish();
+    if (this.suppressPublish) {
+      this.dirty = true;
+    } else if (!this.closed) {
+      this.publishFn(this.path, this.getDiagnostics());
+    }
   }
 
   clearAll(): void {
     this.byKind.clear();
-    this.cancelPending();
     this.publishFn(this.path, []);
+  }
+
+  flush(): void {
+    if (this.dirty && !this.closed) {
+      this.dirty = false;
+      this.publishFn(this.path, this.getDiagnostics());
+    }
   }
 
   getDiagnostics(): readonly LSPDiagnostic[] {
@@ -79,24 +94,8 @@ class FileDiagnostics {
 
   close(): void {
     this.closed = true;
-    this.cancelPending();
     this.byKind.clear();
     this.publishFn(this.path, []);
-  }
-
-  private schedulePublish(): void {
-    if (this.publishTimer !== null) return;
-    this.publishTimer = setTimeout(() => {
-      this.publishTimer = null;
-      if (!this.closed) this.publishFn(this.path, this.getDiagnostics());
-    }, this.debounceMs);
-  }
-
-  private cancelPending(): void {
-    if (this.publishTimer !== null) {
-      clearTimeout(this.publishTimer);
-      this.publishTimer = null;
-    }
   }
 }
 
@@ -104,23 +103,47 @@ class FileDiagnostics {
  * Aggregates diagnostics from all sources per file.
  *
  * Consumers call `update(path, kind, diagnostics)` from each diagnostic
- * source. Publication is debounced per file — rapid updates from ganko
- * single-file + cross-file + TypeScript coalesce into a single publish.
+ * source. Each update publishes immediately with all kinds merged, unless
+ * inside a `beginBatch()` / `endBatch()` block which coalesces updates.
  */
 export class DiagnosticsManager {
   private readonly files = new ResourceMap<FileDiagnostics>();
+  private batchDepth = 0;
+  private batchDirty: FileDiagnostics[] | null = null;
 
   constructor(
     private readonly identity: ResourceIdentity,
     private readonly publishFn: (uri: string, diagnostics: readonly LSPDiagnostic[]) => void,
-    private readonly debounceMs = 50,
   ) {}
+
+  beginBatch(): void {
+    if (this.batchDepth++ === 0) {
+      this.batchDirty = [];
+    }
+  }
+
+  endBatch(): void {
+    if (--this.batchDepth === 0 && this.batchDirty !== null) {
+      const dirty = this.batchDirty;
+      this.batchDirty = null;
+      for (let i = 0; i < dirty.length; i++) {
+        const f = dirty[i];
+        if (!f) continue;
+        f.suppressPublish = false;
+        f.flush();
+      }
+    }
+  }
 
   update(path: string, kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[]): void {
     let file = this.files.get(path);
     if (!file) {
-      file = new FileDiagnostics(path, this.publish, this.debounceMs);
+      file = new FileDiagnostics(path, this.publish);
       this.files.set(path, file);
+    }
+    if (this.batchDepth > 0 && this.batchDirty !== null && !file.suppressPublish) {
+      file.suppressPublish = true;
+      this.batchDirty.push(file);
     }
     file.update(kind, diagnostics);
   }
@@ -134,7 +157,10 @@ export class DiagnosticsManager {
   }
 
   evict(path: string): void {
-    this.files.get(path)?.clearAll();
+    const file = this.files.get(path);
+    if (file) {
+      this.files.delete(path);
+    }
   }
 
   onClose(path: string): void {

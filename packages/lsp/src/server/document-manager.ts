@@ -41,7 +41,7 @@ interface PendingChange {
   timestamp: number
 }
 
-type DebouncedChangesCallback = (paths: readonly string[]) => void;
+type DebouncedChangesCallback = () => void;
 
 export class DocumentManager {
   /** URI → TrackedDocument */
@@ -193,12 +193,10 @@ export class DocumentManager {
   }
 
   private fireDebouncedChanges(): void {
-    const changes = this.drainPendingChanges();
-    if (changes.length === 0) return;
-    const paths = changes.map((c) => c.path);
+    if (this.pending.size === 0) return;
     for (let i = 0; i < this.changeListeners.length; i++) {
       const listener = this.changeListeners[i];
-      if (listener) listener(paths);
+      if (listener) listener();
     }
   }
 }
