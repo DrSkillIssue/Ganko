@@ -23,6 +23,7 @@ import {
 } from "../diagnostics-push";
 import { isRunningOrEnriched } from "../server-state";
 import type { ServerContext } from "../connection";
+import type { DocumentHandlerContext } from "../handlers/handler-context";
 import type { Project } from "../../core/project";
 import { evictCachesForPath } from "../change-processor";
 
@@ -63,6 +64,18 @@ function refreshCrossFileCache(
  */
 export function setupDocumentHandlers(context: ServerContext): void {
   const { documents, serverState, docManager } = context;
+
+  const docHandlerCtx: DocumentHandlerContext = {
+    identity: context.identity,
+    documents: context.docManager,
+    diagnostics: context.diagManager,
+    log: context.log,
+    runDiagnostics(path: string) {
+      const phase = context.phase;
+      if (!isRunningOrEnriched(phase)) return;
+      publishFileDiagnostics(context, phase.project, path);
+    },
+  };
 
   function processChangesCallback(): void {
     const phase = context.phase;
@@ -217,13 +230,13 @@ export function setupDocumentHandlers(context: ServerContext): void {
   });
 
   documents.onDidClose((event) => {
-    const path = docManager.close(event);
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
+    const path = docHandlerCtx.documents.close(event);
+    if (docHandlerCtx.log.isLevelEnabled(Level.Debug)) docHandlerCtx.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
     if (path) {
       clearDiagnostics(context.connection, event.document.uri);
       const key = canonicalPath(path);
       context.diagCache.delete(key);
-      context.diagManager.onClose(key);
+      docHandlerCtx.diagnostics.onClose(key);
     }
   });
 }

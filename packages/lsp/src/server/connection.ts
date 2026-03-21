@@ -58,6 +58,7 @@ import { setupDocumentHandlers } from "./routing/document";
 import { setupFeatureHandlers } from "./routing/feature";
 
 function createFeatureHandlerContext(
+  tsService: TsService,
   project: Project,
   graphCache: GraphCache,
   diagCache: ResourceMap<readonly Diagnostic[]>,
@@ -67,23 +68,23 @@ function createFeatureHandlerContext(
     log: handlerLog,
 
     getLanguageService(_path) {
-      return project.getLanguageService();
+      return tsService.getLanguageService();
     },
 
     getSourceFile(path) {
-      return project.getSourceFile(path) ?? null;
+      return tsService.getSourceFile(path);
     },
 
     getTSFileInfo(path) {
-      const ls = project.getLanguageService();
+      const ls = tsService.getLanguageService();
       if (!ls) return null;
-      const sf = project.getSourceFile(path);
+      const sf = tsService.getSourceFile(path);
       if (!sf) return null;
       return { ls, sf };
     },
 
     getAST(path) {
-      return project.getSourceFile(path) ?? null;
+      return tsService.getSourceFile(path);
     },
 
     getDiagnostics(path) {
@@ -91,12 +92,12 @@ function createFeatureHandlerContext(
     },
 
     getContent(path) {
-      return project.getSourceFile(path)?.text ?? null;
+      return tsService.getSourceFile(path)?.text ?? null;
     },
 
     getSolidGraph(path) {
       if (classifyFile(path) !== "solid") return null;
-      const sourceFile = project.getSourceFile(path);
+      const sourceFile = tsService.getSourceFile(path);
       if (!sourceFile) return null;
       const version = contentHash(sourceFile.text);
       return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
@@ -211,7 +212,8 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     phase: { tag: "initializing" },
 
     setProject(project) {
-      return createFeatureHandlerContext(project, graphCache, diagCache, prefixLogger(log, "handler"));
+      context.tsService.setProject(project);
+      return createFeatureHandlerContext(context.tsService, project, graphCache, diagCache, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {

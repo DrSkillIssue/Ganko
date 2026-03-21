@@ -29,11 +29,21 @@ import { createFileIndex } from "../../core/file-index";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import { isRunningOrEnriched } from "../server-state";
+import type { LifecyclePhase } from "../server-state";
 import type { ServerContext } from "../connection";
+import type { LifecycleHandlerContext } from "../handlers/handler-context";
 import { evictCachesForPath } from "../change-processor";
 
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
+
+  const lifecycleCtx: LifecycleHandlerContext = {
+    connection: context.connection,
+    log: context.log,
+    transitionPhase(phase: LifecyclePhase) {
+      context.phase = phase;
+    },
+  };
 
   connection.onInitialize((params) => {
     const rawLevel = params.initializationOptions?.logLevel;
@@ -101,9 +111,9 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         const newFileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const curPhase = context.phase;
         if (curPhase.tag === "enriched") {
-          context.phase = { ...curPhase, fileIndex: newFileIndex };
+          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
         } else if (curPhase.tag === "running") {
-          context.phase = { ...curPhase, fileIndex: newFileIndex };
+          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
@@ -174,9 +184,9 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       const newIdx = createFileIndex(serverState.rootPath, excludes, context.log);
       const cfgPhase = context.phase;
       if (cfgPhase.tag === "enriched") {
-        context.phase = { ...cfgPhase, fileIndex: newIdx };
+        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
       } else if (cfgPhase.tag === "running") {
-        context.phase = { ...cfgPhase, fileIndex: newIdx };
+        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
       }
       if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${newIdx.solidFiles.size} solid, ${newIdx.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
@@ -187,9 +197,9 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         const newIdx = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const eslintPhase = context.phase;
         if (eslintPhase.tag === "enriched") {
-          context.phase = { ...eslintPhase, fileIndex: newIdx };
+          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
         } else if (eslintPhase.tag === "running") {
-          context.phase = { ...eslintPhase, fileIndex: newIdx };
+          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;

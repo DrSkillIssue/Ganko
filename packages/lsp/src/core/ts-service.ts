@@ -20,6 +20,8 @@
 
 import ts from "typescript"
 import { dirname } from "node:path"
+import type { Diagnostic } from "@drskillissue/ganko"
+import type { Project } from "./project"
 
 export const enum TsServiceTier {
   /** Fast startup: per-file createProgram, no cross-module types. */
@@ -32,11 +34,17 @@ export interface TsService {
   /** Current highest available tier. */
   readonly activeTier: TsServiceTier
 
+  /** Upgrade to Incremental tier by setting the backing Project. */
+  setProject(project: Project): void
+
   /** Get a SourceFile from the best available program. */
   getSourceFile(path: string): ts.SourceFile | null
 
   /** Get the LanguageService (only available at Incremental tier). */
   getLanguageService(): ts.LanguageService | null
+
+  /** Get the current TypeScript program (only available at Incremental tier). */
+  getProgram(): ts.Program | null
 
   /** Get compiler options from the project's tsconfig. */
   getCompilerOptions(): ts.CompilerOptions | null
@@ -47,6 +55,12 @@ export interface TsService {
    * Used during startup before the incremental program is ready.
    */
   createQuickProgram(path: string, content: string): ts.Program | null
+
+  /** Update in-memory file content. Delegates to project when available. */
+  updateFile(path: string, content: string): void
+
+  /** Run diagnostics on files. Delegates to project. */
+  run(files: readonly string[]): readonly Diagnostic[]
 
   /** Notify that a file's content changed. */
   notifyFileChange(path: string, content: string): void
@@ -59,6 +73,7 @@ export function createTsService(rootPath: string): TsService {
   let compilerOptions: ts.CompilerOptions | null = null
   let tier1Host: ts.CompilerHost | null = null
   let tier: TsServiceTier = TsServiceTier.Quick
+  let project: Project | null = null
 
   // Lazily resolve tsconfig compiler options
   function ensureCompilerOptions(): ts.CompilerOptions | null {
@@ -83,13 +98,23 @@ export function createTsService(rootPath: string): TsService {
   return {
     get activeTier() { return tier },
 
-    getSourceFile(_path) {
-      // At Quick tier, no persistent program — callers use createQuickProgram()
+    setProject(p) {
+      project = p
+      tier = TsServiceTier.Incremental
+    },
+
+    getSourceFile(path) {
+      if (project !== null) return project.getSourceFile(path) ?? null
       return null
     },
 
     getLanguageService() {
-      // Only available when the incremental program is set via the Project
+      if (project !== null) return project.getLanguageService()
+      return null
+    },
+
+    getProgram() {
+      if (project !== null) return project.getProgram()
       return null
     },
 
@@ -116,6 +141,15 @@ export function createTsService(rootPath: string): TsService {
       return ts.createProgram([path], opts, patchedHost)
     },
 
+    updateFile(path, content) {
+      if (project !== null) project.updateFile(path, content)
+    },
+
+    run(files) {
+      if (project !== null) return project.run(files)
+      return []
+    },
+
     notifyFileChange(_path, _content) {
       // At Quick tier, no state to invalidate — each createQuickProgram is fresh
     },
@@ -124,6 +158,7 @@ export function createTsService(rootPath: string): TsService {
       compilerOptions = null
       tier1Host = null
       tier = TsServiceTier.Quick
+      project = null
     },
   }
 }

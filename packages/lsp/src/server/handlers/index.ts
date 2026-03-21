@@ -4,7 +4,7 @@
  * Re-exports all surviving LSP handlers from a single module.
  */
 
-export type { FeatureHandlerContext } from "./handler-context";
+export type { FeatureHandlerContext, DocumentHandlerContext, LifecycleHandlerContext } from "./handler-context";
 
 export {
   type ServerConfig,
