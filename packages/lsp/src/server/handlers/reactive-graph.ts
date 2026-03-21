@@ -8,7 +8,7 @@
  */
 import type { FeatureHandlerContext } from "./handler-context";
 import type { SolidGraph, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /** Node in the reactive graph response. */
 interface ReactiveGraphNode {
@@ -51,7 +51,8 @@ export function handleReactiveGraph(
   ctx: FeatureHandlerContext,
 ): ReactiveGraphResult | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
 
   const graph = ctx.getSolidGraph(path);
   if (!graph) {

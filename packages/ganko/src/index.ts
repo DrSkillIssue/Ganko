@@ -32,7 +32,8 @@ export type { ComputationEntity, DependencyEdge } from "./solid"
 export { CSSPlugin, buildCSSGraph } from "./css"
 export type { CSSGraph, CSSInput } from "./css"
 export type { TailwindValidator } from "./css"
-export { resolveTailwindValidator } from "./css"
+export { prepareTailwindEval, buildTailwindValidatorFromEval } from "./css"
+export type { TailwindEvalParams, BatchableTailwindValidator } from "./css"
 export { scanDependencyCustomProperties } from "./css/library-analysis"
 
 // Accessibility policy

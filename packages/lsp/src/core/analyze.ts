@@ -15,29 +15,10 @@ import {
   createOverrideEmit,
 } from "@drskillissue/ganko";
 import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";
-import { readFileSync } from "node:fs";
 import { canonicalPath, classifyFile, contentHash, Level } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
-import type { FileIndex } from "./file-index";
-
-/**
- * Read all CSS files from disk, skipping unreadable entries.
- *
- * @param cssFiles - Set of canonical CSS file paths
- * @returns Array of `{ path, content }` pairs
- */
-export function readCSSFilesFromDisk(
-  cssFiles: ReadonlySet<string>,
-): { path: string; content: string }[] {
-  const result: { path: string; content: string }[] = [];
-  for (const cssPath of cssFiles) {
-    try {
-      result.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") });
-    } catch { /* skip unreadable */ }
-  }
-  return result;
-}
+import type { FileRegistry } from "./file-registry";
 
 export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; emit: (d: Diagnostic) => void } {
   const results: Diagnostic[] = [];
@@ -130,7 +111,7 @@ export function runSingleFileDiagnostics(
  */
 export function runCrossFileDiagnostics(
   path: string,
-  fileIndex: FileIndex,
+  fileIndex: FileRegistry,
   project: Project,
   cache: GraphCache,
   tailwind: TailwindValidator | null,
@@ -179,7 +160,7 @@ export function runCrossFileDiagnostics(
  * for the graph-rebuild + rule-execution pipeline.
  */
 function rebuildGraphsAndRunCrossFileRules(
-  fileIndex: FileIndex,
+  fileIndex: FileRegistry,
   project: Project,
   cache: GraphCache,
   tailwind: TailwindValidator | null,
@@ -214,7 +195,9 @@ function rebuildGraphsAndRunCrossFileRules(
       }
     }
     if (log.isLevelEnabled(Level.Trace)) log.trace(`crossFile: building CSSGraph from ${files.length} CSS files (tailwind=${tailwind !== null}, externalProps=${externalCustomProperties?.size ?? 0})`);
-    const cssInput = buildCSSInput(files, log, tailwind, externalCustomProperties);
+    const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files, logger: log };
+    if (tailwind !== null) cssInput.tailwind = tailwind;
+    if (externalCustomProperties !== undefined) cssInput.externalCustomProperties = externalCustomProperties;
     return buildCSSGraph(cssInput);
   });
 
@@ -246,7 +229,7 @@ function rebuildGraphsAndRunCrossFileRules(
  * @returns All cross-file diagnostics
  */
 export function runAllCrossFileDiagnostics(
-  fileIndex: FileIndex,
+  fileIndex: FileRegistry,
   project: Project,
   cache: GraphCache,
   tailwind: TailwindValidator | null,
@@ -266,26 +249,3 @@ export function runAllCrossFileDiagnostics(
   return results;
 }
 
-/**
- * Build a CSSInput with a consistent object shape per code path.
- *
- * Branches ensure each returned literal includes all intended properties,
- * avoiding both conditional spreads and post-construction property additions.
- */
-function buildCSSInput(
-  files: { path: string; content: string }[],
-  logger: Logger,
-  tailwind: TailwindValidator | null,
-  externalCustomProperties: ReadonlySet<string> | undefined,
-): CSSInput {
-  if (tailwind !== null && externalCustomProperties !== undefined) {
-    return { files, logger, tailwind, externalCustomProperties };
-  }
-  if (tailwind !== null) {
-    return { files, logger, tailwind };
-  }
-  if (externalCustomProperties !== undefined) {
-    return { files, logger, externalCustomProperties };
-  }
-  return { files, logger };
-}

@@ -9,7 +9,7 @@ import type { FoldingRangeParams, FoldingRange } from "vscode-languageserver";
 import { FoldingRangeKind } from "vscode-languageserver";
 import ts from "typescript";
 import type { FeatureHandlerContext } from "./handler-context";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /** Folding kind constants. */
 const KIND_REGION = FoldingRangeKind.Region;
@@ -127,7 +127,8 @@ export function handleFoldingRanges(
   params: FoldingRangeParams,
   ctx: FeatureHandlerContext,
 ): FoldingRange[] | null {
-  const filePath = uriToPath(params.textDocument.uri);
+  const filePath = uriToCanonicalPath(params.textDocument.uri);
+  if (filePath === null) return null;
   const sf = ctx.getAST(filePath);
   if (!sf) return null;
   const { log } = ctx;

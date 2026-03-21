@@ -13,12 +13,11 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties, type TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
+import { SolidPlugin, CSSPlugin, setActivePolicy } from "@drskillissue/ganko";
+import { pathToUri, projectRootFromUri, acceptProjectRoot, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
-import { createFileIndex, type FileIndex } from "../../core/file-index";
-import { readCSSFilesFromDisk } from "../../core/analyze";
+import { runEnrichment } from "../../core/enrichment";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
 import type { PhaseEnriched } from "../server-state";
@@ -101,12 +100,12 @@ export function handleInitialize(
   const workspaceFolder = params.workspaceFolders?.[0];
   if (workspaceFolder) {
     state.rootUri = workspaceFolder.uri;
-    state.rootPath = uriToPath(workspaceFolder.uri);
+    state.rootPath = projectRootFromUri(workspaceFolder.uri).path;
   } else if (params.rootUri) {
     state.rootUri = params.rootUri;
-    state.rootPath = uriToPath(params.rootUri);
+    state.rootPath = projectRootFromUri(params.rootUri).path;
   } else if (params.rootPath) {
-    state.rootPath = canonicalPath(params.rootPath);
+    state.rootPath = acceptProjectRoot(params.rootPath).path;
     state.rootUri = pathToUri(state.rootPath);
   }
 
@@ -209,7 +208,7 @@ export async function handleInitialized(
      synchronous program build blocks the event loop. */
 
   await project.watchProgramReady();
-  context.phase = { tag: "running", project, handlerCtx, fileIndex: null };
+  context.phase = { tag: "running", project, handlerCtx };
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
@@ -224,14 +223,23 @@ export async function handleInitialized(
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
-  const enrichment = await enrichWorkspace(rootPath, state, context);
+  const enrichment = await runEnrichment(rootPath, effectiveExclude(state), {
+    graphCache: context.graphCache,
+    diagCache: context.diagCache,
+    log,
+  });
   const enrichedPhase: PhaseEnriched = {
     tag: "enriched",
     project,
     handlerCtx,
-    fileIndex: enrichment.fileIndex,
+    registry: enrichment.registry,
+    layout: enrichment.layout,
     tailwindValidator: enrichment.tailwindValidator,
     externalCustomProperties: enrichment.externalCustomProperties,
+    changePipeline: enrichment.changePipeline,
+    tailwindState: enrichment.tailwindState,
+    evaluator: enrichment.evaluator,
+    batchableValidator: enrichment.batchableValidator,
   };
   context.phase = enrichedPhase;
 
@@ -256,50 +264,6 @@ export async function handleInitialized(
   }
 
   propagateTsDiagnostics(context, project, new Set());
-}
-
-/**
- * Workspace enrichment: file index, Tailwind validator, library analysis.
- *
- * Runs as Phase C of handleInitialized, after the full TypeScript program
- * is available. These operations are needed for cross-file diagnostics
- * but not for single-file Tier 1/2 analysis.
- */
-interface EnrichmentResult {
-  readonly fileIndex: FileIndex
-  readonly tailwindValidator: TailwindValidator | null
-  readonly externalCustomProperties: ReadonlySet<string> | undefined
-}
-
-async function enrichWorkspace(
-  rootPath: string,
-  state: ServerState,
-  context: ServerContext,
-): Promise<EnrichmentResult> {
-  const { log } = context;
-
-  const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
-  if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
-
-  let tailwindValidator: TailwindValidator | null = null;
-  if (fileIndex.cssFiles.size > 0) {
-    const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    tailwindValidator = await resolveTailwindValidator(cssFiles, log)
-      .catch((err) => {
-        if (log.isLevelEnabled(Level.Warning)) log.warning(`tailwind validator: uncaught error: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      });
-    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${tailwindValidator !== null ? "resolved" : "not found"}`);
-  }
-
-  const externalProps = scanDependencyCustomProperties(rootPath);
-  let externalCustomProperties: ReadonlySet<string> | undefined;
-  if (externalProps.size > 0) {
-    externalCustomProperties = externalProps;
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
-  }
-
-  return { fileIndex, tailwindValidator, externalCustomProperties };
 }
 
 /**

@@ -5,11 +5,12 @@ export type { CSSRule } from "./rule"
 export * from "./entities"
 export { hasClassSelector, getClassDefinitions, getAllClassNames } from "./queries/class"
 export type { ClassDefinition } from "./queries/class"
-export type { TailwindValidator } from "./tailwind"
+export type { TailwindValidator, TailwindEvalParams, BatchableTailwindValidator } from "./tailwind"
 export {
   createLiveValidator,
   createStaticValidator,
   detectTailwindEntry,
-  resolveTailwindValidator,
+  prepareTailwindEval,
+  buildTailwindValidatorFromEval,
   resolveTailwindValidatorSync,
 } from "./tailwind"

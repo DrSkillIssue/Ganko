@@ -7,7 +7,7 @@
  * as unresolved.
  *
  * Architecture:
- * 1. Read project package.json files to discover direct dependencies
+ * 1. Receive dependency names from WorkspaceLayout (single source of truth)
  * 2. For each dependency, scan its dist/source files for CSS custom property patterns
  * 3. Return discovered properties as a synthetic CSS `:root` declaration block
  * 4. The caller feeds this into the normal CSS parsing pipeline as an additional file
@@ -21,16 +21,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import type { Dirent } from "node:fs"
 import { join, dirname, resolve } from "node:path"
-import { z } from "zod/v4"
-
-const PackageJsonSchema = z.object({
-  dependencies: z.record(z.string(), z.string()).optional(),
-  peerDependencies: z.record(z.string(), z.string()).optional(),
-  workspaces: z.union([
-    z.array(z.string()),
-    z.object({ packages: z.array(z.string()).optional() }),
-  ]).optional(),
-})
+import type { WorkspaceLayout } from "@drskillissue/ganko-shared"
 
 /**
  * Pattern matching CSS custom property names in JavaScript/JSX source files.
@@ -54,9 +45,6 @@ const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
  */
 const SCANNABLE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"])
 
-/** Strips trailing glob stars from workspace patterns: "packages/*" → "packages" */
-const TRAILING_GLOB_RE = /\/?\*+$/
-
 /**
  * Result of scanning a single dependency package.
  */
@@ -68,20 +56,17 @@ interface PackageScanResult {
 /**
  * Scan installed dependencies for CSS custom properties they inject at runtime.
  *
- * Reads each direct dependency's package.json to find its dist directory,
- * then scans JavaScript/JSX files for CSS custom property name patterns.
+ * Receives dependency names from WorkspaceLayout instead of re-reading
+ * package.json files. Uses layout.root for node_modules resolution.
  *
- * @param projectRoot - Absolute path to the project root (containing package.json)
+ * @param layout - Workspace layout with pre-resolved dependency names
  * @returns Set of CSS custom property names (e.g., "--kb-accordion-content-height")
  */
-export function scanDependencyCustomProperties(projectRoot: string): ReadonlySet<string> {
+export function scanDependencyCustomProperties(layout: WorkspaceLayout): ReadonlySet<string> {
   const allProperties = new Set<string>()
 
-  const packageJsonPaths = findWorkspacePackageJsonPaths(projectRoot)
-  const dependencyNames = collectDependencyNames(packageJsonPaths)
-
-  for (const depName of dependencyNames) {
-    const packageDir = findPackageDir(projectRoot, depName)
+  for (const depName of layout.allDependencyNames) {
+    const packageDir = findPackageDir(layout.root.path, depName)
     if (packageDir === null) continue
 
     const result = scanPackage(depName, packageDir)
@@ -113,124 +98,6 @@ export function generateExternalPropertiesCSS(properties: ReadonlySet<string>): 
   }
 
   return `:root {\n${declarations.join("\n")}\n}\n`
-}
-
-/**
- * Find all package.json files in a workspace (monorepo or single-package).
- *
- * Checks for workspace definitions in the root package.json and collects
- * package.json paths from workspace packages.
- */
-function findWorkspacePackageJsonPaths(projectRoot: string): readonly string[] {
-  const rootPkgPath = join(projectRoot, "package.json")
-  if (!existsSync(rootPkgPath)) return []
-
-  const paths: string[] = [rootPkgPath]
-
-  try {
-    const parseResult = PackageJsonSchema.safeParse(JSON.parse(readFileSync(rootPkgPath, "utf-8")))
-    if (!parseResult.success) return paths
-
-    const workspaces = parseResult.data.workspaces
-    if (workspaces === undefined) {
-      // no workspaces defined
-    } else if (Array.isArray(workspaces)) {
-      for (const pattern of workspaces) {
-        collectWorkspacePackageJsons(projectRoot, pattern, paths)
-      }
-    } else if (workspaces.packages) {
-      for (const pattern of workspaces.packages) {
-        collectWorkspacePackageJsons(projectRoot, pattern, paths)
-      }
-    }
-  } catch {
-    // If package.json is unreadable or malformed, return just the root
-  }
-
-  return paths
-}
-
-/**
- * Collect package.json files matching a workspace glob pattern.
- * Handles simple patterns like "packages/*" and "web/packages/*".
- */
-function collectWorkspacePackageJsons(root: string, pattern: string, out: string[]): void {
-  const baseDir = pattern.replace(TRAILING_GLOB_RE, "")
-  const searchDir = join(root, baseDir)
-
-  if (!existsSync(searchDir)) return
-
-  try {
-    const stat = statSync(searchDir)
-    if (stat.isFile()) {
-      // Direct reference to a package directory
-      const pkgPath = join(searchDir, "package.json")
-      if (existsSync(pkgPath)) out.push(pkgPath)
-      return
-    }
-
-    if (!stat.isDirectory()) return
-
-    // If pattern had a glob, enumerate subdirectories
-    if (pattern.includes("*")) {
-      const entries = readdirSync(searchDir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        const pkgPath = join(searchDir, entry.name, "package.json")
-        if (existsSync(pkgPath)) out.push(pkgPath)
-      }
-    } else {
-      // Exact directory reference
-      const pkgPath = join(searchDir, "package.json")
-      if (existsSync(pkgPath)) out.push(pkgPath)
-    }
-  } catch {
-    // Skip inaccessible directories
-  }
-}
-
-/**
- * Collect all unique dependency names from a set of package.json files.
- * Reads `dependencies`, `devDependencies`, and `peerDependencies`.
- */
-function collectDependencyNames(packageJsonPaths: readonly string[]): ReadonlySet<string> {
-  const names = new Set<string>()
-
-  for (const pkgPath of packageJsonPaths) {
-    try {
-      collectDepsFromPackageJson(readFileSync(pkgPath, "utf-8"), names)
-    } catch {
-      // Skip unreadable/malformed package.json files
-    }
-  }
-
-  return names
-}
-
-function collectDepsFromPackageJson(content: string, out: Set<string>): void {
-  const pkg = parsePackageJson(content)
-  if (pkg === null) return
-
-  collectDepsFromSection(pkg["dependencies"], out)
-  collectDepsFromSection(pkg["peerDependencies"], out)
-}
-
-function collectDepsFromSection(value: Readonly<Record<string, string>> | undefined, out: Set<string>): void {
-  if (value === undefined) return
-  for (const name of Object.keys(value)) {
-    out.add(name)
-  }
-}
-
-type PackageJsonShape = z.infer<typeof PackageJsonSchema>
-
-function parsePackageJson(text: string): PackageJsonShape | null {
-  try {
-    const result = PackageJsonSchema.safeParse(JSON.parse(text))
-    return result.success ? result.data : null
-  } catch {
-    return null
-  }
 }
 
 /**

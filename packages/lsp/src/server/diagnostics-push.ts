@@ -141,8 +141,8 @@ export function publishFileDiagnostics(
 
   let crossFile: readonly Diagnostic[];
   if (includeCrossFile && phase.tag === "enriched") {
-    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${phase.fileIndex.solidFiles.size} cssFiles=${phase.fileIndex.cssFiles.size})`);
-    crossFile = runCrossFileDiagnostics(key, phase.fileIndex, phase.project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties);
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: running cross-file for ${key} (solidFiles=${phase.registry.solidFiles.size} cssFiles=${phase.registry.cssFiles.size})`);
+    crossFile = runCrossFileDiagnostics(key, phase.registry, phase.project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties);
   } else {
     crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
     if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`publishFileDiagnostics: using cached cross-file for ${key} (${crossFile.length} diags)`);

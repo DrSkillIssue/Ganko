@@ -12,9 +12,9 @@
  * Detection scans CSS file content for `@import "tailwindcss` or `@theme`
  * directives to determine if Tailwind v4 is in use.
  */
-import { dirname, join } from "node:path"
-import { createRequire } from "node:module"
+import { dirname, join, sep } from "node:path"
 import { existsSync } from "node:fs"
+import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
 /**
@@ -50,15 +50,6 @@ interface DesignSystem {
   getVariants(): { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[]
 }
 
-/**
- * Module shape expected from `@tailwindcss/node`.
- *
- * Defined as a named interface so the type guard narrows cleanly
- * without type assertions.
- */
-interface TailwindNodeModule {
-  __unstable__loadDesignSystem(css: string, opts: { base: string }): Promise<DesignSystem>
-}
 
 /**
  * Packages that depend on `@tailwindcss/node` and can be used as carriers
@@ -72,49 +63,73 @@ interface TailwindNodeModule {
 const CARRIER_PACKAGES = ["@tailwindcss/vite", "@tailwindcss/postcss", "@tailwindcss/cli"]
 
 /**
- * Resolve the absolute path to `@tailwindcss/node` from a project directory.
- *
- * Resolution strategy:
- * 1. Walk up from `startDir` looking for `node_modules` directories
- * 2. For each `node_modules`, try direct resolution of `@tailwindcss/node`
- * 3. If direct resolution fails, try resolving through carrier packages
- *    (`@tailwindcss/vite`, `@tailwindcss/postcss`, `@tailwindcss/cli`)
- *    whose transitive deps include `@tailwindcss/node`
- *
- * @param startDir - Directory to start searching from (typically CSS entry dir)
- * @returns Resolved absolute path to `@tailwindcss/node`, or null
+ * Walk up from a directory to find the nearest directory containing package.json.
+ * Used as fallback when no explicit project root is provided (ESLint plugin path).
  */
-function resolveTailwindNodePath(startDir: string): string | null {
+function findNearestPackageRoot(startDir: string): string {
   let dir = startDir
   for (;;) {
-    const nmDir = join(dir, "node_modules")
-    if (existsSync(nmDir)) {
-      /* Try direct resolution first. */
-      const dummyFile = join(nmDir, "__resolve_anchor__")
-      const req = createRequire(dummyFile)
-      try {
-        return req.resolve("@tailwindcss/node")
-      } catch {
-        /* Not directly available — try carrier packages. */
-      }
-
-      for (let i = 0; i < CARRIER_PACKAGES.length; i++) {
-        try {
-          const pkg = CARRIER_PACKAGES[i]
-          if (!pkg) continue
-          const carrierPath = req.resolve(pkg)
-          const carrierReq = createRequire(carrierPath)
-          return carrierReq.resolve("@tailwindcss/node")
-        } catch {
-          /* Carrier not installed here, try next. */
-        }
-      }
-    }
-
+    if (existsSync(join(dir, "package.json"))) return dir
     const parent = dirname(dir)
-    if (parent === dir) return null
+    if (parent === dir) return startDir
     dir = parent
   }
+}
+
+/** The entry point path within @tailwindcss/node */
+const TAILWIND_NODE_ENTRY = join("@tailwindcss", "node", "dist", "index.js")
+
+/**
+ * Check a single search root for @tailwindcss/node.
+ *
+ * Tries direct installation first, then transitive installation
+ * through each carrier package's own node_modules.
+ *
+ * @param searchRoot - Directory containing a node_modules folder
+ * @returns Absolute path to @tailwindcss/node entry, or null
+ */
+function probeForTailwindNode(searchRoot: string): string | null {
+  const nmDir = join(searchRoot, "node_modules")
+
+  const direct = join(nmDir, TAILWIND_NODE_ENTRY)
+  if (existsSync(direct)) return direct
+
+  for (let i = 0; i < CARRIER_PACKAGES.length; i++) {
+    const carrier = CARRIER_PACKAGES[i]
+    if (!carrier) continue
+    const transitive = join(nmDir, carrier.replace("/", sep), "node_modules", TAILWIND_NODE_ENTRY)
+    if (existsSync(transitive)) return transitive
+  }
+
+  return null
+}
+
+/**
+ * Resolve the absolute path to `@tailwindcss/node` from known workspace roots.
+ *
+ * Uses direct filesystem existence checks — no `createRequire`, which is
+ * broken in Bun-compiled binaries. Searches the project root first, then
+ * each workspace package root. Does NOT walk up past the project root.
+ *
+ * @param rootPath - Project root directory (contains the top-level node_modules)
+ * @param workspacePackagePaths - Workspace package directories to search
+ * @returns Resolved absolute path to @tailwindcss/node entry, or null
+ */
+function resolveTailwindNodePath(
+  rootPath: string,
+  workspacePackagePaths: readonly string[],
+): string | null {
+  const fromRoot = probeForTailwindNode(rootPath)
+  if (fromRoot !== null) return fromRoot
+
+  for (let i = 0; i < workspacePackagePaths.length; i++) {
+    const wsPath = workspacePackagePaths[i]
+    if (!wsPath) continue
+    const fromWs = probeForTailwindNode(wsPath)
+    if (fromWs !== null) return fromWs
+  }
+
+  return null
 }
 
 /**
@@ -245,10 +260,37 @@ export function detectTailwindEntry(
  * - `@tailwindcss/node` is not installed (directly or transitively)
  * - The design system fails to load
  */
-export async function resolveTailwindValidator(
+/**
+ * Preparation result for Tailwind resolution.
+ *
+ * Contains the data needed by the WorkspaceEvaluator subprocess to load the
+ * design system. The caller passes these fields to evaluateWorkspace().
+ */
+export interface TailwindEvalParams {
+  readonly modulePath: string
+  readonly entryCss: string
+  readonly entryBase: string
+}
+
+/**
+ * Prepare Tailwind evaluation parameters from CSS files.
+ *
+ * Detects the Tailwind entry file and resolves the @tailwindcss/node module
+ * path. Returns null if no entry is detected or the module is not installed.
+ * Does NOT spawn a subprocess — the caller does that via WorkspaceEvaluator.
+ *
+ * @param files - CSS files with content
+ * @param rootPath - Project root for module resolution
+ * @param workspacePackagePaths - Workspace package paths for module resolution
+ * @param logger - Logger
+ * @returns Evaluation parameters, or null
+ */
+export function prepareTailwindEval(
   files: readonly { path: string; content: string }[],
+  rootPath: string,
+  workspacePackagePaths: readonly string[],
   logger?: Logger,
-): Promise<TailwindValidator | null> {
+): TailwindEvalParams | null {
   const entry = detectTailwindEntry(files)
   if (!entry) {
     logger?.info("tailwind: no entry file detected (no @import \"tailwindcss\" or @theme block found in CSS files)")
@@ -257,32 +299,75 @@ export async function resolveTailwindValidator(
 
   logger?.info(`tailwind: entry file detected: ${entry.path}`)
 
-  try {
-    const base = dirname(entry.path)
-    const resolved = resolveTailwindNodePath(base)
-    if (resolved === null) {
-      logger?.warning(`tailwind: @tailwindcss/node not resolvable walking up from ${base}`)
-      return null
-    }
-
-    logger?.info(`tailwind: @tailwindcss/node resolved to ${resolved}`)
-
-    const mod: TailwindNodeModule = await import(resolved)
-    if (typeof mod.__unstable__loadDesignSystem !== "function") {
-      logger?.warning("tailwind: @tailwindcss/node module missing __unstable__loadDesignSystem export")
-      return null
-    }
-
-    const design = await mod.__unstable__loadDesignSystem(
-      entry.content,
-      { base },
-    )
-
-    logger?.info("tailwind: design system loaded successfully")
-    return createLiveValidator(design)
-  } catch (err) {
-    logger?.warning(`tailwind: failed to load design system: ${err instanceof Error ? err.message : String(err)}`)
+  const modulePath = resolveTailwindNodePath(rootPath, workspacePackagePaths)
+  if (modulePath === null) {
+    logger?.warning(`tailwind: @tailwindcss/node not resolvable in project root or workspace packages`)
     return null
+  }
+
+  logger?.info(`tailwind: @tailwindcss/node resolved to ${modulePath}`)
+  return { modulePath, entryCss: entry.content, entryBase: dirname(entry.path) }
+}
+
+/**
+ * A TailwindValidator with a preloadable batch cache for arbitrary value classes.
+ *
+ * The static validator handles known utility/variant combinations.
+ * Arbitrary values (min-h-[60vh], max-w-[360px], [&_[data-slot]]:hidden, etc.)
+ * are not in the static set. The caller collects all class names that will be
+ * checked, sends them to candidatesToCss in one batch via the WorkspaceEvaluator,
+ * and preloads the results before rule execution.
+ */
+export interface BatchableTailwindValidator extends TailwindValidator {
+  preloadBatch(classNames: readonly string[], results: readonly boolean[]): void
+}
+
+/**
+ * Build a TailwindValidator from evaluation results with batch preloading.
+ *
+ * @param utilities - Utility class names from the design system
+ * @param variants - Variant definitions from the design system
+ * @param logger - Logger
+ * @returns BatchableTailwindValidator
+ */
+export function buildTailwindValidatorFromEval(
+  utilities: readonly string[],
+  variants: readonly { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[],
+  logger?: Logger,
+): BatchableTailwindValidator {
+  const utilitySet = new Set(utilities)
+  const variantSet = expandVariants(variants as { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[])
+  logger?.info(`tailwind: design system loaded (${utilitySet.size} utilities, ${variantSet.size} variants)`)
+
+  const staticValidator = createStaticValidator(utilitySet, variantSet)
+  const batchCache = new Map<string, boolean>()
+
+  return {
+    has(className: string): boolean {
+      if (staticValidator.has(className)) return true
+      const cached = batchCache.get(className)
+      if (cached !== undefined) return cached
+      return false
+    },
+    resolve(): string | null {
+      return null
+    },
+    preloadBatch(classNames: readonly string[], results: readonly boolean[]): void {
+      for (let i = 0; i < classNames.length; i++) {
+        const name = classNames[i]
+        const valid = results[i]
+        if (name !== undefined && valid !== undefined) {
+          batchCache.set(name, valid)
+        }
+      }
+      if (logger?.isLevelEnabled(Level.Debug)) {
+        let validCount = 0
+        for (let i = 0; i < results.length; i++) {
+          if (results[i]) validCount++
+        }
+        logger.debug(`tailwind: preloaded ${classNames.length} candidates (${validCount} valid)`)
+      }
+    },
   }
 }
 
@@ -322,23 +407,37 @@ function expandVariants(
  * - The subprocess fails
  * - `@tailwindcss/node` is not available (directly or transitively)
  */
-export function resolveTailwindValidatorSync(
-  files: readonly { path: string; content: string }[],
-): TailwindValidator | null {
-  const entry = detectTailwindEntry(files)
-  if (!entry) return null
-
-  const base = dirname(entry.path)
-  const modulePath = resolveTailwindNodePath(base)
-  if (modulePath === null) return null
-
-  /* The subprocess loads the design system using the pre-resolved absolute
-     path, avoiding module resolution issues with transitive dependencies. */
+/**
+ * Resolve a TailwindValidator synchronously.
+ *
+ * Prepares the evaluation parameters and delegates to a caller-provided
+ * sync evaluator function. The evaluator is responsible for spawning the
+ * subprocess — this function handles detection, path resolution, and
+ * validator construction.
+ *
+ * @param files - CSS files with content
+ * @param syncEvaluator - Function that evaluates tailwind params and returns utilities/variants
+ * @param rootPath - Project root (optional, walks up to package.json if not provided)
+ * @param workspacePackagePaths - Workspace package paths (optional)
+ * @returns TailwindValidator, or null
+ */
+/**
+ * Default sync evaluator — spawns a Bun subprocess to load the design system.
+ *
+ * Used by ESLint plugin and runner paths that don't have access to the
+ * WorkspaceEvaluator from the LSP package.
+ *
+ * @param params - Tailwind evaluation parameters
+ * @returns Utilities and variants, or null
+ */
+function defaultSyncEvaluator(
+  params: TailwindEvalParams,
+): { utilities: string[]; variants: { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[] } | null {
   const script = [
-    `const { __unstable__loadDesignSystem } = await import(${JSON.stringify(modulePath)});`,
+    `const { __unstable__loadDesignSystem } = await import(${JSON.stringify(params.modulePath)});`,
     `const d = await __unstable__loadDesignSystem(`,
-    `  ${JSON.stringify(entry.content)},`,
-    `  { base: ${JSON.stringify(base)} }`,
+    `  ${JSON.stringify(params.entryCss)},`,
+    `  { base: ${JSON.stringify(params.entryBase)} }`,
     `);`,
     `const u = d.getClassList().map(e => e[0]);`,
     `const v = d.getVariants().map(v => ({`,
@@ -351,21 +450,38 @@ export function resolveTailwindValidatorSync(
   ].join("\n")
 
   try {
-    const result = Bun.spawnSync(["bun", "-e", script], { cwd: base })
+    const result = Bun.spawnSync(["bun", "-e", script], { cwd: params.entryBase })
     if (result.exitCode !== 0) return null
-
     const text = result.stdout.toString()
     if (text.length === 0) return null
-
-    const data = JSON.parse(text) as {
-      u: string[]
-      v: { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[]
-    }
-
-    const utilities = new Set(data.u)
-    const variants = expandVariants(data.v)
-    return createStaticValidator(utilities, variants)
+    const data = JSON.parse(text)
+    return { utilities: data.u, variants: data.v }
   } catch {
     return null
   }
+}
+
+/**
+ * Resolve a TailwindValidator synchronously.
+ *
+ * Uses the default Bun subprocess evaluator unless a custom one is provided.
+ *
+ * @param files - CSS files with content
+ * @param rootPath - Project root (optional, walks up to package.json if not provided)
+ * @param workspacePackagePaths - Workspace package paths (optional)
+ * @returns TailwindValidator, or null
+ */
+export function resolveTailwindValidatorSync(
+  files: readonly { path: string; content: string }[],
+  rootPath?: string,
+  workspacePackagePaths?: readonly string[],
+): TailwindValidator | null {
+  const effectiveRoot = rootPath ?? findNearestPackageRoot(dirname(files[0]?.path ?? "."))
+  const params = prepareTailwindEval(files, effectiveRoot, workspacePackagePaths ?? [])
+  if (params === null) return null
+
+  const result = defaultSyncEvaluator(params)
+  if (result === null) return null
+
+  return buildTailwindValidatorFromEval(result.utilities, result.variants)
 }

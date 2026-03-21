@@ -239,11 +239,6 @@ function checkDimension(
 ): void {
   let px = readKnownPx(snapshot, signal)
 
-  // When readKnownPx returns null because a conditional selector (higher
-  // specificity) shadowed the unconditional value, fall back to the guaranteed
-  // unconditional base value from the delta fact system. This prevents false
-  // 0px reports when component CSS has a conditional variant (e.g., [data-icon])
-  // that shadows the base sizing (e.g., [data-size="md"]).
   if (px === null) {
     const signalValue = readKnownSignalWithGuard(snapshot, signal)
     if (signalValue !== null && signalValue.guard.kind === LayoutSignalGuard.Conditional) {

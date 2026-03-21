@@ -14,7 +14,7 @@ import type {
 import type { FeatureHandlerContext } from "./handler-context";
 import type ts from "typescript";
 import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Token type legend — Solid-specific types only.
@@ -92,7 +92,8 @@ export function handleSemanticTokens(
   ctx: FeatureHandlerContext,
 ): SemanticTokens | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const graph = ctx.getSolidGraph(path);
   if (!graph) return null;
 

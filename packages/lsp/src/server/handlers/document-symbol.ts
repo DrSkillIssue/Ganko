@@ -10,7 +10,7 @@ import type {
 import { SymbolKind } from "vscode-languageserver";
 import type { FeatureHandlerContext } from "./handler-context";
 import { textSpanToRange, SCRIPT_ELEMENT_KIND_TO_SYMBOL_KIND } from "./ts-utils";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
 /**
@@ -21,7 +21,8 @@ export function handleDocumentSymbol(
   ctx: FeatureHandlerContext,
 ): DocumentSymbol[] | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;

@@ -10,7 +10,7 @@ import type {
 import { InlayHintKind } from "vscode-languageserver";
 import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/inlayHint request.
@@ -20,7 +20,8 @@ export function handleInlayHint(
   ctx: FeatureHandlerContext,
 ): InlayHint[] | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;

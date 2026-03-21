@@ -643,7 +643,13 @@ function matchesRequiredAttributes(
     const constraint = required[i]
     if (constraint === undefined) continue
     if (!actual.has(constraint.name)) return SelectorMatchResult.NoMatch
-    if (constraint.operator === "exists") continue
+    if (constraint.operator === "exists") {
+      // A null value means the attribute is dynamic — it may or may not
+      // exist at runtime. Treat as conditional, not unconditional match.
+      const existsValue = actual.get(constraint.name)
+      if (existsValue === null) hasConditional = true
+      continue
+    }
 
     const actualValue = actual.get(constraint.name)
     if (actualValue === undefined) return SelectorMatchResult.NoMatch

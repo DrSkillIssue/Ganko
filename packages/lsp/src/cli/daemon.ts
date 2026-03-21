@@ -16,14 +16,16 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
+import { evaluateWorkspace } from "../core/workspace-eval";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, contentHash, createLogger, Level, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createBatchProgram } from "../core/batch-program";
-import { createFileIndex, type FileIndex } from "../core/file-index";
+import { createFileRegistry, type FileRegistry } from "../core/file-registry";
+import { acceptProjectRoot, buildWorkspaceLayout } from "@drskillissue/ganko-shared";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
-import { createEmit, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
+import { createEmit, runAllCrossFileDiagnostics } from "../core/analyze";
 import { createFileWriter, type Logger } from "../core/logger";
 import {
   daemonSocketPath,
@@ -53,7 +55,7 @@ interface DaemonState {
   log: Logger
   closeLogFile: () => Promise<void>
   cache: GraphCache | null
-  fileIndex: FileIndex | null
+  fileIndex: FileRegistry | null
   tailwind: TailwindValidator | null
   externalCustomProperties: ReadonlySet<string> | null
   cssContentMap: Map<string, string> | null
@@ -194,13 +196,15 @@ async function handleLintRequest(
     ? [...params.exclude, ...eslintResult.globalIgnores]
     : params.exclude;
 
-  /** H1: Rebuild FileIndex every request — files may be created/deleted
+  /** H1: Rebuild FileRegistry every request — files may be created/deleted
    * between invocations. The scan is single-digit ms; the TS project
    * service (which we keep warm) is the expensive part. */
   const previousSolidFiles = state.fileIndex !== null
     ? new Set(state.fileIndex.solidFiles)
     : null;
-  state.fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
+  const daemonRoot = acceptProjectRoot(projectRoot);
+  const daemonLayout = buildWorkspaceLayout(daemonRoot, log);
+  state.fileIndex = createFileRegistry(daemonLayout, effectiveExclude, log);
   const fileIndex = state.fileIndex;
 
   /** H2: Evict GraphCache entries for files that no longer exist.
@@ -255,7 +259,7 @@ async function handleLintRequest(
    * Only invalidate the GraphCache CSS generation when content actually
    * changed, so cross-file results remain cached across no-op runs. */
   {
-    const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
+    const allCSSFiles = fileIndex.loadAllCSSContent();
     const previousContentMap = state.cssContentMap;
     const nextContentMap = new Map<string, string>();
 
@@ -304,10 +308,20 @@ async function handleLintRequest(
         }
       }
 
-      state.tailwind = await resolveTailwindValidator(allCSSFiles, log).catch((err) => {
-        log.warning(`failed to resolve Tailwind validator: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      });
+      const wsPackagePaths = Array.from(daemonLayout.packagePaths);
+      const twParams = prepareTailwindEval(allCSSFiles, projectRoot, wsPackagePaths, log);
+      if (twParams !== null) {
+        const twResponse = await evaluateWorkspace(projectRoot, {
+          tailwindModulePath: twParams.modulePath,
+          tailwindEntryCss: twParams.entryCss,
+          tailwindEntryBase: twParams.entryBase,
+        }, log).catch(() => null);
+        state.tailwind = twResponse !== null && twResponse.tailwind !== undefined
+          ? buildTailwindValidatorFromEval(twResponse.tailwind.utilities, twResponse.tailwind.variants, log)
+          : null;
+      } else {
+        state.tailwind = null;
+      }
     }
   }
 
@@ -317,7 +331,7 @@ async function handleLintRequest(
    * When the set changes, invalidate the CSSGraph so it rebuilds with
    * the updated synthetic `:root` declarations. */
   {
-    const nextExternal = scanDependencyCustomProperties(projectRoot);
+    const nextExternal = scanDependencyCustomProperties(daemonLayout);
     if (!setsEqual(state.externalCustomProperties, nextExternal) && state.cache !== null) {
       state.cache.invalidateAll();
     }

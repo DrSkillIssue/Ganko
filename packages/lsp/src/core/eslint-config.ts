@@ -3,62 +3,18 @@
  *
  * Loads ESLint flat config files and extracts ganko rule overrides
  * that differ from the RULES manifest defaults, plus global ignore patterns.
+ *
+ * Config evaluation is delegated to the WorkspaceEvaluator subprocess so
+ * `import "@drskillissue/ganko/eslint-plugin"` resolves against the project's
+ * own node_modules. This module handles config file discovery, result parsing,
+ * and ganko-specific override extraction.
  */
-import { existsSync, copyFileSync, unlinkSync } from "node:fs";
-import { resolve, join, extname, dirname } from "node:path";
-import { pathToFileURL } from "node:url";
-import { z } from "zod/v4";
+import { existsSync } from "node:fs";
+import { resolve, join } from "node:path";
 import type { RuleOverrides, RuleSeverityOverride, ESLintConfigResult, Logger } from "@drskillissue/ganko-shared";
 import { ESLINT_CONFIG_FILENAMES, numericSeverity, SEVERITY_LOOKUP, Level } from "@drskillissue/ganko-shared";
 import { getRule } from "@drskillissue/ganko";
-
-let importCounter = 0;
-
-/**
- * Import an ESM module bypassing the runtime's module cache.
- *
- * Both Node.js and Bun cache `import()` results by URL. Node respects
- * query-string differences (`?t=123`), but Bun does not — it resolves
- * to the same filesystem path and returns the cached module.
- *
- * This function copies the file to a unique temporary path, imports
- * that copy, and deletes it afterward. Each call produces a fresh
- * module regardless of runtime.
- */
-async function importFresh(filePath: string): Promise<unknown> {
-  const ext = extname(filePath);
-  const tmpPath = join(dirname(filePath), `.ganko-eslint-${process.pid}-${++importCounter}${ext}`);
-  copyFileSync(filePath, tmpPath);
-  try {
-    const mod = await import(pathToFileURL(tmpPath).href);
-    return mod.default ?? mod;
-  } finally {
-    try { unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
-  }
-}
-
-/** ESLint rule values: severity, array, or arbitrary plugin values (boolean, object, etc.).
- * Covers all values ESLint allows in flat config `rules` records. */
-type ESLintRuleValue = string | number | boolean | null | readonly (string | number | boolean | null | Record<string, unknown>)[];
-
-/** Zod schema for a single ESLint flat config object.
- * Rules use z.unknown() because non-ganko plugins may use arbitrary
- * value shapes (booleans, strings, etc.). Filtering happens in
- * normalizeSeverity which already handles unrecognizable entries. */
-const FlatConfigObjectSchema = z.object({
-  rules: z.record(z.string(), z.unknown()).optional(),
-  files: z.unknown().optional(),
-  plugins: z.unknown().optional(),
-  ignores: z.array(z.string()).optional(),
-}).passthrough();
-
-type FlatConfigObject = z.infer<typeof FlatConfigObjectSchema>;
-
-/** Zod schema for the ESLint config export: array of config objects, or a single object. */
-const ESLintConfigExportSchema = z.union([
-  z.array(FlatConfigObjectSchema),
-  FlatConfigObjectSchema,
-]);
+import { evaluateWorkspace } from "./workspace-eval";
 
 /** Shared empty result — returned when no config is found or config is empty. */
 export const EMPTY_ESLINT_RESULT: ESLintConfigResult = { overrides: {}, globalIgnores: [] };
@@ -66,12 +22,24 @@ export const EMPTY_ESLINT_RESULT: ESLintConfigResult = { overrides: {}, globalIg
 /** Prefix for ganko rules in ESLint config */
 const RULE_PREFIX = "solid/";
 
+/** ESLint rule values: severity, array, or arbitrary plugin values. */
+type ESLintRuleValue = string | number | boolean | null | readonly (string | number | boolean | null | Record<string, unknown>)[];
+
+interface FlatConfigObject {
+  rules?: Record<string, unknown>
+  files?: unknown
+  plugins?: unknown
+  ignores?: string[]
+}
 
 /**
  * Normalize an ESLint severity value to a RuleSeverityOverride.
  *
  * Handles: "error", "warn", "off", 0, 1, 2, and array format [severity, ...options].
  * Returns null if the value is unrecognizable.
+ *
+ * @param entry - ESLint rule value
+ * @returns Normalized severity, or null
  */
 function normalizeSeverity(entry: ESLintRuleValue): RuleSeverityOverride | null {
   if (Array.isArray(entry)) {
@@ -87,8 +55,10 @@ function normalizeSeverity(entry: ESLintRuleValue): RuleSeverityOverride | null 
 
 /**
  * A config object is a "global ignores" entry when it has ONLY `ignores` —
- * no `files`, `rules`, or `plugins`. This is ESLint's flat config semantic
- * for unconditional file exclusion.
+ * no `files`, `rules`, or `plugins`.
+ *
+ * @param config - Flat config object
+ * @returns true if this is a global ignores-only entry
  */
 function isGlobalIgnoresOnly(config: FlatConfigObject): boolean {
   if (!config.ignores || config.ignores.length === 0) return false;
@@ -99,10 +69,8 @@ function isGlobalIgnoresOnly(config: FlatConfigObject): boolean {
 /**
  * Collect global ignore patterns from all config objects.
  *
- * Only config objects that contain ONLY an `ignores` array (no `files`,
- * `rules`, or `plugins`) contribute patterns. This matches ESLint's
- * flat config semantics where ignores-only objects act as unconditional
- * file exclusion.
+ * @param configs - Flat config objects from subprocess
+ * @returns Global ignore patterns
  */
 function extractGlobalIgnores(configs: readonly FlatConfigObject[]): readonly string[] {
   const ignores: string[] = [];
@@ -122,19 +90,14 @@ function extractGlobalIgnores(configs: readonly FlatConfigObject[]): readonly st
 }
 
 /**
- * Extract ganko rule overrides from a loaded ESLint flat config.
+ * Extract ganko rule overrides from flat config objects.
  *
- * Iterates all config objects, collects rules prefixed with "solid/",
- * normalizes severity, and strips the prefix. Later config objects
- * override earlier ones (ESLint's merge semantics).
+ * Collects rules prefixed with "solid/", normalizes severity, strips prefix.
+ * Later config objects override earlier ones (ESLint merge semantics).
+ * Filters out entries matching the RULES manifest default severity.
  *
- * After computing the final severity for each rule, filters out entries
- * whose severity matches the RULES manifest default. This prevents
- * `solid.configs.recommended` from flooding the override map with 163
- * entries that are identical to the built-in defaults.
- *
- * Rules not found in the manifest (unknown rule IDs) are kept as
- * overrides unconditionally — they may be user-defined extensions.
+ * @param configs - Flat config objects from subprocess
+ * @returns Rule overrides (non-default only)
  */
 function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
   const raw = new Map<string, RuleSeverityOverride>();
@@ -172,6 +135,7 @@ function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
  *
  * @param rootPath - Workspace root directory
  * @param explicitPath - User-specified config path (takes priority)
+ * @param log - Logger
  * @returns Absolute path to config file, or null if not found
  */
 function findConfigFile(rootPath: string, explicitPath?: string, log?: Logger): string | null {
@@ -195,30 +159,16 @@ function findConfigFile(rootPath: string, explicitPath?: string, log?: Logger): 
 }
 
 /**
- * Process a dynamically imported ESLint config export into overrides and ignores.
+ * Load an ESLint flat config and extract ganko rule overrides plus
+ * global ignore patterns.
  *
- * Parses the export through a zod schema, handling both array exports
- * (standard flat config) and single-object exports.
- */
-function processExport(exported: FlatConfigObject[] | FlatConfigObject): ESLintConfigResult {
-  const configs = Array.isArray(exported) ? exported : [exported];
-  if (configs.length === 0) return EMPTY_ESLINT_RESULT;
-
-  return {
-    overrides: extractOverrides(configs),
-    globalIgnores: extractGlobalIgnores(configs),
-  };
-}
-
-/**
- * Load an ESLint flat config file and extract ganko rule overrides
- * (filtered against manifest defaults) plus global ignore patterns.
- *
- * Uses dynamic import() with cache-busting query parameter to ensure
- * the module is re-evaluated on each call (for config file changes).
+ * Delegates config evaluation to the WorkspaceEvaluator subprocess so
+ * module resolution uses the project's node_modules. Extracts ganko-specific
+ * overrides and global ignores from the structured result.
  *
  * @param rootPath - Workspace root directory
  * @param explicitPath - Optional user-specified config path
+ * @param log - Logger
  * @returns Rule overrides (non-default only) and global ignore patterns
  */
 export async function loadESLintConfig(
@@ -233,28 +183,28 @@ export async function loadESLintConfig(
   }
 
   if (log?.isLevelEnabled(Level.Debug)) log.debug(`eslintConfig: loading ${configPath}`);
-  try {
-    const raw = await importFresh(configPath);
-    const parsed = ESLintConfigExportSchema.safeParse(raw);
-    if (!parsed.success) {
-      if (log?.isLevelEnabled(Level.Warning)) log.warning(`eslintConfig: ${configPath} export did not match expected schema`);
-      return EMPTY_ESLINT_RESULT;
-    }
-    const result = processExport(parsed.data);
-    if (log?.isLevelEnabled(Level.Trace)) {
-      log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
-      if (Object.keys(result.overrides).length > 0) {
-        log.trace(`eslintConfig: overrides: ${JSON.stringify(result.overrides)}`);
-      }
-      if (result.globalIgnores.length > 0) {
-        log.trace(`eslintConfig: globalIgnores: ${JSON.stringify(result.globalIgnores)}`);
-      }
-    }
-    return result;
-  } catch (e) {
-    if (log?.isLevelEnabled(Level.Warning)) log.warning(`eslintConfig: failed to load ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
+
+  const response = await evaluateWorkspace(rootPath, { type: "eslint", eslintConfigPath: configPath }, log);
+  if (response === null || response.eslint === undefined) {
     return EMPTY_ESLINT_RESULT;
   }
+
+  const configs = response.eslint.configs;
+  const result: ESLintConfigResult = {
+    overrides: extractOverrides(configs),
+    globalIgnores: extractGlobalIgnores(configs),
+  };
+
+  if (log?.isLevelEnabled(Level.Trace)) {
+    log.debug(`eslintConfig: ${Object.keys(result.overrides).length} overrides, ${result.globalIgnores.length} ignores`);
+    if (Object.keys(result.overrides).length > 0) {
+      log.trace(`eslintConfig: overrides: ${JSON.stringify(result.overrides)}`);
+    }
+    if (result.globalIgnores.length > 0) {
+      log.trace(`eslintConfig: globalIgnores: ${JSON.stringify(result.globalIgnores)}`);
+    }
+  }
+  return result;
 }
 
 /**

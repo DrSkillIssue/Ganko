@@ -10,7 +10,9 @@ import { FileChangeType } from "vscode-languageserver/node";
 import {
   canonicalPath,
   classifyFile,
-  uriToPath,
+  uriToCanonicalPath,
+  acceptProjectRoot,
+  buildWorkspaceLayout,
   parseLogLevel,
   CROSS_FILE_DEPENDENTS,
   Level,
@@ -25,13 +27,14 @@ import {
   reloadESLintConfig,
   effectiveExclude,
 } from "../handlers/lifecycle";
-import { createFileIndex } from "../../core/file-index";
+import { createFileRegistry } from "../../core/file-registry";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
 import type { LifecyclePhase } from "../server-state";
 import type { ServerContext } from "../connection";
 import type { LifecycleHandlerContext } from "../handlers/handler-context";
 import { evictCachesForPath } from "../change-processor";
+import type { FileChange } from "../../core/change-pipeline";
 
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
@@ -75,44 +78,56 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     await context.ready;
     const watchPhase = context.phase;
     if (watchPhase.tag !== "running" && watchPhase.tag !== "enriched") return;
-    let eslintConfigChanged = false;
-    const changes = params.changes;
-    const paths: string[] = [];
-    const fileIndex = watchPhase.tag === "enriched" ? watchPhase.fileIndex : watchPhase.fileIndex;
 
-    for (let i = 0; i < changes.length; i++) {
-      const change = changes[i];
+    let eslintConfigChanged = false;
+    const fileChanges: FileChange[] = [];
+    const deletedUris: string[] = [];
+
+    for (let i = 0; i < params.changes.length; i++) {
+      const change = params.changes[i];
       if (!change) continue;
-      const path = uriToPath(change.uri);
-      paths.push(path);
+      const path = uriToCanonicalPath(change.uri);
+      if (path === null) continue;
 
       if (path.endsWith("eslint.config.mjs") || path.endsWith("eslint.config.js") || path.endsWith("eslint.config.cjs")) {
         eslintConfigChanged = true;
       }
 
       if (change.type === FileChangeType.Created) {
-        fileIndex?.add(path);
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
+        fileChanges.push({ path, type: "created" });
+      } else if (change.type === FileChangeType.Changed) {
+        fileChanges.push({ path, type: "changed" });
+      } else if (change.type === FileChangeType.Deleted) {
+        fileChanges.push({ path, type: "deleted" });
+        deletedUris.push(change.uri);
       }
-      if (change.type === FileChangeType.Changed) {
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
-      }
-      if (change.type === FileChangeType.Deleted) {
-        fileIndex?.remove(path);
-        clearDiagnostics(connection, change.uri);
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
+    }
+
+    for (let i = 0; i < deletedUris.length; i++) {
+      const uri = deletedUris[i];
+      if (uri) clearDiagnostics(connection, uri);
+    }
+
+    if (watchPhase.tag === "enriched") {
+      watchPhase.changePipeline.processFileChanges(fileChanges);
+    } else {
+      for (let i = 0; i < fileChanges.length; i++) {
+        const fc = fileChanges[i];
+        if (!fc) continue;
+        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, fc.path);
       }
     }
 
     if (eslintConfigChanged) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        const newFileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const curPhase = context.phase;
         if (curPhase.tag === "enriched") {
-          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
-        } else if (curPhase.tag === "running") {
-          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
+          const root = acceptProjectRoot(serverState.rootPath);
+          const newLayout = buildWorkspaceLayout(root, context.log);
+          const newRegistry = createFileRegistry(newLayout, effectiveExclude(serverState), context.log);
+          curPhase.changePipeline.processRegistryRebuild(newRegistry);
+          lifecycleCtx.transitionPhase({ ...curPhase, registry: newRegistry, layout: newLayout });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
@@ -121,6 +136,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
       }
     }
 
+    const paths = fileChanges.map(fc => fc.path);
     const alreadyDiagnosed = new Set<string>();
     {
       const needed = new Set<FileKind>();
@@ -179,26 +195,28 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     let needRediagnose = result.rediagnose || result.rebuildIndex;
 
     if (result.rebuildIndex && serverState.rootPath) {
-      const excludes = effectiveExclude(serverState);
-      const newIdx = createFileIndex(serverState.rootPath, excludes, context.log);
       const cfgPhase = context.phase;
       if (cfgPhase.tag === "enriched") {
-        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
-      } else if (cfgPhase.tag === "running") {
-        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
+        const excludes = effectiveExclude(serverState);
+        const root = acceptProjectRoot(serverState.rootPath);
+        const newLayout = buildWorkspaceLayout(root, context.log);
+        const newRegistry = createFileRegistry(newLayout, excludes, context.log);
+        cfgPhase.changePipeline.processRegistryRebuild(newRegistry);
+        lifecycleCtx.transitionPhase({ ...cfgPhase, registry: newRegistry, layout: newLayout });
+        if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file registry rebuilt: ${newRegistry.solidFiles.size} solid, ${newRegistry.cssFiles.size} css`);
       }
-      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${newIdx.solidFiles.size} solid, ${newIdx.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
 
     if (result.reloadEslint) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        const newIdx = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const eslintPhase = context.phase;
         if (eslintPhase.tag === "enriched") {
-          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
-        } else if (eslintPhase.tag === "running") {
-          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
+          const root = acceptProjectRoot(serverState.rootPath);
+          const newLayout = buildWorkspaceLayout(root, context.log);
+          const newRegistry = createFileRegistry(newLayout, effectiveExclude(serverState), context.log);
+          eslintPhase.changePipeline.processRegistryRebuild(newRegistry);
+          lifecycleCtx.transitionPhase({ ...eslintPhase, registry: newRegistry, layout: newLayout });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;

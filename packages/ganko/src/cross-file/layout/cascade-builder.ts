@@ -75,6 +75,7 @@ export function collectMonitoredDeclarations(
       ? substituteVarReferences(rawValue, variablesByName, 0)
       : rawValue
 
+
     const directSignal = MONITORED_SIGNAL_NAME_MAP.get(property)
     if (directSignal !== undefined) {
       out.push({ property: directSignal, value: resolvedValue, guardProvenance: guard, position })

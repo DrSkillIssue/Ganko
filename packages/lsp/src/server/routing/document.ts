@@ -11,7 +11,7 @@
  *   4. Merge cross-file results into changed files (republish)
  */
 
-import { canonicalPath, classifyFile, uriToPath, Level } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import { runCrossFileDiagnostics } from "../../core/analyze";
 import { isServerReady } from "../handlers/lifecycle";
 import { clearDiagnostics } from "../handlers/diagnostics";
@@ -48,7 +48,7 @@ function refreshCrossFileCache(
 
   runCrossFileDiagnostics(
     seedPath,
-    phase.fileIndex,
+    phase.registry,
     project,
     context.graphCache,
     phase.tailwindValidator,
@@ -190,7 +190,8 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     docManager.flush();
     const changes = docManager.drainPendingChanges();
-    const savedPath = uriToPath(event.document.uri);
+    const savedPath = uriToCanonicalPath(event.document.uri);
+    if (savedPath === null) return;
 
     for (let i = 0, len = changes.length; i < len; i++) {
       const change = changes[i];

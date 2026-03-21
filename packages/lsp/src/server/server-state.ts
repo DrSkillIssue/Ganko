@@ -12,9 +12,14 @@
  */
 
 import type { TailwindValidator } from "@drskillissue/ganko";
+import type { WorkspaceLayout } from "@drskillissue/ganko-shared";
 import type { Project } from "../core/project";
-import type { FileIndex } from "../core/file-index";
+import type { FileRegistry } from "../core/file-registry";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
+import type { ChangePipeline } from "../core/change-pipeline";
+import type { TailwindState } from "../core/tailwind-state";
+import type { WorkspaceEvaluator } from "../core/workspace-eval";
+import type { BatchableTailwindValidator } from "@drskillissue/ganko";
 
 export interface PhaseInitializing {
   readonly tag: "initializing"
@@ -24,16 +29,20 @@ export interface PhaseRunning {
   readonly tag: "running"
   readonly project: Project
   readonly handlerCtx: FeatureHandlerContext
-  readonly fileIndex: FileIndex | null
 }
 
 export interface PhaseEnriched {
   readonly tag: "enriched"
   readonly project: Project
   readonly handlerCtx: FeatureHandlerContext
-  readonly fileIndex: FileIndex
+  readonly registry: FileRegistry
+  readonly layout: WorkspaceLayout
   readonly tailwindValidator: TailwindValidator | null
   readonly externalCustomProperties: ReadonlySet<string> | undefined
+  readonly changePipeline: ChangePipeline
+  readonly tailwindState: TailwindState
+  readonly evaluator: WorkspaceEvaluator | null
+  readonly batchableValidator: BatchableTailwindValidator | null
 }
 
 export interface PhaseShuttingDown {

@@ -15,7 +15,7 @@ import ts from "typescript";
 
 import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /** Solid primitive signatures — zero-cost static lookup for rich docs */
 const SOLID_SIGNATURES: ReadonlyMap<string, SignatureInformation> = new Map([
@@ -151,7 +151,8 @@ export function handleSignatureHelp(
   ctx: FeatureHandlerContext,
 ): SignatureHelp | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;

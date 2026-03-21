@@ -13,7 +13,7 @@ import {
   DocumentDiagnosticReportKind,
   type DocumentDiagnosticParams,
 } from "vscode-languageserver/node";
-import { canonicalPath, classifyFile, uriToPath, formatSnapshot, Level } from "@drskillissue/ganko-shared";
+import { classifyFile, uriToCanonicalPath, formatSnapshot, Level } from "@drskillissue/ganko-shared";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { runCrossFileDiagnostics } from "../../core/analyze";
 import { runDiagnostics } from "../diagnostics-push";
@@ -189,7 +189,8 @@ export function setupFeatureHandlers(context: ServerContext): void {
     }
 
     const project = phase.project;
-    const key = canonicalPath(uriToPath(params.textDocument.uri));
+    const key = uriToCanonicalPath(params.textDocument.uri);
+    if (key === null) return { kind: DocumentDiagnosticReportKind.Full, items: [] };
     const kind = classifyFile(key);
     if (kind === "unknown") {
       if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] UNKNOWN FILE: ${key}`);
@@ -220,7 +221,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
     const crossFile: readonly Diagnostic[] = phase.tag === "enriched"
       ? (contentUnchanged
         ? context.graphCache.getCachedCrossFileDiagnostics(key)
-        : runCrossFileDiagnostics(key, phase.fileIndex, project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties))
+        : runCrossFileDiagnostics(key, phase.registry, project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties))
       : [];
 
     const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
