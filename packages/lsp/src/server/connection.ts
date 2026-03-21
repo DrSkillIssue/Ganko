@@ -24,7 +24,6 @@ import {
   type Connection,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import ts from "typescript";
 import { GraphCache } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import {
@@ -54,6 +53,7 @@ import { createResourceIdentity, type ResourceIdentity } from "./resource-identi
 import { DocumentManager } from "./document-manager";
 import { DiagnosticsManager } from "./diagnostics-manager";
 import { ChangeProcessor } from "./change-processor";
+import { createTsService, type TsService } from "../core/ts-service";
 
 import { setupLifecycleHandlers } from "./routing/lifecycle";
 import { setupDocumentHandlers } from "./routing/document";
@@ -135,8 +135,6 @@ export interface ServerContext {
   readonly graphCache: GraphCache
   tailwindValidator: TailwindValidator | null
   externalCustomProperties?: ReadonlySet<string>
-  cachedCompilerOptions: ts.CompilerOptions | null
-  cachedTier1Host: ts.CompilerHost | null
   watchProgramReady: boolean
   workspaceReady: boolean
   tsPropagationCancel: (() => void) | null
@@ -154,11 +152,11 @@ export interface ServerContext {
   rediagnoseAffected(changed: readonly string[], exclude?: ReadonlySet<string>): void
   rediagnoseAll(clearTsCache?: boolean): void
 
-  // --- New architecture modules (Phase 3+ migration) ---
   readonly identity: ResourceIdentity
   readonly docManager: DocumentManager
   readonly diagManager: DiagnosticsManager
   readonly changeProcessor: ChangeProcessor
+  readonly tsService: TsService
 }
 
 /** Options for server creation. */
@@ -210,6 +208,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   });
   // ChangeProcessor wired after context is created (needs rediagnose callbacks)
   let changeProcessor: ChangeProcessor;
+  let tsService: TsService | null = null;
 
   let resolveReady: () => void;
   const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
@@ -229,8 +228,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     diagCache,
     graphCache,
     tailwindValidator: null,
-    cachedCompilerOptions: null,
-    cachedTier1Host: null,
     watchProgramReady: false,
     workspaceReady: false,
     tsPropagationCancel: null,
@@ -240,6 +237,14 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     docManager,
     diagManager,
     get changeProcessor() { return changeProcessor },
+    get tsService(): TsService {
+      if (tsService === null) {
+        const rootPath = context.serverState.rootPath;
+        if (!rootPath) throw new Error("tsService accessed before rootPath is set");
+        tsService = createTsService(rootPath);
+      }
+      return tsService;
+    },
     ready,
     resolveReady() { resolveReady(); },
 

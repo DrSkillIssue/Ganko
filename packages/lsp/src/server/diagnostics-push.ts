@@ -11,8 +11,6 @@
  * All functions write to the LSP connection via connection.sendDiagnostics.
  */
 
-import ts from "typescript";
-import { dirname } from "node:path";
 import {
   type PublishDiagnosticsParams,
   type Diagnostic as LSPDiagnostic,
@@ -21,7 +19,6 @@ import { createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } 
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
-import { createTier1Program } from "../core/tier1-program";
 import { runSingleFileDiagnostics, runCrossFileDiagnostics } from "../core/analyze";
 import type { Project } from "../core/project";
 import { collectTsDiagnosticsForFile, tsDiagsEqual, convertTsDiagnostic } from "./handlers/ts-diagnostics";
@@ -73,45 +70,16 @@ export function publishTier1Diagnostics(
 
   const t0 = performance.now();
 
-  /* Cache compiler options from tsconfig — parsed once, reused for all
-     Tier 1 calls during startup. */
-  if (context.cachedCompilerOptions === null) {
-    const tsconfigPath = ts.findConfigFile(
-      context.serverState.rootPath,
-      ts.sys.fileExists,
-      "tsconfig.json",
-    );
-    if (tsconfigPath) {
-      const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-      const parsed = ts.parseJsonConfigFileContent(
-        configFile.config,
-        ts.sys,
-        dirname(tsconfigPath),
-      );
-      context.cachedCompilerOptions = parsed.options;
-    }
-  }
-
-  /* Cache the CompilerHost across Tier 1 calls to avoid re-parsing lib.d.ts
-     for each opened file. lib.d.ts parsing is cached within a single
-     CompilerHost instance, NOT globally — reusing the host saves ~50-100ms
-     per subsequent file. */
-  if (context.cachedTier1Host === null && context.cachedCompilerOptions) {
-    context.cachedTier1Host = ts.createCompilerHost(context.cachedCompilerOptions);
-  }
-
-  const tier1 = createTier1Program(
-    path,
-    content,
-    context.cachedCompilerOptions ?? undefined,
-    context.cachedTier1Host ?? undefined,
-  );
-  if (!tier1) {
+  const program = context.tsService.createQuickProgram(path, content);
+  if (!program) {
     if (context.log.isLevelEnabled(Level.Warning)) context.log.warning(`Tier 1: failed to create program for ${path}`);
     return;
   }
 
-  const input = createSolidInput(path, tier1.program, context.log);
+  const sourceFile = program.getSourceFile(path);
+  if (!sourceFile) return;
+
+  const input = createSolidInput(path, program, context.log);
   const graph = buildSolidGraph(input);
 
   const diagnostics: Diagnostic[] = [];
@@ -127,7 +95,7 @@ export function publishTier1Diagnostics(
 
   if (context.serverState.enableTsDiagnostics) {
     const tsDiags: LSPDiagnostic[] = [];
-    const syntactic = tier1.program.getSyntacticDiagnostics(tier1.sourceFile);
+    const syntactic = program.getSyntacticDiagnostics(sourceFile);
     for (let i = 0, len = syntactic.length; i < len; i++) {
       const d = syntactic[i];
       if (!d) continue;
