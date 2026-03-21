@@ -227,68 +227,68 @@ function scanDir(
  * Returns an empty set if no workspaces are declared or package.json is absent.
  */
 function resolveWorkspaceRoots(rootPath: string, log?: Logger): ReadonlySet<string> {
-  const out = new Set<string>()
-  let raw: string
+  const out = new Set<string>();
+  let raw: string;
   try {
-    raw = readFileSync(join(rootPath, "package.json"), "utf-8")
+    raw = readFileSync(join(rootPath, "package.json"), "utf-8");
   } catch {
-    return out
+    return out;
   }
 
-  let parsed: { workspaces?: string[] | { packages?: string[] } }
+  let parsed: { workspaces?: string[] | { packages?: string[] } };
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(raw);
   } catch {
-    return out
+    return out;
   }
 
   const patterns = Array.isArray(parsed.workspaces)
     ? parsed.workspaces
     : Array.isArray(parsed.workspaces?.packages)
       ? parsed.workspaces.packages
-      : null
-  if (patterns === null) return out
+      : null;
+  if (patterns === null) return out;
 
   for (let i = 0; i < patterns.length; i++) {
-    const pattern = patterns[i]
-    if (!pattern) continue
+    const pattern = patterns[i];
+    if (!pattern) continue;
     // Expand simple globs: "packages/*" → list directories matching the pattern
     if (pattern.endsWith("/*")) {
-      const parentDir = join(rootPath, pattern.slice(0, -2))
-      let entries
+      const parentDir = join(rootPath, pattern.slice(0, -2));
+      let entries;
       try {
-        entries = readdirSync(parentDir, { withFileTypes: true })
+        entries = readdirSync(parentDir, { withFileTypes: true });
       } catch {
-        continue
+        continue;
       }
       for (let j = 0; j < entries.length; j++) {
-        const entry = entries[j]
-        if (!entry) continue
-        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
-        if (entry.name.startsWith(".")) continue
-        const resolved = resolveSymlink(join(parentDir, entry.name), log)
-        if (resolved !== null && resolved.isDir) out.add(resolved.realPath)
-        else if (entry.isDirectory()) out.add(join(parentDir, entry.name))
+        const entry = entries[j];
+        if (!entry) continue;
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+        if (entry.name.startsWith(".")) continue;
+        const resolved = resolveSymlink(join(parentDir, entry.name), log);
+        if (resolved !== null && resolved.isDir) out.add(resolved.realPath);
+        else if (entry.isDirectory()) out.add(join(parentDir, entry.name));
       }
     } else {
       // Direct path: "packages/ui"
-      const dir = join(rootPath, pattern)
+      const dir = join(rootPath, pattern);
       try {
-        const st = statSync(dir)
-        if (st.isDirectory()) out.add(dir)
+        const st = statSync(dir);
+        if (st.isDirectory()) out.add(dir);
       } catch {
         // try as symlink
-        const resolved = resolveSymlink(dir, log)
-        if (resolved !== null && resolved.isDir) out.add(resolved.realPath)
+        const resolved = resolveSymlink(dir, log);
+        if (resolved !== null && resolved.isDir) out.add(resolved.realPath);
       }
     }
   }
 
   if (log?.isLevelEnabled(Level.Debug) && out.size > 0) {
-    log.debug(`fileIndex: resolved ${out.size} workspace roots from package.json`)
+    log.debug(`fileIndex: resolved ${out.size} workspace roots from package.json`);
   }
 
-  return out
+  return out;
 }
 
 /**
@@ -308,7 +308,7 @@ function scanWorkspaceSymlinks(
   workspaceRoots: ReadonlySet<string>,
   log?: Logger,
 ): void {
-  if (workspaceRoots.size === 0) return
+  if (workspaceRoots.size === 0) return;
 
   let entries;
   try {

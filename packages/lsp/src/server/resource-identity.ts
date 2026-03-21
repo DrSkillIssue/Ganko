@@ -6,7 +6,7 @@
  * instead of calling uriToPath/pathToUri/canonicalPath directly.
  */
 
-import { canonicalPath, uriToPath, pathToUri } from "@drskillissue/ganko-shared"
+import { canonicalPath, uriToPath, pathToUri } from "@drskillissue/ganko-shared";
 
 export interface ResourceIdentity {
   /** Convert a file:// URI to a canonical file path. */
@@ -20,13 +20,13 @@ export interface ResourceIdentity {
 export function createResourceIdentity(): ResourceIdentity {
   return {
     uriToPath(uri: string): string {
-      return uriToPath(uri)
+      return uriToPath(uri);
     },
     pathToUri(path: string): string {
-      return pathToUri(path)
+      return pathToUri(path);
     },
     canonicalize(path: string): string {
-      return canonicalPath(path)
+      return canonicalPath(path);
     },
-  }
+  };
 }

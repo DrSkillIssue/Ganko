@@ -9,58 +9,58 @@
  * DocumentState, diagCache, and tsDiagCache.
  */
 
-import { canonicalPath } from "@drskillissue/ganko-shared"
+import { canonicalPath } from "@drskillissue/ganko-shared";
 
 export class ResourceMap<T> {
-  private readonly map = new Map<string, T>()
-  private readonly isCaseInsensitive: boolean
+  private readonly map = new Map<string, T>();
+  private readonly isCaseInsensitive: boolean;
 
   constructor(caseInsensitive = process.platform === "win32") {
-    this.isCaseInsensitive = caseInsensitive
+    this.isCaseInsensitive = caseInsensitive;
   }
 
   private toKey(path: string): string {
-    const canonical = canonicalPath(path)
-    return this.isCaseInsensitive ? canonical.toLowerCase() : canonical
+    const canonical = canonicalPath(path);
+    return this.isCaseInsensitive ? canonical.toLowerCase() : canonical;
   }
 
   has(path: string): boolean {
-    return this.map.has(this.toKey(path))
+    return this.map.has(this.toKey(path));
   }
 
   get(path: string): T | undefined {
-    return this.map.get(this.toKey(path))
+    return this.map.get(this.toKey(path));
   }
 
   set(path: string, value: T): void {
-    this.map.set(this.toKey(path), value)
+    this.map.set(this.toKey(path), value);
   }
 
   delete(path: string): boolean {
-    return this.map.delete(this.toKey(path))
+    return this.map.delete(this.toKey(path));
   }
 
   clear(): void {
-    this.map.clear()
+    this.map.clear();
   }
 
   get size(): number {
-    return this.map.size
+    return this.map.size;
   }
 
   keys(): IterableIterator<string> {
-    return this.map.keys()
+    return this.map.keys();
   }
 
   values(): IterableIterator<T> {
-    return this.map.values()
+    return this.map.values();
   }
 
   entries(): IterableIterator<[string, T]> {
-    return this.map.entries()
+    return this.map.entries();
   }
 
   forEach(fn: (value: T, key: string) => void): void {
-    this.map.forEach(fn)
+    this.map.forEach(fn);
   }
 }

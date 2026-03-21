@@ -18,10 +18,10 @@
  *     Future: batch program for cross-file analysis.
  */
 
-import ts from "typescript"
-import { dirname } from "node:path"
-import type { Diagnostic } from "@drskillissue/ganko"
-import type { Project } from "./project"
+import ts from "typescript";
+import { dirname } from "node:path";
+import type { Diagnostic } from "@drskillissue/ganko";
+import type { Project } from "./project";
 
 export const enum TsServiceTier {
   /** Fast startup: per-file createProgram, no cross-module types. */
@@ -70,84 +70,84 @@ export interface TsService {
 }
 
 export function createTsService(rootPath: string): TsService {
-  let compilerOptions: ts.CompilerOptions | null = null
-  let tier1Host: ts.CompilerHost | null = null
-  let tier: TsServiceTier = TsServiceTier.Quick
-  let project: Project | null = null
+  let compilerOptions: ts.CompilerOptions | null = null;
+  let tier1Host: ts.CompilerHost | null = null;
+  let tier: TsServiceTier = TsServiceTier.Quick;
+  let project: Project | null = null;
 
   // Lazily resolve tsconfig compiler options
   function ensureCompilerOptions(): ts.CompilerOptions | null {
-    if (compilerOptions !== null) return compilerOptions
-    const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json")
-    if (!tsconfigPath) return null
-    const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile)
-    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, dirname(tsconfigPath))
-    compilerOptions = parsed.options
-    return compilerOptions
+    if (compilerOptions !== null) return compilerOptions;
+    const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
+    if (!tsconfigPath) return null;
+    const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, dirname(tsconfigPath));
+    compilerOptions = parsed.options;
+    return compilerOptions;
   }
 
   // Lazily create and cache the Tier 1 CompilerHost
   function ensureTier1Host(): ts.CompilerHost | null {
-    if (tier1Host !== null) return tier1Host
-    const opts = ensureCompilerOptions()
-    if (!opts) return null
-    tier1Host = ts.createCompilerHost(opts)
-    return tier1Host
+    if (tier1Host !== null) return tier1Host;
+    const opts = ensureCompilerOptions();
+    if (!opts) return null;
+    tier1Host = ts.createCompilerHost(opts);
+    return tier1Host;
   }
 
   return {
-    get activeTier() { return tier },
+    get activeTier() { return tier; },
 
     setProject(p) {
-      project = p
-      tier = TsServiceTier.Incremental
+      project = p;
+      tier = TsServiceTier.Incremental;
     },
 
     getSourceFile(path) {
-      if (project !== null) return project.getSourceFile(path) ?? null
-      return null
+      if (project !== null) return project.getSourceFile(path) ?? null;
+      return null;
     },
 
     getLanguageService() {
-      if (project !== null) return project.getLanguageService()
-      return null
+      if (project !== null) return project.getLanguageService();
+      return null;
     },
 
     getProgram() {
-      if (project !== null) return project.getProgram()
-      return null
+      if (project !== null) return project.getProgram();
+      return null;
     },
 
     getCompilerOptions() {
-      return ensureCompilerOptions()
+      return ensureCompilerOptions();
     },
 
     createQuickProgram(path, content) {
-      const opts = ensureCompilerOptions()
-      const host = ensureTier1Host()
-      if (!opts || !host) return null
+      const opts = ensureCompilerOptions();
+      const host = ensureTier1Host();
+      if (!opts || !host) return null;
 
-      const originalGetSourceFile = host.getSourceFile.bind(host)
+      const originalGetSourceFile = host.getSourceFile.bind(host);
       const patchedHost: ts.CompilerHost = {
         ...host,
         getSourceFile(fileName, languageVersion, onError, shouldCreate) {
           if (fileName === path) {
-            return ts.createSourceFile(fileName, content, languageVersion, true)
+            return ts.createSourceFile(fileName, content, languageVersion, true);
           }
-          return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate)
+          return originalGetSourceFile(fileName, languageVersion, onError, shouldCreate);
         },
-      }
+      };
 
-      return ts.createProgram([path], opts, patchedHost)
+      return ts.createProgram([path], opts, patchedHost);
     },
 
     updateFile(path, content) {
-      if (project !== null) project.updateFile(path, content)
+      if (project !== null) project.updateFile(path, content);
     },
 
     run(files) {
-      if (project !== null) return project.run(files)
-      return []
+      if (project !== null) return project.run(files);
+      return [];
     },
 
     notifyFileChange(_path, _content) {
@@ -155,10 +155,10 @@ export function createTsService(rootPath: string): TsService {
     },
 
     dispose() {
-      compilerOptions = null
-      tier1Host = null
-      tier = TsServiceTier.Quick
-      project = null
+      compilerOptions = null;
+      tier1Host = null;
+      tier = TsServiceTier.Quick;
+      project = null;
     },
-  }
+  };
 }

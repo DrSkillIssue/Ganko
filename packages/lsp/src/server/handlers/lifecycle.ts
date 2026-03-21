@@ -13,11 +13,11 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties, type TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
-import { createFileIndex } from "../../core/file-index";
+import { createFileIndex, type FileIndex } from "../../core/file-index";
 import { readCSSFilesFromDisk } from "../../core/analyze";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../connection";
@@ -266,8 +266,8 @@ export async function handleInitialized(
  * but not for single-file Tier 1/2 analysis.
  */
 interface EnrichmentResult {
-  readonly fileIndex: import("../../core/file-index").FileIndex
-  readonly tailwindValidator: import("@drskillissue/ganko").TailwindValidator | null
+  readonly fileIndex: FileIndex
+  readonly tailwindValidator: TailwindValidator | null
   readonly externalCustomProperties: ReadonlySet<string> | undefined
 }
 
@@ -281,7 +281,7 @@ async function enrichWorkspace(
   const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
   if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
-  let tailwindValidator: import("@drskillissue/ganko").TailwindValidator | null = null;
+  let tailwindValidator: TailwindValidator | null = null;
   if (fileIndex.cssFiles.size > 0) {
     const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
     tailwindValidator = await resolveTailwindValidator(cssFiles, log)

@@ -119,7 +119,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     refreshCrossFileCache(context, project, changes);
     context.changeProcessor.processChanges(
-      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
       diagnosed,
     );
 
@@ -223,7 +223,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
     paths[changes.length] = savedPath;
 
     context.changeProcessor.processChanges(
-      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
       diagnosed,
     );
     propagateTsDiagnostics(context, project, new Set([savedPath]));

@@ -11,10 +11,10 @@
  * Consumers narrow via: if (context.phase.tag === "running") { context.phase.project }
  */
 
-import type { TailwindValidator } from "@drskillissue/ganko"
-import type { Project } from "../core/project"
-import type { FileIndex } from "../core/file-index"
-import type { FeatureHandlerContext } from "./handlers/handler-context"
+import type { TailwindValidator } from "@drskillissue/ganko";
+import type { Project } from "../core/project";
+import type { FileIndex } from "../core/file-index";
+import type { FeatureHandlerContext } from "./handlers/handler-context";
 
 export interface PhaseInitializing {
   readonly tag: "initializing"
@@ -44,8 +44,9 @@ export type LifecyclePhase =
   | PhaseInitializing
   | PhaseRunning
   | PhaseEnriched
-  | PhaseShuttingDown
+  | PhaseShuttingDown;
 
+// eslint-disable-next-line solid/avoid-type-casting -- type guard, not a cast
 export function isRunningOrEnriched(phase: LifecyclePhase): phase is PhaseRunning | PhaseEnriched {
-  return phase.tag === "running" || phase.tag === "enriched"
+  return phase.tag === "running" || phase.tag === "enriched";
 }

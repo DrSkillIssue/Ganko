@@ -142,7 +142,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     }
 
     context.changeProcessor.processChanges(
-      paths.filter((p): p is string => p !== undefined).map(p => ({ path: p, kind: "changed" as const })),
+      paths.filter(Boolean).map(p => ({ path: p, kind: "changed" as const })),
     );
 
     const rediagPhase = context.phase;
@@ -155,7 +155,7 @@ export function setupLifecycleHandlers(context: ServerContext): void {
         if (alreadyDiagnosed.has(key)) continue;
         const uri = context.docManager.uriForPath(key);
         if (uri === undefined) continue;
-        if (!context.docManager.getByUri(uri) !== null) continue;
+        if (context.docManager.getByUri(uri) === null) continue;
 
         const doc = context.documents.get(uri);
         const content = doc !== undefined ? doc.getText() : undefined;

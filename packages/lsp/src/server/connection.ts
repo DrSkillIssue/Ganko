@@ -172,6 +172,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
     connection.sendDiagnostics({ uri, diagnostics: [...diags] });
   });
+  // eslint-disable-next-line prefer-const -- assigned after context construction due to circular reference
   let changeProcessor: ChangeProcessor;
   let tsService: TsService | null = null;
 
@@ -196,7 +197,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     identity,
     docManager,
     diagManager,
-    get changeProcessor() { return changeProcessor },
+    get changeProcessor() { return changeProcessor; },
     get tsService(): TsService {
       if (tsService === null) {
         const rootPath = context.serverState.rootPath;
@@ -235,8 +236,8 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     graphCache,
     docManager,
     prefixLogger(log, "changes"),
-    (path) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") publishFileDiagnostics(context, p.project, path) },
-    (exclude) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") propagateTsDiagnostics(context, p.project, exclude) },
+    (path) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") publishFileDiagnostics(context, p.project, path); },
+    (exclude) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") propagateTsDiagnostics(context, p.project, exclude); },
   );
 
   setupLifecycleHandlers(context);
