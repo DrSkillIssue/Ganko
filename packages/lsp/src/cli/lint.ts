@@ -241,6 +241,14 @@ export async function runLint(args: readonly string[]): Promise<void> {
     log.info(`project root: ${projectRoot}`);
     log.info(`files to lint: ${filesToLint.length}`);
 
+    // Sync all discovered files into the TS project so the LanguageService
+    // includes them in getScriptFileNames. Required for monorepo setups where
+    // the root tsconfig has "files": [] and uses project references — the
+    // parsed fileNames is empty but the FileRegistry discovered all workspace files.
+    for (const solidPath of fileRegistry.solidFiles) {
+      try { project.updateFile(solidPath, readFileSync(solidPath, "utf-8")); } catch { /* skip unreadable */ }
+    }
+
     const allDiagnostics: Diagnostic[] = [];
     const program = project.getProgram();
     const t0 = performance.now();

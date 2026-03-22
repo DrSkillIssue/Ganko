@@ -20,7 +20,7 @@ export const cssLayoutTransitionLayoutProperty = defineAnalysisRule({
   },
   requirement: { tier: ComputationTier.CSSSyntax },
   register(registry) {
-    registry.registerCSSSyntaxAction((_tree, symbolTable, emit) => {
+    registry.registerCompilationAction((compilation, symbolTable, emit) => {
       const declarations = symbolTable.declarationsForProperties("transition", "transition-property")
       for (let i = 0; i < declarations.length; i++) {
         const declaration = declarations[i]

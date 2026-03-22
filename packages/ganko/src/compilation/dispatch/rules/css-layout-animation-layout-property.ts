@@ -21,7 +21,7 @@ export const cssLayoutAnimationLayoutProperty = defineAnalysisRule({
   },
   requirement: { tier: ComputationTier.CSSSyntax },
   register(registry) {
-    registry.registerCSSSyntaxAction((_tree, symbolTable, emit) => {
+    registry.registerCompilationAction((compilation, symbolTable, emit) => {
       // Build risky keyframes map from symbol table
       const riskyKeyframes = new Map<string, readonly KeyframeLayoutMutation[]>()
       for (const [name, symbol] of symbolTable.keyframes) {
