@@ -29,6 +29,8 @@ const ALL_CATEGORIES = RULE_CATEGORIES;
  */
 function buildRuleProperty(rule: RuleEntry): RuleConfigProperty {
   return {
+    scope: "language-overridable",
+    order: 100,
     type: "string",
     enum: ["error", "warn", "off", "default"],
     default: "default",

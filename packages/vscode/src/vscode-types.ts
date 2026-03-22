@@ -3,6 +3,8 @@ import type { RuleSeveritySettingValue } from "@drskillissue/ganko-shared";
 /** A single VS Code contributes.configuration property entry (JSON Schema subset). */
 export interface VSCodeConfigProperty {
   readonly type: string
+  readonly scope?: "window" | "resource" | "language-overridable"
+  readonly order?: number
   readonly default?: string | boolean | number | readonly string[] | Record<string, string>
   readonly description?: string
   readonly markdownDescription?: string
@@ -14,6 +16,8 @@ export interface VSCodeConfigProperty {
 
 /** A rule-specific VS Code contributes.configuration property with a fixed string-enum shape. */
 export interface RuleConfigProperty {
+  readonly scope: "language-overridable"
+  readonly order: number
   readonly type: "string"
   readonly enum: readonly RuleSeveritySettingValue[]
   readonly default: "default"
