@@ -6,7 +6,7 @@
 import postcss, { CssSyntaxError, type Root } from "postcss"
 import safeParse from "postcss-safe-parser"
 import postcssScss from "postcss-scss"
-import type { CSSGraph } from "../impl"
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput, CSSOptions } from "../input"
 import type { FileEntity, ImportInfo } from "../entities"
 import { FILE_HAS_IMPORTS, FILE_HAS_VARIABLES, FILE_HAS_MIXINS } from "../entities"
@@ -24,7 +24,7 @@ const URL_IMPORT_RE = /^url\s*\(\s*(['"]?)([^'")\s]+)\1\s*\)/;
 const LAYER_RE = /layer\s*\(\s*([^)]+)\s*\)/;
 const LAYER_GLOBAL_RE = /layer\s*\([^)]*\)/g;
 
-export function runParsePhase(graph: CSSGraph, input: CSSInput): void {
+export function runParsePhase(graph: CSSBuildContext, input: CSSInput): void {
   if (input.files.length === 0) return;
 
   const files = input.files
@@ -42,7 +42,7 @@ export function runParsePhase(graph: CSSGraph, input: CSSInput): void {
  * @returns The created FileEntity
  * @throws If errorReporting is set to "throw" and parsing fails
  */
-function parseFile(graph: CSSGraph, path: string, content: string): FileEntity {
+function parseFile(graph: CSSBuildContext, path: string, content: string): FileEntity {
   const syntax = detectSyntax(path, graph.options);
   const isScss = syntax === "scss" || syntax === "sass";
 

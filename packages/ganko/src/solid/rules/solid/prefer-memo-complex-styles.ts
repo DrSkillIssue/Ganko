@@ -84,7 +84,7 @@ export const preferMemoComplexStyles = defineSolidRule({
       if (precomputed.hasConditionalSpread) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             value,
             graph.sourceFile,
             "prefer-memo-complex-styles",
@@ -100,7 +100,7 @@ export const preferMemoComplexStyles = defineSolidRule({
         )
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             value,
             graph.sourceFile,
             "prefer-memo-complex-styles",

@@ -27,7 +27,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { CallEntity } from "../../entities";
 import type { FunctionEntity } from "../../entities/function";
 import type { VariableEntity } from "../../entities/variable";
@@ -409,7 +409,7 @@ export const resourceImplicitSuspense = defineSolidRule({
         if (resourceVariable && hasLoadingRead(resourceVariable)) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               call.node,
               graph.sourceFile,
               "resource-implicit-suspense",
@@ -438,7 +438,7 @@ export const resourceImplicitSuspense = defineSolidRule({
       if (analysis.conditionalMountTag) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "resource-implicit-suspense",
@@ -463,7 +463,7 @@ export const resourceImplicitSuspense = defineSolidRule({
 
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               call.node,
               graph.sourceFile,
               "resource-implicit-suspense",

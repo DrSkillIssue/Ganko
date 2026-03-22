@@ -30,7 +30,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { VariableEntity, ScopeEntity, JSXElementEntity } from "../../entities";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -616,7 +616,7 @@ export const resourceAccessUnchecked = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             reportNode,
             graph.sourceFile,
             "resource-access-unchecked",

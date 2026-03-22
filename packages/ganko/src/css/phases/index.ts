@@ -1,9 +1,9 @@
 /**
  * CSS graph phases.
  */
-import type { CSSGraph } from "../impl"
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input"
-type Phase = (graph: CSSGraph, input: CSSInput) => void
+type Phase = (graph: CSSBuildContext, input: CSSInput) => void
 
 import { runParsePhase } from "./parse"
 import { runAstPhase } from "./ast"
@@ -20,7 +20,7 @@ const phases: readonly Phase[] = [
   runCascadePhase,
   runScssPhase,
 ]
-export function runPhases(graph: CSSGraph, input: CSSInput): void {
+export function runPhases(graph: CSSBuildContext, input: CSSInput): void {
   for (const phase of phases) {
     phase(graph, input)
   }

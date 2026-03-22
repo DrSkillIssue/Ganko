@@ -280,19 +280,23 @@ describe("Phase 1: Compilation Shell", () => {
       expect([...comp.getCSSFilePaths()].sort()).toEqual(["/a.css", "/b.css"]);
     });
 
-    it("symbolTable throws Phase 2 error", () => {
+    it("symbolTable is lazily built from CSS trees", () => {
       const comp = createStyleCompilation();
-      expect(() => comp.symbolTable).toThrow("Phase 2");
+      const table = comp.symbolTable;
+      expect(table).toBeDefined();
+      expect(table.classNames).toBeDefined();
     });
 
-    it("dependencyGraph throws Phase 3 error", () => {
+    it("dependencyGraph is lazily built from trees", () => {
       const comp = createStyleCompilation();
-      expect(() => comp.dependencyGraph).toThrow("Phase 3");
+      const graph = comp.dependencyGraph;
+      expect(graph).toBeDefined();
+      expect(typeof graph.getCSSScope).toBe("function");
     });
 
-    it("getSemanticModel throws Phase 5 error", () => {
+    it("getSemanticModel throws for nonexistent solid file", () => {
       const comp = createStyleCompilation();
-      expect(() => comp.getSemanticModel("test.tsx")).toThrow("Phase 5");
+      expect(() => comp.getSemanticModel("test.tsx")).toThrow("No solid tree");
     });
   });
 

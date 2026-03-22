@@ -146,7 +146,7 @@ export const suspenseBoundaryMissing = defineSolidRule({
       if (getJSXAttributeValue(graph, element, "fallback") === null) {
         if (!ts.isJsxElement(element.node)) continue;
         emit(
-          createDiagnostic(graph.file, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "suspenseNoFallback", messages.suspenseNoFallback, "error"),
+          createDiagnostic(graph.filePath, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "suspenseNoFallback", messages.suspenseNoFallback, "error"),
         );
       }
     }
@@ -162,7 +162,7 @@ export const suspenseBoundaryMissing = defineSolidRule({
       if (getJSXAttributeValue(graph, element, "fallback") === null) {
         if (!ts.isJsxElement(element.node)) continue;
         emit(
-          createDiagnostic(graph.file, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "errorBoundaryNoFallback", messages.errorBoundaryNoFallback, "error"),
+          createDiagnostic(graph.filePath, element.node.openingElement, graph.sourceFile, "suspense-boundary-missing", "errorBoundaryNoFallback", messages.errorBoundaryNoFallback, "error"),
         );
       }
     }
@@ -214,7 +214,7 @@ export const suspenseBoundaryMissing = defineSolidRule({
           if (!reportNode) continue;
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               reportNode,
               graph.sourceFile,
               "suspense-boundary-missing",

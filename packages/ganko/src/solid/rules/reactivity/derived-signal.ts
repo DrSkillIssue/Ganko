@@ -23,7 +23,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { FunctionEntity, ReadEntity, TrackingContext } from "../../entities";
 import {
   isInsideJSXExpression,
@@ -151,7 +151,7 @@ export const derivedSignal = defineSolidRule({
         const { messageId, data } = getSpecificMessage(graph, read, variable.name, formattedVars);
         const msg = resolveMessage(messages[messageId], data);
 
-        emit(createDiagnostic(graph.file, read.node, graph.sourceFile, "derived-signal", messageId, msg, "error"));
+        emit(createDiagnostic(graph.filePath, read.node, graph.sourceFile, "derived-signal", messageId, msg, "error"));
       }
     }
   },

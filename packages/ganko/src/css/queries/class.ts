@@ -4,7 +4,7 @@
  * Query functions for finding CSS class definitions in CSSGraph.
  */
 
-import type { CSSGraph } from "../impl"
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 
 /**
  * Location info for a CSS class definition.

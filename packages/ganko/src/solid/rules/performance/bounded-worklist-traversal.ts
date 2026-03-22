@@ -47,7 +47,7 @@ export const boundedWorklistTraversal = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           usage.node,
           graph.sourceFile,
           "bounded-worklist-traversal",

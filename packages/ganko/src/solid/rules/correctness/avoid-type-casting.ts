@@ -274,7 +274,7 @@ export const avoidTypeCasting = defineSolidRule({
   options,
   check(graph, emit) {
     const sourceText = graph.sourceFile.text
-    const file = graph.file
+    const file = graph.filePath
     const sourceFile = graph.sourceFile
 
     const typeAssertions = getTypeAssertions(graph)

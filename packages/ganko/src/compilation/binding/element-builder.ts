@@ -10,11 +10,9 @@ import { ExportKind, type ExportEntity } from "../../solid/entities/export"
 import type { FunctionEntity } from "../../solid/entities/function"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
 import type { VariableEntity } from "../../solid/entities/variable"
-import { SolidGraph } from "../../solid/impl"
+import { buildSolidSyntaxTree } from "../../solid/impl"
 import { createSolidInput } from "../../solid/create-input"
-import { runPhases } from "../../solid/phases"
 import type { SolidSyntaxTree } from "../core/solid-syntax-tree"
-import { solidGraphToSyntaxTree } from "../core/solid-syntax-tree"
 import { getStaticStringFromJSXValue, getStaticNumericValue, getStaticStringValue } from "../../solid/util/static-value"
 import { getPropertyKeyName } from "../../solid/util/pattern-detection"
 import { containsJSX } from "../../solid/util/function"
@@ -1543,9 +1541,7 @@ function parseAndBuildExternalIndex(filePath: string): SolidModuleIndex | null {
       readFile: (f) => f === filePath ? content : undefined,
     })
     const input = createSolidInput(filePath, program)
-    const graph = new SolidGraph(input)
-    runPhases(graph, input)
-    const tree = solidGraphToSyntaxTree(graph, "external")
+    const tree = buildSolidSyntaxTree(input, "external")
     return buildSolidModuleIndex(tree)
   } catch {
     return null

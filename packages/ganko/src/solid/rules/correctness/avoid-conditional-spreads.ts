@@ -75,7 +75,7 @@ export const avoidConditionalSpreads = defineSolidRule({
           : "avoidLogicalAndSpread"
       const msg = messages[messageId]
 
-      emit(createDiagnostic(graph.file, spread.node, graph.sourceFile, "avoid-conditional-spreads", messageId, msg, "error"))
+      emit(createDiagnostic(graph.filePath, spread.node, graph.sourceFile, "avoid-conditional-spreads", messageId, msg, "error"))
     }
   },
 })

@@ -1,8 +1,7 @@
 import type { CSSSourceProvider, CSSSymbolContribution } from "./provider"
 import type { CSSSyntaxTree } from "../core/css-syntax-tree"
 import type { CSSClassNameSource } from "../symbols/class-name"
-import { cssGraphToSyntaxTrees } from "../core/css-syntax-tree"
-import { buildCSSGraph } from "../../css/plugin"
+import { buildCSSResult } from "../../css/impl"
 import { createSelectorSymbol } from "../symbols/selector"
 import { createDeclarationSymbol } from "../symbols/declaration"
 import { createCustomPropertySymbol } from "../symbols/custom-property"
@@ -197,8 +196,8 @@ export function createPlainCSSProvider(): PlainCSSProvider {
 
     parse(filePath: string, content: string, sourceOrderBase: number): CSSSyntaxTree {
       const input = { files: [{ path: filePath, content }] }
-      const graph = buildCSSGraph(input)
-      const trees = cssGraphToSyntaxTrees(graph)
+      const result = buildCSSResult(input)
+      const trees = result.trees
       const tree = trees[0]!
       return {
         ...tree,

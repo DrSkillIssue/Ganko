@@ -43,7 +43,7 @@ export const preferIndexScanOverStringIterator = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             parent,
             graph.sourceFile,
             "prefer-index-scan-over-string-iterator",

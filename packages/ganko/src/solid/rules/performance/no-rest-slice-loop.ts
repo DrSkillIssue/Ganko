@@ -65,7 +65,7 @@ export const noRestSliceLoop = defineSolidRule({
       const restDiagNode = callAssignment?.node ?? first.node
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           restDiagNode,
           graph.sourceFile,
           "no-rest-slice-loop",

@@ -30,7 +30,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { VariableEntity, ReadEntity } from "../../entities";
 import type { Diagnostic } from "../../../diagnostic"
 import { getEffectiveTrackingContext } from "../../queries/scope";
@@ -75,7 +75,7 @@ export const storeReactiveBreak = defineSolidRule({
     for (let i = 0, len = storeVariables.length; i < len; i++) {
       const storeVar = storeVariables[i];
       if (!storeVar) return;
-      checkStoreVariable(graph, storeVar, diagnostics, graph.file);
+      checkStoreVariable(graph, storeVar, diagnostics, graph.filePath);
     }
 
     for (const diagnostic of diagnostics) {

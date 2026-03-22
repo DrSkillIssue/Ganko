@@ -121,7 +121,7 @@ export const inlineComponent = defineSolidRule({
       const reportNode = getReportNode(fn);
       const message = messages.inlineComponent.replace("{{name}}", componentName);
       emit(
-        createDiagnostic(graph.file, reportNode, graph.sourceFile, "inline-component", "inlineComponent", message, "error"),
+        createDiagnostic(graph.filePath, reportNode, graph.sourceFile, "inline-component", "inlineComponent", message, "error"),
       );
     }
   },

@@ -1,5 +1,5 @@
 import type { BaseRule } from "../graph"
-import type { SolidGraph } from "./impl"
+import type { SolidSyntaxTree } from "../compilation/core/solid-syntax-tree"
 
 /**
  * A Solid.js lint rule.
@@ -7,7 +7,7 @@ import type { SolidGraph } from "./impl"
  * Rules receive a typed SolidGraph and emit diagnostics via callback.
  * No workspace lookup needed - the graph is fully typed.
  */
-export interface SolidRule extends BaseRule<SolidGraph> {
+export interface SolidRule extends BaseRule<SolidSyntaxTree> {
   readonly options: Record<string, unknown>
 }
 

@@ -9,7 +9,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { ScopeEntity } from "../../entities";
 import type { Diagnostic } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule";
@@ -47,11 +47,11 @@ export const childrenHelperMisuse = defineSolidRule({
 
     // Check 1: Multiple children() calls per component
     if (childrenCalls.length > 1) {
-      checkMultipleChildrenCalls(graph, childrenCalls, diagnostics, graph.file);
+      checkMultipleChildrenCalls(graph, childrenCalls, diagnostics, graph.filePath);
     }
 
     // Check 2: props.children in tracked contexts
-    checkPropsChildrenAccess(graph, propsVars, diagnostics, graph.file);
+    checkPropsChildrenAccess(graph, propsVars, diagnostics, graph.filePath);
 
     for (const diagnostic of diagnostics) {
       emit(diagnostic);

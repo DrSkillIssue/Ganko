@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidBuildContext } from "../../build-context"
 import type { ScopeEntity } from "../../entities/scope";
 import type { VariableEntity } from "../../entities/variable";
 import type { JSXAttributeEntity, StyleComplexityInfo } from "../../entities/jsx";
@@ -200,7 +200,7 @@ export function buildJSXAttribute(attr: ts.JsxAttributeLike, id: number): JSXAtt
 export function computeCaptures(
   node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | ts.ConstructorDeclaration,
   fnScope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
 ): VariableEntity[] {
   const captures: VariableEntity[] = [];
   const seen = new Set<number>();
@@ -235,7 +235,7 @@ function collectIdentifierCaptures(
   node: ts.Node,
   ownNames: Set<string>,
   fnScope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   seen: Set<number>,
   captures: VariableEntity[],
 ): void {

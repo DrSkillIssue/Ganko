@@ -21,7 +21,7 @@
 
 import ts from "typescript";
 import type { Diagnostic, Fix } from "../../../diagnostic"
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { JSXAttributeEntity, JSXElementEntity } from "../../entities/jsx";
 import type { ScopeEntity } from "../../entities/scope";
 import type { VariableEntity } from "../../entities/variable";
@@ -203,7 +203,7 @@ export const jsxNoScriptUrl = defineSolidRule({
       if (!entry) continue;
       const { attr, element } = entry;
 
-      const result = checkAttributeForScriptUrl(attr, element, graph, graph.file);
+      const result = checkAttributeForScriptUrl(attr, element, graph, graph.filePath);
       if (result) {
         emit(result);
       }

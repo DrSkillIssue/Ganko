@@ -6,7 +6,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { CallEntity, ScopeEntity, VariableEntity, ReadEntity } from "../../entities";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { buildSolidImportFix, extractSignalDestructures, getContainingStatement } from "../util";
@@ -115,7 +115,7 @@ export const batchOptimization = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             firstCall.callNode,
             graph.sourceFile,
             "batch-optimization",

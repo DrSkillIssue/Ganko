@@ -51,7 +51,7 @@ export const preferPrecompiledRegex = defineSolidRule({
             const regexText = receiver.text
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 receiver,
                 graph.sourceFile,
                 "prefer-precompiled-regex",
@@ -78,7 +78,7 @@ export const preferPrecompiledRegex = defineSolidRule({
             const regexText = arg.text
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 arg,
                 graph.sourceFile,
                 "prefer-precompiled-regex",

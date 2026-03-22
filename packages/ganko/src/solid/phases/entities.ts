@@ -29,12 +29,12 @@
  * - entities/handlers/  - Entity creation (function, call, jsx, class, etc.)
  * - entities/helpers.ts - Pure utility functions
  */
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import { createVisitorContext } from "./entities/context";
 import { visitProgram } from "./entities/visitors";
 
-export function runEntitiesPhase(graph: SolidGraph, input: SolidInput): void {
+export function runEntitiesPhase(graph: SolidBuildContext, input: SolidInput): void {
   const ctx = createVisitorContext(graph);
   visitProgram(ctx, input.sourceFile);
   graph.componentFunctions = ctx.componentFunctions;

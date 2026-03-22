@@ -58,7 +58,7 @@ export const avoidFunctionAllocationInHotLoop = defineSolidRule({
       if (!capturesLoopVariable) continue;
 
       emit(
-        createDiagnostic(graph.file, fnNode, graph.sourceFile, "avoid-function-allocation-in-hot-loop", "closureInLoop", messages.closureInLoop, "warn"),
+        createDiagnostic(graph.filePath, fnNode, graph.sourceFile, "avoid-function-allocation-in-hot-loop", "closureInLoop", messages.closureInLoop, "warn"),
       )
     }
   },

@@ -54,7 +54,7 @@ export const avoidSparseArrays = defineSolidRule({
       if (isFixedCapacityBuffer(expr, arg)) continue
 
       emit(
-        createDiagnostic(graph.file, expr, graph.sourceFile, "avoid-sparse-arrays", "sparseArray", messages.sparseArray, "warn"),
+        createDiagnostic(graph.filePath, expr, graph.sourceFile, "avoid-sparse-arrays", "sparseArray", messages.sparseArray, "warn"),
       )
     }
   },

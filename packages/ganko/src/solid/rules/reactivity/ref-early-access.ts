@@ -178,7 +178,7 @@ export const refEarlyAccess = defineSolidRule({
           if (context.source === "createMemo") {
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 read.node,
                 graph.sourceFile,
                 "ref-early-access",
@@ -201,7 +201,7 @@ export const refEarlyAccess = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             read.node,
             graph.sourceFile,
             "ref-early-access",

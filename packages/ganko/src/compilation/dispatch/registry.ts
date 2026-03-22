@@ -12,6 +12,7 @@
  * thunks are opaque — the type parameter has been existentially erased
  * into the closure.
  */
+import type { StyleCompilation } from "../core/compilation"
 import type { CSSSyntaxTree } from "../core/css-syntax-tree"
 import type { SolidSyntaxTree } from "../core/solid-syntax-tree"
 import type { SymbolTable } from "../symbols/symbol-table"
@@ -30,6 +31,7 @@ export type ElementAction = (element: ElementNode, semanticModel: FileSemanticMo
 export type CascadeAction = (element: ElementNode, cascade: ElementCascade, snapshot: SignalSnapshot, semanticModel: FileSemanticModel, emit: Emit) => void
 export type ConditionalDeltaAction = (element: ElementNode, delta: ReadonlyMap<string, ConditionalSignalDelta>, semanticModel: FileSemanticModel, emit: Emit) => void
 export type AlignmentAction = (parentElement: ElementNode, context: AlignmentContext, cohort: CohortStats, semanticModel: FileSemanticModel, emit: Emit) => void
+export type CompilationAction = (compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit) => void
 
 /**
  * Opaque dispatch thunk for a symbol action. Calls provider.getSymbols(kind)
@@ -69,6 +71,7 @@ export interface CollectedActions {
   readonly cascade: readonly CascadeAction[]
   readonly conditionalDelta: readonly ConditionalDeltaAction[]
   readonly alignment: readonly AlignmentAction[]
+  readonly compilation: readonly CompilationAction[]
 }
 
 function createSymbolThunk<K extends StyleSymbolKind>(
@@ -109,6 +112,7 @@ export function createActionRegistry(): { registry: AnalysisActionRegistry; acti
   const cascade: CascadeAction[] = []
   const conditionalDelta: ConditionalDeltaAction[] = []
   const alignment: AlignmentAction[] = []
+  const compilation: CompilationAction[] = []
 
   const registry: AnalysisActionRegistry = {
     registerCSSSyntaxAction(action) { cssSyntax.push(action) },
@@ -125,11 +129,12 @@ export function createActionRegistry(): { registry: AnalysisActionRegistry; acti
     registerCascadeAction(action) { cascade.push(action) },
     registerConditionalDeltaAction(action) { conditionalDelta.push(action) },
     registerAlignmentAction(action) { alignment.push(action) },
+    registerCompilationAction(action) { compilation.push(action) },
   }
 
   const actions: CollectedActions = {
     cssSyntax, crossSyntax, symbolThunks, symbolKinds,
-    element, factThunks, factKinds, cascade, conditionalDelta, alignment,
+    element, factThunks, factKinds, cascade, conditionalDelta, alignment, compilation,
   }
 
   return { registry, actions }

@@ -147,7 +147,7 @@ export const preferSetLookupInLoop = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "prefer-set-lookup-in-loop",

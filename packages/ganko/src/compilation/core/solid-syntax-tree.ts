@@ -18,7 +18,6 @@ import type { ComputationEntity, DependencyEdge, OwnershipEdge } from "../../sol
 import type { FileEntity } from "../../solid/entities/file";
 import type { TypeResolver } from "../../solid/typescript/index";
 import type { JSXAttributeKind } from "../../solid/util/jsx";
-import type { SolidGraph } from "../../solid/impl";
 
 interface JSXAttributeWithElement {
   readonly attr: JSXAttributeEntity;
@@ -118,87 +117,11 @@ export interface SolidSyntaxTree {
   readonly fileEntity: FileEntity;
   readonly lineStartOffsets: readonly number[];
 
+  // Mutable caches used by query functions for memoization
+  readonly jsxContextCache: WeakMap<ts.Node, import("../../solid/entities/jsx").JSXContext | null>;
+  readonly scopeForCache: WeakMap<ts.Node, ScopeEntity>;
+  readonly onDepsCache: WeakMap<ts.Node, boolean>;
+  readonly passthroughCache: WeakMap<ts.Node, boolean>;
+
   findExpressionAtOffset(offset: number): ts.Node | null;
-}
-
-export function solidGraphToSyntaxTree(graph: SolidGraph, version: string): SolidSyntaxTree {
-  return {
-    kind: "solid",
-    filePath: graph.file,
-    version,
-    sourceFile: graph.sourceFile,
-    comments: graph.comments,
-
-    scopes: graph.scopes,
-    variables: graph.variables,
-    functions: graph.functions,
-    calls: graph.calls,
-    jsxElements: graph.jsxElements,
-    imports: graph.imports,
-    exports: graph.exports,
-    classes: graph.classes,
-    properties: graph.properties,
-    propertyAssignments: graph.propertyAssignments,
-    conditionalSpreads: graph.conditionalSpreads,
-    objectSpreads: graph.objectSpreads,
-    nonNullAssertions: graph.nonNullAssertions,
-    typeAssertions: graph.typeAssertions,
-    typePredicates: graph.typePredicates,
-    unsafeGenericAssertions: graph.unsafeGenericAssertions,
-    unsafeTypeAnnotations: graph.unsafeTypeAnnotations,
-    inlineImports: graph.inlineImports,
-    computations: graph.computations,
-    dependencyEdges: graph.dependencyEdges,
-    ownershipEdges: graph.ownershipEdges,
-
-    variablesByName: graph.variablesByName,
-    functionsByNode: graph.functionsByNode,
-    functionsByDeclarationNode: graph.functionsByDeclarationNode,
-    functionsByName: graph.functionsByName,
-    callsByNode: graph.callsByNode,
-    callsByPrimitive: graph.callsByPrimitive,
-    callsByMethodName: graph.callsByMethodName,
-    callsByArgNode: graph.callsByArgNode,
-    jsxByNode: graph.jsxByNode,
-    jsxByTag: graph.jsxByTag,
-    jsxAttributesByElementId: graph.jsxAttributesByElementId,
-    jsxAttrsByKind: graph.jsxAttrsByKind,
-    jsxClassAttributes: graph.jsxClassAttributes,
-    jsxClassListAttributes: graph.jsxClassListAttributes,
-    jsxStyleAttributes: graph.jsxStyleAttributes,
-    fillImageElements: graph.fillImageElements,
-    staticClassTokensByElementId: graph.staticClassTokensByElementId,
-    staticClassListKeysByElementId: graph.staticClassListKeysByElementId,
-    staticStyleKeysByElementId: graph.staticStyleKeysByElementId,
-    classListProperties: graph.classListProperties,
-    styleProperties: graph.styleProperties,
-    inlineStyleClassNames: graph.inlineStyleClassNames,
-    importsBySource: graph.importsBySource,
-    exportsByName: graph.exportsByName,
-    exportsByEntityId: graph.exportsByEntityId,
-    classesByNode: graph.classesByNode,
-    classesByName: graph.classesByName,
-    unaryExpressionsByOperator: graph.unaryExpressionsByOperator,
-    spreadElements: graph.spreadElements,
-    newExpressionsByCallee: graph.newExpressionsByCallee,
-    deleteExpressions: graph.deleteExpressions,
-    identifiersByName: graph.identifiersByName,
-
-    firstScope: graph.firstScope,
-    componentScopes: graph.componentScopes,
-    componentFunctions: graph.componentFunctions,
-    functionsWithReactiveCaptures: graph.functionsWithReactiveCaptures,
-    reactiveVariables: graph.reactiveVariables,
-    propsVariables: graph.propsVariables,
-    storeVariables: graph.storeVariables,
-    resourceVariables: graph.resourceVariables,
-    variablesWithPropertyAssignment: graph.variablesWithPropertyAssignment,
-    computationByCallId: graph.computationByCallId,
-
-    typeResolver: graph.typeResolver,
-    fileEntity: graph.fileEntity,
-    lineStartOffsets: graph.lineStartOffsets,
-
-    findExpressionAtOffset: graph.findExpressionAtOffset.bind(graph),
-  };
 }

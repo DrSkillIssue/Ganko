@@ -46,7 +46,7 @@ export const avoidIntermediateMapCopy = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           loopCopy.node,
           graph.sourceFile,
           "avoid-intermediate-map-copy",

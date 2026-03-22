@@ -10,12 +10,12 @@
  * - Builds call site lists on functions
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import { getVariableByNameInScope } from "../queries/scope";
 
 
-export function runWiringPhase(graph: SolidGraph, _input: SolidInput): void {
+export function runWiringPhase(graph: SolidBuildContext, _input: SolidInput): void {
     wireJSXHierarchy(graph);
     wireEnclosingComponents(graph);
     resolveCallTargets(graph);
@@ -27,7 +27,7 @@ export function runWiringPhase(graph: SolidGraph, _input: SolidInput): void {
  * Wires JSX parent-child relationships based on AST hierarchy.
  * @param graph - The solid graph to populate
  */
-function wireJSXHierarchy(graph: SolidGraph): void {
+function wireJSXHierarchy(graph: SolidBuildContext): void {
   const elements = graph.jsxElements;
   if (elements.length === 0) return;
 
@@ -95,7 +95,7 @@ function findParentJSXNode(node: ts.JsxElement | ts.JsxSelfClosingElement | ts.J
  * Sets the enclosing component reference for each scope.
  * @param graph - The solid graph to populate
  */
-function wireEnclosingComponents(graph: SolidGraph): void {
+function wireEnclosingComponents(graph: SolidBuildContext): void {
   const scopes = graph.scopes;
   if (scopes.length === 0) return;
   const componentScopes = graph.componentScopes;
@@ -120,7 +120,7 @@ function wireEnclosingComponents(graph: SolidGraph): void {
  * Resolves call targets by matching callee names to function definitions.
  * @param graph - The solid graph to populate
  */
-function resolveCallTargets(graph: SolidGraph): void {
+function resolveCallTargets(graph: SolidBuildContext): void {
   const calls = graph.calls;
   if (calls.length === 0) return;
 
@@ -154,7 +154,7 @@ function resolveCallTargets(graph: SolidGraph): void {
  *
  * @param graph - The solid graph to populate
  */
-function wireCalleeRootVariables(graph: SolidGraph): void {
+function wireCalleeRootVariables(graph: SolidBuildContext): void {
   const calls = graph.calls;
   if (calls.length === 0) return;
 
@@ -192,7 +192,7 @@ function extractCalleeRootName(node: ts.Expression): string | null {
  * is already assignable to target type.
  * @param graph - The solid graph to populate
  */
-function analyzeTypeAssertions(graph: SolidGraph): void {
+function analyzeTypeAssertions(graph: SolidBuildContext): void {
   const assertions = graph.typeAssertions;
   if (assertions.length === 0) return;
 

@@ -87,6 +87,9 @@ export function createAnalysisDispatcher(): AnalysisDispatcher {
         }
       }
 
+      // Compilation-wide actions (run after all per-file dispatch)
+      dispatchCompilationActions(actions, compilation, symbolTable, emit)
+
       return { diagnostics, maxTierComputed: maxTier }
     },
   }
@@ -184,5 +187,14 @@ function dispatchAlignmentActions(actions: CollectedActions, elements: readonly 
       const action = actions.alignment[j]
       if (action) action(element, context, cohort, model, emit)
     }
+  }
+}
+
+function dispatchCompilationActions(actions: CollectedActions, compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit): void {
+  if (actions.compilation.length === 0) return
+
+  for (let i = 0; i < actions.compilation.length; i++) {
+    const action = actions.compilation[i]
+    if (action) action(compilation, symbolTable, emit)
   }
 }

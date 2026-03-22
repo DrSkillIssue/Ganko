@@ -5,7 +5,7 @@
  * Groups related variables into semantic tokens and detects missing variants.
  */
 
-import type { CSSGraph } from "../impl";
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input";
 import type {
   ThemeTokenEntity,
@@ -74,7 +74,7 @@ const NAMING_PATTERNS = [
   { regex: /^--([a-z]+)-(\d+|[a-z]+)$/i, template: "--{name}-{variant}" },
 ] as const;
 
-export function runTokensPhase(graph: CSSGraph, input: CSSInput): void {
+export function runTokensPhase(graph: CSSBuildContext, input: CSSInput): void {
     if (input.options?.inferTokens === false) return;
     if (graph.variables.length === 0) return;
 
@@ -129,7 +129,7 @@ export function runTokensPhase(graph: CSSGraph, input: CSSInput): void {
  * @returns The created theme token entity
  */
 function createThemeTokenEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   name: string,
   category: TokenCategory,
   file: FileEntity,

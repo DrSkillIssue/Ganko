@@ -370,7 +370,7 @@ export const validateJsxNesting = defineSolidRule({
         if (ts.isJsxElement(node)) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               node.openingElement,
               graph.sourceFile,
               "validate-jsx-nesting",
@@ -404,7 +404,7 @@ export const validateJsxNesting = defineSolidRule({
         if (ts.isJsxElement(node)) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               node.openingElement,
               graph.sourceFile,
               "validate-jsx-nesting",

@@ -20,7 +20,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName } from "../../queries"
@@ -70,7 +70,7 @@ export const detachedDomReference = defineSolidRule({
           if (ts.isIdentifier(varId) && call.scope.isModuleScope) {
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 call.node,
                 graph.sourceFile,
                 "detached-dom-reference",
@@ -88,7 +88,7 @@ export const detachedDomReference = defineSolidRule({
           if (isModuleScopedVariable(graph, parent.left.text)) {
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 call.node,
                 graph.sourceFile,
                 "detached-dom-reference",
@@ -108,7 +108,7 @@ export const detachedDomReference = defineSolidRule({
             const propName = root + "." + getMemberPath(parent.left)
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 call.node,
                 graph.sourceFile,
                 "detached-dom-reference",

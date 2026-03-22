@@ -21,7 +21,7 @@
 
 import ts from "typescript";
 import type { Diagnostic } from "../../../diagnostic"
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type {
   CallEntity,
   JSXElementEntity,
@@ -86,10 +86,10 @@ export const signalInLoop = defineSolidRule({
     const diagnostics: Diagnostic[] = [];
 
     // Check 1: Signal/store creation inside loops
-    checkSignalCreation(graph, loopScopeIndex, diagnostics, graph.file);
+    checkSignalCreation(graph, loopScopeIndex, diagnostics, graph.filePath);
 
     // Check 2 & 3: Signal calls and derived function calls inside loops
-    checkSignalCalls(graph, loopScopeIndex, diagnostics, graph.file);
+    checkSignalCalls(graph, loopScopeIndex, diagnostics, graph.filePath);
 
     for (const diagnostic of diagnostics) {
       emit(diagnostic);

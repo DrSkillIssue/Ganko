@@ -363,7 +363,7 @@ export const styleProp = defineSolidRule({
       if (ts.isStringLiteral(value) || ts.isTemplateExpression(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
         const issue = detectStringStyleIssue(value, attr.node, graph.sourceFile);
         if (issue) {
-          emit(issueToDiagnostic(issue, graph.file, graph.sourceFile));
+          emit(issueToDiagnostic(issue, graph.filePath, graph.sourceFile));
         }
         continue;
       }
@@ -377,13 +377,13 @@ export const styleProp = defineSolidRule({
 
           const nameIssue = detectPropertyNameIssue(prop, graph.sourceFile);
           if (nameIssue) {
-            emit(issueToDiagnostic(nameIssue, graph.file, graph.sourceFile));
+            emit(issueToDiagnostic(nameIssue, graph.filePath, graph.sourceFile));
             continue;
           }
 
           const valueIssue = detectNumericValueIssue(prop);
           if (valueIssue) {
-            emit(issueToDiagnostic(valueIssue, graph.file, graph.sourceFile));
+            emit(issueToDiagnostic(valueIssue, graph.filePath, graph.sourceFile));
           }
         }
       }

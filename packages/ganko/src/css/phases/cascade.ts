@@ -5,7 +5,7 @@
  * Determines which declarations override others and which variables
  * shadow other variables.
  */
-import type { CSSGraph } from "../impl";
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input";
 import type { DeclarationEntity, VariableEntity } from "../entities";
 import { hasFlag, DECL_IS_IMPORTANT, VAR_IS_GLOBAL } from "../entities";
@@ -16,7 +16,7 @@ import { extractKeyframeNames } from "@drskillissue/ganko-shared";
  * @param graph CSS graph
  * @param input CSS input options
  */
-export function runCascadePhase(graph: CSSGraph, input: CSSInput): void {
+export function runCascadePhase(graph: CSSBuildContext, input: CSSInput): void {
   if (input.options?.analyzeCascade === false) return;
 
   for (const declarations of graph.declarationsByProperty.values()) {
@@ -113,7 +113,7 @@ function analyzeVariableShadows(variables: VariableEntity[]): void {
  * Detects unused @keyframes rules.
  * @param graph - The CSS graph
  */
-function detectUnusedKeyframes(graph: CSSGraph): void {
+function detectUnusedKeyframes(graph: CSSBuildContext): void {
   const keyframes = graph.keyframes;
   if (keyframes.length === 0) return;
 

@@ -2,7 +2,7 @@
  * Shared utilities for rule implementations.
  */
 import ts from "typescript"
-import type { SolidGraph } from "../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree"
 import type { FixOperation } from "../../diagnostic"
 import type { CallEntity, VariableEntity } from "../entities"
 import { hasImportSpecifier, getImportsBySource, getImports, getVariableByNameInScope } from "../queries"

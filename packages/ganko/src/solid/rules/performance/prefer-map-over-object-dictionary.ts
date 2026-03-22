@@ -12,7 +12,7 @@ import type { TypeInfo } from "../../typescript"
 import type { PropertyAssignmentEntity } from "../../entities/property-assignment"
 import { getPropertyAssignments, getVariablesByName } from "../../queries/get"
 import { getTypeInfo } from "../../queries/type"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic"
 import { isEmptyObjectLiteral } from "../../util"
@@ -54,7 +54,7 @@ export const preferMapOverObjectDictionary = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           pa.node,
           graph.sourceFile,
           "prefer-map-over-object-dictionary",

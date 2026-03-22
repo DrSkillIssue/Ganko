@@ -5,7 +5,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { CallEntity } from "../../entities/call";
@@ -197,7 +197,7 @@ export const avoidChainedArrayMethods = defineSolidRule({
               chain: chainStr + "()",
             });
           emit(
-            createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
+            createDiagnostic(graph.filePath, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
           );
         }
       }
@@ -246,7 +246,7 @@ export const avoidChainedArrayMethods = defineSolidRule({
               chain: chainStr + "()",
             });
           emit(
-            createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
+            createDiagnostic(graph.filePath, call.node, graph.sourceFile, "avoid-chained-array-methods", "avoidChainedArrayMethods", msg, "warn"),
           );
         }
       }

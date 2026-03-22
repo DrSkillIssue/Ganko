@@ -63,7 +63,7 @@ export const avoidQuadraticSpread = defineSolidRule({
         if (parent.expression !== read.node) continue;
 
         emit(
-          createDiagnostic(graph.file, parent, graph.sourceFile, "avoid-quadratic-spread", "quadraticSpread", messages.quadraticSpread, "error"),
+          createDiagnostic(graph.filePath, parent, graph.sourceFile, "avoid-quadratic-spread", "quadraticSpread", messages.quadraticSpread, "error"),
         );
         break;
       }

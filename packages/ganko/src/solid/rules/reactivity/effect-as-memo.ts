@@ -125,7 +125,7 @@ export const effectAsMemo = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           setterCallNode,
           graph.sourceFile,
           "effect-as-memo",

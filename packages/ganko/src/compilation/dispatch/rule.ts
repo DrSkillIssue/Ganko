@@ -2,6 +2,7 @@
  * AnalysisRule + typed action registry — replaces CrossRule + BaseRule<CrossRuleContext>.
  */
 import type { Diagnostic } from "../../diagnostic"
+import type { StyleCompilation } from "../core/compilation"
 import type { CSSSyntaxTree } from "../core/css-syntax-tree"
 import type { SolidSyntaxTree } from "../core/solid-syntax-tree"
 import type { SymbolTable } from "../symbols/symbol-table"
@@ -59,6 +60,7 @@ export interface StyleSymbolByKind {
 export interface AnalysisActionRegistry {
   registerCSSSyntaxAction(action: (tree: CSSSyntaxTree, symbolTable: SymbolTable, emit: Emit) => void): void
   registerCrossSyntaxAction(action: (solidTree: SolidSyntaxTree, symbolTable: SymbolTable, emit: Emit) => void): void
+  registerCompilationAction(action: (compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit) => void): void
   registerSymbolAction<K extends StyleSymbolKind>(kind: K, action: (symbol: StyleSymbolByKind[K], semanticModel: FileSemanticModel, emit: Emit) => void): void
   registerElementAction(action: (element: ElementNode, semanticModel: FileSemanticModel, emit: Emit) => void): void
   registerFactAction<K extends LayoutFactKind>(factKind: K, action: (element: ElementNode, fact: LayoutFactMap[K], semanticModel: FileSemanticModel, emit: Emit) => void): void

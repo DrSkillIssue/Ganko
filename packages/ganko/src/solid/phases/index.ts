@@ -1,8 +1,8 @@
-import type { SolidGraph } from "../impl"
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input"
 
 // Phase type — just a function
-type Phase = (graph: SolidGraph, input: SolidInput) => void
+type Phase = (graph: SolidBuildContext, input: SolidInput) => void
 
 // Import phase implementations
 import { runPreparePhase } from "./prepare"
@@ -39,7 +39,7 @@ const phases: readonly Phase[] = [
 /**
  * Run all phases to build the graph.
  */
-export function runPhases(graph: SolidGraph, input: SolidInput): void {
+export function runPhases(graph: SolidBuildContext, input: SolidInput): void {
   for (const phase of phases) {
     phase(graph, input)
   }

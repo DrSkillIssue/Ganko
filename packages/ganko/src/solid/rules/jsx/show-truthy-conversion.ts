@@ -20,7 +20,7 @@
 
 import ts from "typescript";
 import type { Diagnostic, Fix } from "../../../diagnostic"
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import type { JSXElementEntity } from "../../entities/jsx";
@@ -138,7 +138,7 @@ export const showTruthyConversion = defineSolidRule({
       // Skip DOM elements (lowercase <show> would be isDomElement: true)
       if (element.isDomElement) continue;
 
-      const issue = analyzeShowElement(element, graph, graph.file);
+      const issue = analyzeShowElement(element, graph, graph.filePath);
       if (issue) {
         emit(issue);
       }

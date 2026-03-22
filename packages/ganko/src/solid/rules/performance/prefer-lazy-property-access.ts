@@ -7,7 +7,7 @@
 import ts from "typescript"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { VariableEntity } from "../../entities/variable"
 import type { FunctionEntity } from "../../entities/function"
 import type { ReturnStatementEntity } from "../../entities/return-statement"
@@ -163,7 +163,7 @@ export const preferLazyPropertyAccess = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           decl,
           graph.sourceFile,
           "prefer-lazy-property-access",

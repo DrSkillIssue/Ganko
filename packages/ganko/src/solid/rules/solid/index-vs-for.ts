@@ -7,7 +7,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { JSXElementEntity } from "../../entities/jsx"
 import type { FixOperation } from "../../../diagnostic"
 import type { Emit } from "../../../graph"
@@ -131,7 +131,7 @@ function checkElement(
   const fix = createFix(el, replacement, tag, graph)
   const messageId = isIndex ? "indexWithObjects" : "forWithPrimitives"
 
-  emit(createDiagnostic(graph.file, el.node, graph.sourceFile, "index-vs-for", messageId, messages[messageId], "warn", fix.length > 0 ? fix : undefined))
+  emit(createDiagnostic(graph.filePath, el.node, graph.sourceFile, "index-vs-for", messageId, messages[messageId], "warn", fix.length > 0 ? fix : undefined))
 }
 
 const options = {}

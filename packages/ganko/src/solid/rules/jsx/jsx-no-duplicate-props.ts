@@ -16,7 +16,7 @@
  */
 
 import ts from "typescript";
-import type { JSXElementEntity, JSXAttributeEntity } from "../../impl";
+import type { JSXElementEntity, JSXAttributeEntity } from "../../entities/jsx"
 import { defineSolidRule } from "../../rule";
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -240,7 +240,7 @@ export const jsxNoDuplicateProps = defineSolidRule({
       for (let j = 0, issuesLen = issues.length; j < issuesLen; j++) {
         const issue = issues[j];
         if (!issue) continue;
-        emit(createDiagnostic(graph.file, issue.node, graph.sourceFile, "jsx-no-duplicate-props", issue.messageKey, issue.message, "error", issue.fix));
+        emit(createDiagnostic(graph.filePath, issue.node, graph.sourceFile, "jsx-no-duplicate-props", issue.messageKey, issue.message, "error", issue.fix));
       }
     }
   },

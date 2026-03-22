@@ -229,7 +229,7 @@ export function getFunctionByDeclarationNode(graph: SolidGraph, node: ts.Node): 
   return graph.functionsByDeclarationNode.get(node) ?? null;
 }
 
-export function getComponentScopes(graph: SolidGraph): Map<ScopeEntity, { scope: ScopeEntity; name: string }> {
+export function getComponentScopes(graph: SolidGraph): ReadonlyMap<ScopeEntity, { readonly scope: ScopeEntity; readonly name: string }> {
   return graph.componentScopes;
 }
 
@@ -242,7 +242,7 @@ export function getExportByEntityId(graph: SolidGraph, entityId: number): Export
 }
 
 export function getFileByPath(graph: SolidGraph, path: string): FileEntity | null {
-  return path === graph.file ? graph.fileEntity : null;
+  return path === graph.filePath ? graph.fileEntity : null;
 }
 
 export function getFunctionById(graph: SolidGraph, id: number): FunctionEntity | null {
@@ -289,7 +289,7 @@ export function getNodeAtPosition(graph: SolidGraph, line: number, column: numbe
 }
 
 export function getNodeAtPositionInFile(graph: SolidGraph, path: string, line: number, column: number): NodeAtPositionInfo | null {
-  if (path !== graph.file) return null;
+  if (path !== graph.filePath) return null;
   return getNodeAtPosition(graph, line, column);
 }
 

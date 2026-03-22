@@ -99,7 +99,7 @@ export const avoidHiddenClassTransition = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           pa.target,
           graph.sourceFile,
           "avoid-hidden-class-transition",

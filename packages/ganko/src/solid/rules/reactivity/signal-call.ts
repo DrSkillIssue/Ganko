@@ -12,7 +12,7 @@
  * - GOOD: <div>{count()}</div>    // signal called
  */
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { TrackingContext } from "../../entities/scope"
 import type { VariableEntity, ReadEntity } from "../../entities/variable"
 import type { Diagnostic, Fix } from "../../../diagnostic"
@@ -83,7 +83,7 @@ function checkSignalRead(
   const { messageId, data } = getSpecificMessage(variable.name, read.node, context)
   const fix = createSignalCallFix(read.node, variable.name, graph.sourceFile)
   return createDiagnostic(
-    graph.file,
+    graph.filePath,
     read.node,
     graph.sourceFile,
     "signal-call",

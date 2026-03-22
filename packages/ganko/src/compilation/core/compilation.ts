@@ -1,5 +1,10 @@
 import type { SolidSyntaxTree } from "./solid-syntax-tree";
 import type { CSSSyntaxTree } from "./css-syntax-tree";
+import type { SymbolTable } from "../symbols/symbol-table";
+import { buildSymbolTable } from "../symbols/symbol-table";
+import type { DependencyGraph } from "../incremental/dependency-graph";
+import { buildDependencyGraph } from "../incremental/dependency-graph";
+import { createFileSemanticModel, type FileSemanticModel } from "../binding/semantic-model";
 
 export interface TailwindConfigInput {
   readonly kind: "tailwind-config";
@@ -29,8 +34,8 @@ export interface StyleCompilation {
   readonly packageManifest: PackageManifestInput | null;
   readonly tsConfig: TSConfigInput | null;
 
-  readonly symbolTable: never;
-  readonly dependencyGraph: never;
+  readonly symbolTable: SymbolTable;
+  readonly dependencyGraph: DependencyGraph;
 
   withSolidTree(tree: SolidSyntaxTree): StyleCompilation;
   withCSSTrees(trees: readonly CSSSyntaxTree[]): StyleCompilation;
@@ -43,7 +48,7 @@ export interface StyleCompilation {
 
   getSolidTree(filePath: string): SolidSyntaxTree | null;
   getCSSTree(filePath: string): CSSSyntaxTree | null;
-  getSemanticModel(solidFilePath: string): never;
+  getSemanticModel(solidFilePath: string): FileSemanticModel;
 
   getSolidFilePaths(): readonly string[];
   getCSSFilePaths(): readonly string[];
@@ -62,8 +67,11 @@ function makeCompilation(
   tsConfig: TSConfigInput | null,
 ): StyleCompilation {
   const id = nextId++;
+  let cachedSymbolTable: SymbolTable | null = null
+  let cachedDependencyGraph: DependencyGraph | null = null
+  const cachedSemanticModels = new Map<string, FileSemanticModel>()
 
-  return {
+  const self: StyleCompilation = {
     id,
     solidTrees,
     cssTrees,
@@ -71,12 +79,20 @@ function makeCompilation(
     packageManifest,
     tsConfig,
 
-    get symbolTable(): never {
-      throw new Error("Not implemented: Phase 2 required");
+    get symbolTable(): SymbolTable {
+      if (cachedSymbolTable === null) {
+        const allCssTrees: CSSSyntaxTree[] = []
+        for (const tree of cssTrees.values()) allCssTrees.push(tree)
+        cachedSymbolTable = buildSymbolTable(allCssTrees)
+      }
+      return cachedSymbolTable
     },
 
-    get dependencyGraph(): never {
-      throw new Error("Not implemented: Phase 3 required");
+    get dependencyGraph(): DependencyGraph {
+      if (cachedDependencyGraph === null) {
+        cachedDependencyGraph = buildDependencyGraph(solidTrees, cssTrees)
+      }
+      return cachedDependencyGraph
     },
 
     withSolidTree(tree: SolidSyntaxTree): StyleCompilation {
@@ -145,8 +161,14 @@ function makeCompilation(
       return cssTrees.get(filePath) ?? null;
     },
 
-    getSemanticModel(): never {
-      throw new Error("Not implemented: Phase 5 required");
+    getSemanticModel(solidFilePath: string): FileSemanticModel {
+      const cached = cachedSemanticModels.get(solidFilePath)
+      if (cached !== undefined) return cached
+      const solidTree = solidTrees.get(solidFilePath)
+      if (!solidTree) throw new Error(`No solid tree for ${solidFilePath}`)
+      const model = createFileSemanticModel(solidTree, self.symbolTable, self.dependencyGraph, self)
+      cachedSemanticModels.set(solidFilePath, model)
+      return model
     },
 
     getSolidFilePaths(): readonly string[] {
@@ -162,7 +184,9 @@ function makeCompilation(
       for (const k of keys) out.push(k);
       return out;
     },
-  };
+  }
+
+  return self
 }
 
 export function createStyleCompilation(): StyleCompilation {

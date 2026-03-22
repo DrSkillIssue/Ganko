@@ -6,7 +6,7 @@
  */
 
 import type { AtRule, Rule, ChildNode } from "postcss";
-import type { CSSGraph } from "../impl";
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input";
 import type {
   MixinEntity,
@@ -69,7 +69,7 @@ const FUNCTION_CALL_PATTERN = FUNCTION_CALL_RE;
 
 const EMPTY_EXTRACTED_CALLS: Array<{ name: string; args: string[]; sourceIndex: number }> = [];
 
-export function runScssPhase(graph: CSSGraph, _input: CSSInput): void {
+export function runScssPhase(graph: CSSBuildContext, _input: CSSInput): void {
     if (!graph.hasScssFiles) return;
 
     const scssFiles: FileEntity[] = [];
@@ -137,7 +137,7 @@ export function runScssPhase(graph: CSSGraph, _input: CSSInput): void {
  * @returns The parsed mixin entity
  */
 function parseMixin(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: AtRule,
   file: FileEntity,
 ): MixinEntity {
@@ -240,7 +240,7 @@ function parseMixinParameters(params: string): ParsedMixinParameters {
  * @returns The parsed include entity
  */
 function parseIncludeDeferred(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: AtRule,
   file: FileEntity,
   rule: RuleEntity | null,
@@ -307,7 +307,7 @@ function parseIncludeArguments(params: string): MixinArgument[] {
  * @returns The parsed function entity
  */
 function parseFunction(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: AtRule,
   file: FileEntity,
 ): SCSSFunctionEntity {
@@ -372,7 +372,7 @@ function parseFunctionParameters(params: string): FunctionParameter[] {
  * @returns The parsed placeholder entity
  */
 function parsePlaceholder(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: Rule,
   file: FileEntity,
 ): PlaceholderEntity {
@@ -398,7 +398,7 @@ function parsePlaceholder(
  * @returns The parsed extend entity
  */
 function parseExtendDeferred(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: AtRule,
   file: FileEntity,
   rule: RuleEntity,
@@ -428,7 +428,7 @@ function parseExtendDeferred(
  * @returns Object with resolved placeholder and/or rule
  */
 function resolveExtendTarget(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   selector: string,
 ): { placeholder: PlaceholderEntity | null; rule: RuleEntity | null } {
   if (selector.charCodeAt(0) === CHAR_PERCENT) {
@@ -446,7 +446,7 @@ function resolveExtendTarget(
 }
 
 /** Extracts mixin, function, include, extend, and placeholder definitions from a single SCSS file. */
-function collectScssDefinitions(graph: CSSGraph, file: FileEntity): void {
+function collectScssDefinitions(graph: CSSBuildContext, file: FileEntity): void {
   walkNodes(file.node, (node, parent) => {
     if (node.type === "atrule") {
       const name = node.name;
@@ -550,7 +550,7 @@ function findReturnStatements(node: AtRule): ReturnStatement[] {
  */
 function findParentRule(
   parent: ChildNode | null,
-  graph: CSSGraph,
+  graph: CSSBuildContext,
 ): RuleEntity | null {
   if (!parent || parent.type !== "rule") return null;
   return graph.rulesByNode.get(parent) ?? null;
@@ -612,7 +612,7 @@ function extractSCSSFunctionCalls(value: string): Array<{ name: string; args: st
  * @returns The created function call entity
  */
 function createFunctionCallEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   call: { name: string; args: string[]; sourceIndex: number },
   decl: DeclarationEntity,
   file: FileEntity,
@@ -636,7 +636,7 @@ function createFunctionCallEntity(
  * Marks unused SCSS entities and populates tracking arrays.
  * @param graph - The CSS graph containing SCSS entities
  */
-function markUnusedEntities(graph: CSSGraph): void {
+function markUnusedEntities(graph: CSSBuildContext): void {
   const mixins = graph.mixins;
   const unusedMixins = graph.unusedMixins;
   for (let i = 0; i < mixins.length; i++) {

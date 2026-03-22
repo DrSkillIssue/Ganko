@@ -1,5 +1,5 @@
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName, getSpreadElements } from "../../queries"
@@ -39,7 +39,7 @@ export const noCharArrayMaterialization = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "no-char-array-materialization",
@@ -64,7 +64,7 @@ export const noCharArrayMaterialization = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "no-char-array-materialization",
@@ -85,7 +85,7 @@ export const noCharArrayMaterialization = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           spread,
           graph.sourceFile,
           "no-char-array-materialization",

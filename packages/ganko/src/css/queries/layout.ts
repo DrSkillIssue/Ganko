@@ -1,5 +1,5 @@
 import type { SelectorEntity } from "../entities"
-import type { CSSGraph } from "../impl"
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 
 export function getSelectorsTargetingCheckbox(graph: CSSGraph): readonly SelectorEntity[] {
   return graph.selectorsTargetingCheckbox

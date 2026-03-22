@@ -21,7 +21,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { ScopeEntity, CallEntity } from "../../entities"
@@ -68,7 +68,7 @@ export const cleanupScope = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "cleanup-scope",

@@ -13,7 +13,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { ObjectSpreadEntity, CallEntity, SpreadSourceReactivity } from "../../entities"
 import type { ObjectPropertyInfo } from "../../typescript"
 import type { Diagnostic, Fix } from "../../../diagnostic"
@@ -543,7 +543,7 @@ export const avoidObjectSpread = defineSolidRule({
     const splitPropsCalls = graph.callsByPrimitive.get("splitProps") ?? []
 
     for (const call of splitPropsCalls) {
-      const diagnostic = checkUnnecessarySplitProps(call, graph.file, graph.sourceFile)
+      const diagnostic = checkUnnecessarySplitProps(call, graph.filePath, graph.sourceFile)
       if (diagnostic) {
         emit(diagnostic)
       }
@@ -577,7 +577,7 @@ export const avoidObjectSpread = defineSolidRule({
       const msg = messages[messageId]
       const fix = tryCreateFix(spread, graph, sourceCode)
 
-      emit(createDiagnostic(graph.file, spread.node, graph.sourceFile, "avoid-object-spread", messageId, msg, "error", fix ?? undefined))
+      emit(createDiagnostic(graph.filePath, spread.node, graph.sourceFile, "avoid-object-spread", messageId, msg, "error", fix ?? undefined))
     }
   },
 })

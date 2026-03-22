@@ -35,7 +35,7 @@ export const avoidDeleteOperator = defineSolidRule({
       if (!ts.isPropertyAccessExpression(arg) && !ts.isElementAccessExpression(arg)) continue;
 
       emit(
-        createDiagnostic(graph.file, expr, graph.sourceFile, "avoid-delete-operator", "avoidDelete", messages.avoidDelete, "warn"),
+        createDiagnostic(graph.filePath, expr, graph.sourceFile, "avoid-delete-operator", "avoidDelete", messages.avoidDelete, "warn"),
       )
     }
   },

@@ -1,7 +1,7 @@
 /**
  * Variable and reference query functions
  */
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import type { VariableEntity, VariableReferenceEntity } from "../entities";
 import { hasFlag, VAR_IS_USED, VAR_HAS_FALLBACK } from "../entities";
 

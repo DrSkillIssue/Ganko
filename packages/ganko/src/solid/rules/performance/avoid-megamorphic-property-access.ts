@@ -127,7 +127,7 @@ export const avoidMegamorphicPropertyAccess = defineSolidRule({
           if (!access) continue;
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               access,
               graph.sourceFile,
               "avoid-megamorphic-property-access",

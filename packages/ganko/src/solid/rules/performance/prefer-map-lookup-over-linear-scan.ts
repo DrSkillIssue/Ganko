@@ -11,7 +11,7 @@ import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { iterateVariables, getContainingFunction } from "../../queries"
 import { COMPARISON_OPERATORS, expressionReferencesAny, getEnclosingLoop } from "../../util"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 
 const messages = {
   preferMapLookup:
@@ -55,7 +55,7 @@ export const preferMapLookupOverLinearScan = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             usage.node,
             graph.sourceFile,
             "prefer-map-lookup-over-linear-scan",

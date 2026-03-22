@@ -847,6 +847,14 @@ const HEIGHT_CONTRIBUTING_SIGNALS: readonly LayoutSignalName[] = ["height", "min
 const VERTICAL_ALIGN_MITIGATIONS: ReadonlySet<string> = new Set(["middle", "top", "bottom", "text-top", "text-bottom"])
 
 export const alignmentStrengthCalibration = {
+  baselineConflictBoost: 0.66,
+  lineHeightWeight: 0.7,
+  contextConflictBoost: 0.7,
+  contextLineHeightWeight: 0.35,
+  contextCenterPenalty: 0.6,
+  replacedDifferentTextBoost: 0.85,
+  replacedUnknownTextBoost: 0.25,
+  replacedLineHeightWeight: 0.4,
   compositionMixedUnmitigatedOutlierStrength: 0.85,
   compositionMixedOutlierAmongReplacedStrength: 0.6,
   compositionTextOutlierAmongMixedStrength: 0.55,
@@ -1674,4 +1682,587 @@ export function computeBayesianPosterior(
     posteriorUpper: clamp(clamped + (1 - evidenceMass) * 0.1, 0, 1),
     evidenceMass,
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// Alignment case evaluation pipeline
+// (from cross-file/layout/calibration.ts + consistency-evidence.ts +
+//  consistency-policy.ts + scoring.ts + diagnostics.ts + content-composition.ts)
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+export type AlignmentFindingKind =
+  | "offset-delta"
+  | "declared-offset-delta"
+  | "baseline-conflict"
+  | "context-conflict"
+  | "replaced-control-risk"
+  | "content-composition-conflict"
+
+export type AlignmentFactorCoverage = Readonly<Record<AlignmentFactorId, number>>
+
+export interface LogOddsInterval {
+  readonly min: number
+  readonly max: number
+}
+
+export interface EvidenceAtom {
+  readonly factorId: AlignmentFactorId
+  readonly valueKind: EvidenceValueKind
+  readonly contribution: LogOddsInterval
+  readonly provenance: EvidenceProvenance
+  readonly relevanceWeight: number
+  readonly coverage: number
+}
+
+export interface PosteriorInterval {
+  readonly lower: number
+  readonly upper: number
+}
+
+export interface AlignmentSignalFinding {
+  readonly kind: AlignmentFindingKind
+  readonly message: string
+  readonly fix: string
+  readonly weight: number
+}
+
+export interface AlignmentEvaluation {
+  readonly severity: number
+  readonly confidence: number
+  readonly declaredOffsetPx: number | null
+  readonly estimatedOffsetPx: number | null
+  readonly contextKind: AlignmentContextKind
+  readonly contextCertainty: ContextCertainty
+  readonly posterior: PosteriorInterval
+  readonly evidenceMass: number
+  readonly topFactors: readonly AlignmentFactorId[]
+  readonly signalFindings: readonly AlignmentSignalFinding[]
+}
+
+export interface AlignmentCase {
+  readonly subject: AlignmentElementEvidence
+  readonly subjectIsControlOrReplaced: boolean
+  readonly cohort: { readonly parentElementKey: string; readonly parentElementId: number; readonly parentTag: string | null; readonly siblingCount: number }
+  readonly cohortProfile: CohortProfile
+  readonly cohortSignals: AlignmentCohortSignals
+  readonly subjectIdentifiability: CohortIdentifiability
+  readonly factorCoverage: AlignmentFactorCoverage
+  readonly cohortSnapshots: readonly SignalSnapshot[]
+  readonly cohortFactSummary: CohortFactSummary
+  readonly cohortProvenance: EvidenceProvenance
+  readonly subjectDeclaredOffsetDeviation: NumericEvidenceValue
+  readonly subjectEffectiveOffsetDeviation: NumericEvidenceValue
+  readonly subjectLineHeightDeviation: NumericEvidenceValue
+  readonly context: AlignmentContext
+  readonly subjectContentComposition: ContentCompositionFingerprint
+  readonly cohortContentCompositions: readonly ContentCompositionFingerprint[]
+}
+
+
+// ── Calibration (from calibration.ts) ─────────────────────────────────────
+
+interface AlignmentFactorContract {
+  readonly polarity: "support" | "penalty"
+  readonly maxMagnitude: number
+}
+
+const ALIGNMENT_FACTOR_CONTRACTS: Readonly<Record<AlignmentFactorId, AlignmentFactorContract>> = {
+  "offset-delta": { polarity: "support", maxMagnitude: 1.6 },
+  "declared-offset-delta": { polarity: "support", maxMagnitude: 0.42 },
+  "baseline-conflict": { polarity: "support", maxMagnitude: 1.35 },
+  "context-conflict": { polarity: "support", maxMagnitude: 0.78 },
+  "replaced-control-risk": { polarity: "support", maxMagnitude: 1.35 },
+  "content-composition-conflict": { polarity: "support", maxMagnitude: 2.60 },
+  "context-certainty": { polarity: "penalty", maxMagnitude: 0.26 },
+}
+
+const alignmentPolicyCalibration = {
+  priorLogOdds: -1.25,
+  posteriorThreshold: 0.68,
+  evidenceMassFloor: 0.34,
+  severityPosteriorWeight: 0.72,
+  severityOffsetWeight: 0.2,
+  severityBaselineWeight: 0.08,
+  confidenceMassFloor: 0.25,
+  confidenceMassWeight: 0.75,
+  confidenceIntervalPenalty: 0.35,
+}
+
+const evidenceContributionCalibration = {
+  supportIntervalLowerScale: 0.6,
+  supportConditionalUpperScale: 0.7,
+  penaltyIntervalUpperScale: 0.45,
+}
+
+
+// ── Content composition divergence (from content-composition.ts) ──────────
+
+export interface CompositionDivergenceResult {
+  readonly strength: number
+  readonly majorityClassification: ContentCompositionClassification
+}
+
+const NO_DIVERGENCE: CompositionDivergenceResult = Object.freeze({
+  strength: 0,
+  majorityClassification: ContentCompositionClassification.Unknown,
+})
+
+export function resolveCompositionDivergence(
+  subjectFingerprint: ContentCompositionFingerprint,
+  allFingerprints: readonly ContentCompositionFingerprint[],
+  parentContext: AlignmentContext | null,
+): CompositionDivergenceResult {
+  if (allFingerprints.length < 2) return NO_DIVERGENCE
+  if (parentContext !== null && parentContext.baselineRelevance !== "relevant") return NO_DIVERGENCE
+
+  const countByClassification = new Map<ContentCompositionClassification, number>()
+  for (let i = 0; i < allFingerprints.length; i++) {
+    const fp = allFingerprints[i]
+    if (!fp) continue
+    const normalized = normalizeClassificationForComparison(fp.classification)
+    countByClassification.set(normalized, (countByClassification.get(normalized) ?? 0) + 1)
+  }
+
+  const subjectNormalized = normalizeClassificationForComparison(subjectFingerprint.classification)
+  const subjectCount = countByClassification.get(subjectNormalized) ?? 0
+
+  let majorityClassification: ContentCompositionClassification = ContentCompositionClassification.Unknown
+  let majorityCount = 0
+  for (const [classification, count] of countByClassification) {
+    if (count > majorityCount) { majorityCount = count; majorityClassification = classification }
+  }
+
+  if (subjectCount === allFingerprints.length) return { strength: resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints), majorityClassification }
+  if (subjectNormalized === majorityClassification) return { strength: resolveInlineReplacedKindDivergence(subjectFingerprint, allFingerprints), majorityClassification }
+  if (subjectNormalized === ContentCompositionClassification.Unknown) return { strength: 0, majorityClassification }
+
+  const cal = alignmentStrengthCalibration
+  if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) return { strength: cal.compositionMixedUnmitigatedOutlierStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.MixedUnmitigated) return { strength: cal.compositionMixedOutlierAmongReplacedStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.TextOnly) return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.MixedUnmitigated && subjectNormalized === ContentCompositionClassification.ReplacedOnly) return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.TextOnly && subjectNormalized === ContentCompositionClassification.ReplacedOnly) return { strength: cal.compositionMixedOutlierAmongReplacedStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.ReplacedOnly && subjectNormalized === ContentCompositionClassification.TextOnly) return { strength: cal.compositionTextOutlierAmongMixedStrength, majorityClassification }
+  if (majorityClassification === ContentCompositionClassification.Unknown) return { strength: 0, majorityClassification }
+  return { strength: cal.compositionUnknownPenalty, majorityClassification }
+}
+
+function resolveInlineReplacedKindDivergence(
+  subjectFingerprint: ContentCompositionFingerprint,
+  allFingerprints: readonly ContentCompositionFingerprint[],
+): number {
+  if (subjectFingerprint.inlineReplacedKind === null) return 0
+  const countByKind = new Map<InlineReplacedKind, number>()
+  for (let i = 0; i < allFingerprints.length; i++) {
+    const fp = allFingerprints[i]
+    if (!fp || fp.inlineReplacedKind === null) continue
+    countByKind.set(fp.inlineReplacedKind, (countByKind.get(fp.inlineReplacedKind) ?? 0) + 1)
+  }
+  if (countByKind.size < 2) return 0
+  const subjectKindCount = countByKind.get(subjectFingerprint.inlineReplacedKind) ?? 0
+  if (subjectKindCount === allFingerprints.length) return 0
+  return alignmentStrengthCalibration.compositionMixedOutlierAmongReplacedStrength
+}
+
+function normalizeClassificationForComparison(classification: ContentCompositionClassification): ContentCompositionClassification {
+  if (classification === ContentCompositionClassification.MixedMitigated) return ContentCompositionClassification.TextOnly
+  if (classification === ContentCompositionClassification.BlockSegmented) return ContentCompositionClassification.TextOnly
+  return classification
+}
+
+export function resolveCompositionCoverage(
+  subjectFingerprint: ContentCompositionFingerprint,
+  allFingerprints: readonly ContentCompositionFingerprint[],
+): number {
+  if (allFingerprints.length < 2) return 0
+  let analyzableCount = 0
+  for (let i = 0; i < allFingerprints.length; i++) {
+    const fp = allFingerprints[i]
+    if (fp && fp.classification !== ContentCompositionClassification.Unknown) analyzableCount++
+  }
+  const analyzableShare = analyzableCount / allFingerprints.length
+  if (subjectFingerprint.classification === ContentCompositionClassification.Unknown) return analyzableShare * 0.3
+  if (subjectFingerprint.totalChildCount > 0 && subjectFingerprint.analyzableChildCount === 0) return analyzableShare * 0.4
+  return analyzableShare
+}
+
+export function formatCompositionFixSuggestion(subjectFingerprint: ContentCompositionFingerprint): string {
+  if (subjectFingerprint.classification === ContentCompositionClassification.MixedUnmitigated) {
+    if (subjectFingerprint.hasVerticalAlignMitigation) return "verify vertical-align resolves the baseline shift"
+    return "add display: inline-flex; align-items: center to the wrapping container, or vertical-align: middle on the inline-replaced child"
+  }
+  return "ensure consistent content composition across siblings"
+}
+
+
+// ── Consistency evidence (from consistency-evidence.ts) ───────────────────
+
+interface StrengthEvidence {
+  readonly strength: number
+  readonly kind: EvidenceValueKind
+}
+
+const ZERO_STRENGTH: StrengthEvidence = { strength: 0, kind: EvidenceValueKind.Exact }
+
+interface ConsistencyEvidence {
+  readonly offsetStrength: number
+  readonly declaredOffsetStrength: number
+  readonly baselineStrength: number
+  readonly contextStrength: number
+  readonly replacedStrength: number
+  readonly compositionStrength: number
+  readonly majorityClassification: ContentCompositionClassification
+  readonly identifiability: CohortIdentifiability
+  readonly factSummary: CohortFactSummary
+  readonly atoms: readonly EvidenceAtom[]
+}
+
+function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvidence {
+  const factSummary = input.cohortFactSummary
+  const effectiveOffsetScaleReference = resolveOffsetScaleReference(input.cohortProfile.medianLineHeightPx, input.cohortProfile.medianEffectiveOffsetPx)
+  const declaredOffsetScaleReference = resolveOffsetScaleReference(input.cohortProfile.medianLineHeightPx, input.cohortProfile.medianDeclaredOffsetPx)
+
+  const offsetRaw = normalizeDeviation(input.subjectEffectiveOffsetDeviation, input.cohortProfile.effectiveOffsetDispersionPx, effectiveOffsetScaleReference)
+  const declaredOffsetRaw = normalizeDeviation(input.subjectDeclaredOffsetDeviation, input.cohortProfile.declaredOffsetDispersionPx, declaredOffsetScaleReference)
+  const lineHeight = normalizeDeviation(input.subjectLineHeightDeviation, input.cohortProfile.lineHeightDispersionPx, input.cohortProfile.medianLineHeightPx)
+
+  const baselinesIrrelevant = input.context.baselineRelevance === "irrelevant"
+  const blockAxisIsMainAxis = !input.context.crossAxisIsBlockAxis
+  const suppressAll = blockAxisIsMainAxis
+  const offset = suppressAll ? ZERO_STRENGTH : offsetRaw
+  const declaredOffset = suppressAll ? ZERO_STRENGTH : declaredOffsetRaw
+
+  const baselineStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
+  const contextStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
+  const replacedStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
+  const compositionResult = (baselinesIrrelevant || suppressAll) ? null : resolveContentCompositionStrength(input)
+  const compositionStrength = compositionResult ? compositionResult.evidence : ZERO_STRENGTH
+  const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
+  const provenance = input.cohortProvenance
+  const atoms = buildEvidenceAtoms(input, offset, declaredOffset, baselineStrength, contextStrength, replacedStrength, compositionStrength, contextCertaintyPenalty, provenance)
+
+  return {
+    offsetStrength: offset.strength,
+    declaredOffsetStrength: declaredOffset.strength,
+    baselineStrength: baselineStrength.strength,
+    contextStrength: contextStrength.strength,
+    replacedStrength: replacedStrength.strength,
+    compositionStrength: compositionStrength.strength,
+    majorityClassification: compositionResult ? compositionResult.divergence.majorityClassification : ContentCompositionClassification.Unknown,
+    identifiability: input.subjectIdentifiability,
+    factSummary,
+    atoms,
+  }
+}
+
+function normalizeDeviation(value: NumericEvidenceValue, dispersion: number | null, baselineMagnitude: number | null): StrengthEvidence {
+  if (value.value === null || value.value <= 0) return { strength: 0, kind: value.kind }
+  const scaledDispersion = dispersion === null ? 0 : Math.abs(dispersion) * 1.5
+  const magnitudeScale = baselineMagnitude === null ? 0 : Math.abs(baselineMagnitude)
+  let scale = scaledDispersion
+  if (magnitudeScale > scale) scale = magnitudeScale
+  if (scale <= 0) scale = Math.abs(value.value)
+  if (scale <= 0) return { strength: 0, kind: value.kind }
+  return { strength: value.value / scale, kind: value.kind }
+}
+
+function resolveOffsetScaleReference(medianLineHeightPx: number | null, fallbackMedianOffsetPx: number | null): number | null {
+  if (medianLineHeightPx !== null) return Math.abs(medianLineHeightPx) * 0.1
+  if (fallbackMedianOffsetPx === null) return null
+  return Math.abs(fallbackMedianOffsetPx)
+}
+
+function resolveBaselineStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
+  const verticalAlign = input.cohortSignals.verticalAlign
+  const hasConflict = verticalAlign.value === SignalConflictValue.Conflict
+  const conflict = hasConflict ? alignmentStrengthCalibration.baselineConflictBoost : 0
+  const kind = !hasConflict ? mergeEvidenceKind(lineHeight.kind, verticalAlign.kind) : (lineHeight.kind === EvidenceValueKind.Unknown ? verticalAlign.kind : mergeEvidenceKind(lineHeight.kind, verticalAlign.kind))
+  return { strength: clamp(lineHeight.strength * alignmentStrengthCalibration.lineHeightWeight + conflict, 0, 1), kind }
+}
+
+function resolveContextStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
+  const contextKind = mapContextCertaintyToEvidenceKind(input.context.certainty)
+  if (input.context.kind !== "flex-cross-axis" && input.context.kind !== "grid-cross-axis") return { strength: 0, kind: contextKind }
+
+  const alignSelf = input.cohortSignals.alignSelf
+  const placeSelf = input.cohortSignals.placeSelf
+  const conflictKind = mergeEvidenceKind(alignSelf.kind, placeSelf.kind)
+  const hasConflict = alignSelf.value === SignalConflictValue.Conflict || placeSelf.value === SignalConflictValue.Conflict
+  const conflictStrength = hasConflict ? alignmentStrengthCalibration.contextConflictBoost : 0
+
+  const parentIsCenter = input.context.parentAlignItems === "center" || input.context.parentPlaceItems === "center"
+  const centerPenalty = parentIsCenter ? alignmentStrengthCalibration.contextCenterPenalty : 0
+  const kind = mergeEvidenceKind(mergeEvidenceKind(lineHeight.kind, conflictKind), contextKind)
+  return { strength: clamp(conflictStrength + lineHeight.strength * alignmentStrengthCalibration.contextLineHeightWeight - centerPenalty, 0, 1), kind }
+}
+
+function resolveReplacedControlStrength(input: AlignmentCase, lineHeight: StrengthEvidence): StrengthEvidence {
+  const hasReplacedPair = input.subjectIsControlOrReplaced || input.cohortSignals.hasControlOrReplacedPeer
+  if (!hasReplacedPair) return { strength: 0, kind: lineHeight.kind }
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Different) return { strength: alignmentStrengthCalibration.replacedDifferentTextBoost, kind: EvidenceValueKind.Exact }
+  if (input.cohortSignals.textContrastWithPeers === AlignmentTextContrast.Unknown) return { strength: alignmentStrengthCalibration.replacedUnknownTextBoost, kind: EvidenceValueKind.Conditional }
+  return { strength: clamp(lineHeight.strength * alignmentStrengthCalibration.replacedLineHeightWeight, 0, 1), kind: lineHeight.kind }
+}
+
+function resolveContentCompositionStrength(input: AlignmentCase): { evidence: StrengthEvidence; divergence: CompositionDivergenceResult } {
+  const divergence = resolveCompositionDivergence(input.subjectContentComposition, input.cohortContentCompositions, input.context)
+  if (divergence.strength <= 0) return { evidence: { strength: 0, kind: EvidenceValueKind.Exact }, divergence }
+  const kind: EvidenceValueKind = input.subjectContentComposition.classification === ContentCompositionClassification.Unknown ? EvidenceValueKind.Conditional : EvidenceValueKind.Exact
+  return { evidence: { strength: clamp(divergence.strength, 0, 1), kind }, divergence }
+}
+
+function resolveContextCertaintyPenalty(input: AlignmentCase): StrengthEvidence {
+  const kind = mapContextCertaintyToEvidenceKind(input.context.certainty)
+  const coverage = clamp(input.factorCoverage["context-certainty"], 0, 1)
+  return { strength: 1 - coverage, kind }
+}
+
+function mapContextCertaintyToEvidenceKind(certainty: ContextCertainty): EvidenceValueKind {
+  if (certainty === ContextCertainty.Resolved) return EvidenceValueKind.Exact
+  if (certainty === ContextCertainty.Conditional) return EvidenceValueKind.Conditional
+  return EvidenceValueKind.Unknown
+}
+
+function buildEvidenceAtoms(
+  input: AlignmentCase, offset: StrengthEvidence, declaredOffset: StrengthEvidence,
+  baselineStrength: StrengthEvidence, contextStrength: StrengthEvidence,
+  replacedStrength: StrengthEvidence, compositionStrength: StrengthEvidence,
+  contextCertaintyPenalty: StrengthEvidence, provenance: EvidenceProvenance,
+): readonly EvidenceAtom[] {
+  const out: EvidenceAtom[] = []
+  pushAtom(out, "offset-delta", offset.kind, offset.strength, input.factorCoverage["offset-delta"], provenance, "support")
+  pushAtom(out, "declared-offset-delta", declaredOffset.kind, declaredOffset.strength, input.factorCoverage["declared-offset-delta"], provenance, "support")
+  pushAtom(out, "baseline-conflict", baselineStrength.kind, baselineStrength.strength, input.factorCoverage["baseline-conflict"], provenance, "support")
+  pushAtom(out, "context-conflict", contextStrength.kind, contextStrength.strength, input.factorCoverage["context-conflict"], provenance, "support")
+  pushAtom(out, "replaced-control-risk", replacedStrength.kind, replacedStrength.strength, input.factorCoverage["replaced-control-risk"], provenance, "support")
+  pushAtom(out, "content-composition-conflict", compositionStrength.kind, compositionStrength.strength, input.factorCoverage["content-composition-conflict"], provenance, "support")
+  pushAtom(out, "context-certainty", contextCertaintyPenalty.kind, contextCertaintyPenalty.strength, input.factorCoverage["context-certainty"], provenance, "penalty")
+  return out
+}
+
+function pushAtom(
+  out: EvidenceAtom[], factorId: AlignmentFactorId, valueKind: EvidenceValueKind,
+  strength: number, coverage: number, provenance: EvidenceProvenance, expectedPolarity: "support" | "penalty",
+): void {
+  if (strength <= 0) return
+  const contract = ALIGNMENT_FACTOR_CONTRACTS[factorId]
+  const contribution = expectedPolarity === "support"
+    ? toPositiveContribution(strength, contract.maxMagnitude, valueKind)
+    : toNegativeContribution(strength, contract.maxMagnitude, valueKind)
+  out.push({ factorId, valueKind, contribution, provenance, relevanceWeight: clamp(strength, 0, 1), coverage: clamp(coverage, 0, 1) })
+}
+
+function toPositiveContribution(strength: number, maxWeight: number, valueKind: EvidenceValueKind): LogOddsInterval {
+  const contribution = clamp(strength, 0, 2) * maxWeight
+  if (valueKind === EvidenceValueKind.Exact) return { min: contribution, max: contribution }
+  if (valueKind === EvidenceValueKind.Interval) return { min: contribution * evidenceContributionCalibration.supportIntervalLowerScale, max: contribution }
+  if (valueKind === EvidenceValueKind.Conditional) return { min: 0, max: contribution * evidenceContributionCalibration.supportConditionalUpperScale }
+  return { min: 0, max: 0 }
+}
+
+function toNegativeContribution(strength: number, maxPenalty: number, valueKind: EvidenceValueKind): LogOddsInterval {
+  const penalty = clamp(strength, 0, 1) * maxPenalty
+  if (valueKind === EvidenceValueKind.Exact) return { min: -penalty, max: -penalty }
+  if (valueKind === EvidenceValueKind.Interval) return { min: -penalty, max: -penalty * evidenceContributionCalibration.penaltyIntervalUpperScale }
+  if (valueKind === EvidenceValueKind.Conditional) return { min: -penalty, max: 0 }
+  return { min: -penalty, max: 0 }
+}
+
+
+// ── Consistency policy (from consistency-policy.ts) ───────────────────────
+
+function applyConsistencyPolicy(evidence: ConsistencyEvidence): {
+  readonly kind: "accept"; readonly severity: number; readonly confidence: number; readonly posterior: PosteriorInterval; readonly evidenceMass: number; readonly topFactors: readonly AlignmentFactorId[]
+} | {
+  readonly kind: "reject"; readonly reason: "low-evidence" | "threshold" | "undecidable"; readonly detail: "evidence-mass" | "posterior" | "interval" | "identifiability"; readonly posterior: PosteriorInterval; readonly evidenceMass: number
+} {
+  const evidenceMass = resolveEvidenceMass(evidence)
+  const posterior = resolvePosteriorBounds(evidence)
+
+  if (evidence.identifiability.ambiguous) return { kind: "reject", reason: "undecidable", detail: "identifiability", posterior, evidenceMass }
+  if (posterior.lower >= alignmentPolicyCalibration.posteriorThreshold) {
+    return { kind: "accept", severity: resolveSeverity(evidence, posterior), confidence: resolveConfidence(posterior, evidenceMass), posterior, evidenceMass, topFactors: selectTopFactors(evidence) }
+  }
+  if (posterior.upper < alignmentPolicyCalibration.posteriorThreshold) return { kind: "reject", reason: "threshold", detail: "posterior", posterior, evidenceMass }
+  return { kind: "reject", reason: "undecidable", detail: "interval", posterior, evidenceMass }
+}
+
+function resolvePosteriorBounds(evidence: ConsistencyEvidence): PosteriorInterval {
+  let minLogOdds = alignmentPolicyCalibration.priorLogOdds
+  let maxLogOdds = alignmentPolicyCalibration.priorLogOdds
+  for (let i = 0; i < evidence.atoms.length; i++) {
+    const atom = evidence.atoms[i]
+    if (!atom) continue
+    minLogOdds += atom.contribution.min
+    maxLogOdds += atom.contribution.max
+  }
+  return { lower: logistic(minLogOdds), upper: logistic(maxLogOdds) }
+}
+
+function resolveEvidenceMass(evidence: ConsistencyEvidence): number {
+  if (evidence.atoms.length === 0) return 0
+  let coverageWeightedSum = 0
+  let contributionWeightSum = 0
+  for (let i = 0; i < evidence.atoms.length; i++) {
+    const atom = evidence.atoms[i]
+    if (!atom) continue
+    const meanContribution = Math.abs((atom.contribution.min + atom.contribution.max) / 2)
+    if (meanContribution <= 0) continue
+    const weight = clamp(meanContribution, 0, 4)
+    coverageWeightedSum += clamp(atom.coverage, 0, 1) * weight
+    contributionWeightSum += weight
+  }
+  if (contributionWeightSum <= 0) return 0
+  return clamp(coverageWeightedSum / contributionWeightSum, 0, 1)
+}
+
+function resolveSeverity(evidence: ConsistencyEvidence, posterior: PosteriorInterval): number {
+  const midpoint = (posterior.lower + posterior.upper) / 2
+  return clamp(
+    midpoint * alignmentPolicyCalibration.severityPosteriorWeight
+    + evidence.offsetStrength * alignmentPolicyCalibration.severityOffsetWeight
+    + evidence.baselineStrength * alignmentPolicyCalibration.severityBaselineWeight, 0, 1)
+}
+
+function resolveConfidence(posterior: PosteriorInterval, evidenceMass: number): number {
+  const intervalWidth = posterior.upper - posterior.lower
+  const weightedMass = alignmentPolicyCalibration.confidenceMassFloor + evidenceMass * alignmentPolicyCalibration.confidenceMassWeight
+  return clamp(posterior.lower * weightedMass * (1 - intervalWidth * alignmentPolicyCalibration.confidenceIntervalPenalty), 0, 1)
+}
+
+function selectTopFactors(evidence: ConsistencyEvidence): readonly AlignmentFactorId[] {
+  const atoms = evidence.atoms
+  if (atoms.length === 0) return []
+  const top: { id: AlignmentFactorId; mag: number }[] = []
+  for (let i = 0; i < atoms.length; i++) {
+    const atom = atoms[i]
+    if (!atom) continue
+    const mag = Math.abs((atom.contribution.min + atom.contribution.max) / 2)
+    if (mag <= 0) continue
+    if (top.length < 4) { top.push({ id: atom.factorId, mag }); continue }
+    let minIdx = 0
+    for (let j = 1; j < top.length; j++) { const curr = top[j]; const best = top[minIdx]; if (curr && best && curr.mag < best.mag) minIdx = j }
+    const minEntry = top[minIdx]
+    if (minEntry && mag > minEntry.mag) top[minIdx] = { id: atom.factorId, mag }
+  }
+  top.sort((a, b) => { if (a.mag !== b.mag) return b.mag - a.mag; if (a.id < b.id) return -1; if (a.id > b.id) return 1; return 0 })
+  return top.map(t => t.id)
+}
+
+function logistic(value: number): number {
+  if (value > 30) return 1
+  if (value < -30) return 0
+  return 1 / (1 + Math.exp(-value))
+}
+
+
+// ── Scoring — evaluateAlignmentCase (from scoring.ts) ─────────────────────
+
+export type AlignmentEvaluationDecision =
+  | { readonly kind: "accept"; readonly evaluation: AlignmentEvaluation }
+  | { readonly kind: "reject"; readonly reason: "low-evidence" | "threshold" | "undecidable"; readonly detail?: "evidence-mass" | "posterior" | "interval" | "identifiability"; readonly posterior: PosteriorInterval; readonly evidenceMass: number }
+
+export function scoreAlignmentCase(input: AlignmentCase): AlignmentEvaluationDecision {
+  const evidence = buildConsistencyEvidence(input)
+  const policy = applyConsistencyPolicy(evidence)
+
+  if (policy.kind === "reject") {
+    return { kind: "reject", reason: policy.reason, detail: policy.detail, posterior: policy.posterior, evidenceMass: policy.evidenceMass }
+  }
+
+  const signalFindings = buildFindingsFromAtoms(evidence.atoms, input, evidence)
+
+  return {
+    kind: "accept",
+    evaluation: {
+      severity: round(policy.severity),
+      confidence: round(policy.confidence),
+      declaredOffsetPx: input.subjectDeclaredOffsetDeviation.value === null ? null : round(input.subjectDeclaredOffsetDeviation.value),
+      estimatedOffsetPx: input.subjectEffectiveOffsetDeviation.value === null ? null : round(input.subjectEffectiveOffsetDeviation.value),
+      contextKind: input.context.kind,
+      contextCertainty: input.context.certainty,
+      posterior: { lower: round(policy.posterior.lower), upper: round(policy.posterior.upper) },
+      evidenceMass: round(policy.evidenceMass),
+      topFactors: policy.topFactors,
+      signalFindings,
+    },
+  }
+}
+
+function buildFindingsFromAtoms(atoms: readonly EvidenceAtom[], input: AlignmentCase, _evidence: ConsistencyEvidence): readonly AlignmentSignalFinding[] {
+  const byKind = new Map<AlignmentFindingKind, AlignmentSignalFinding>()
+  for (let i = 0; i < atoms.length; i++) {
+    const atom = atoms[i]
+    if (!atom) continue
+    const factor = toFindingFactor(atom.factorId, input)
+    if (factor === null) continue
+    const meanContribution = (atom.contribution.min + atom.contribution.max) / 2
+    if (meanContribution <= 0) continue
+    const weight = clamp(Math.abs(meanContribution), 0, 1)
+    const next: AlignmentSignalFinding = { kind: factor.kind, message: factor.message, fix: factor.fix, weight }
+    const existing = byKind.get(factor.kind)
+    if (!existing) { byKind.set(factor.kind, next); continue }
+    if (next.weight > existing.weight) byKind.set(factor.kind, next)
+  }
+  return [...byKind.values()]
+}
+
+function toFindingFactor(factorId: AlignmentFactorId, input: AlignmentCase): { kind: AlignmentFindingKind; message: string; fix: string } | null {
+  switch (factorId) {
+    case "offset-delta": return { kind: "offset-delta", message: "block-axis offset differs from siblings", fix: "normalize margin/padding to match sibling cohort" }
+    case "declared-offset-delta": return { kind: "declared-offset-delta", message: "declared block-axis offset differs from siblings", fix: "remove or unify the offset" }
+    case "baseline-conflict": return { kind: "baseline-conflict", message: "baseline/line-height mismatch between siblings", fix: "unify line-height or add vertical-align" }
+    case "context-conflict": return { kind: "context-conflict", message: "container and child alignment conflict", fix: "check align-items on the parent" }
+    case "replaced-control-risk": return { kind: "replaced-control-risk", message: "replaced element baseline differs from text siblings", fix: "add vertical-align: middle to the replaced element" }
+    case "content-composition-conflict": return { kind: "content-composition-conflict", message: "content composition differs from siblings", fix: formatCompositionFixSuggestion(input.subjectContentComposition) }
+    default: return null
+  }
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000
+}
+
+
+// ── Diagnostics (from diagnostics.ts) ─────────────────────────────────────
+
+const FINDING_WEIGHT_BY_KIND = new Map<string, number>([
+  ["offset-delta", 0], ["declared-offset-delta", 1], ["baseline-conflict", 2],
+  ["context-conflict", 3], ["replaced-control-risk", 4], ["content-composition-conflict", 5],
+])
+
+export function formatAlignmentCauses(findings: readonly AlignmentSignalFinding[]): readonly string[] {
+  const ordered = [...findings].sort((left, right) => {
+    const leftWeight = FINDING_WEIGHT_BY_KIND.get(left.kind) ?? Number.MAX_SAFE_INTEGER
+    const rightWeight = FINDING_WEIGHT_BY_KIND.get(right.kind) ?? Number.MAX_SAFE_INTEGER
+    if (leftWeight !== rightWeight) return leftWeight - rightWeight
+    if (left.weight !== right.weight) return right.weight - left.weight
+    if (left.message < right.message) return -1
+    if (left.message > right.message) return 1
+    return 0
+  })
+  const out: string[] = []
+  for (let i = 0; i < ordered.length; i++) {
+    const finding = ordered[i]
+    if (!finding) continue
+    const message = finding.message.trim()
+    if (message.length === 0) continue
+    out.push(message)
+  }
+  return out
+}
+
+export function formatPrimaryFix(findings: readonly AlignmentSignalFinding[]): string {
+  if (findings.length === 0) return ""
+  let best: AlignmentSignalFinding | null = null
+  for (let i = 0; i < findings.length; i++) {
+    const finding = findings[i]
+    if (!finding) continue
+    if (best === null || finding.weight > best.weight) best = finding
+  }
+  if (best === null) return ""
+  return best.fix
 }

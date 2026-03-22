@@ -1,7 +1,7 @@
 /**
  * Selector-specific query functions
  */
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import type { SelectorEntity, RuleEntity } from "../entities";
 
 export function getSelectorsBySpecificityRange(

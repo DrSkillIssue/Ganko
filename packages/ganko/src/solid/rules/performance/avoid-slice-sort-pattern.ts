@@ -86,7 +86,7 @@ export const avoidSliceSortPattern = defineSolidRule({
         // Both are wasteful when followed by sort/reverse
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "avoid-slice-sort-pattern",

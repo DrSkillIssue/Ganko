@@ -63,7 +63,7 @@ export const preferCharcodeOverRegexTest = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "prefer-charcode-over-regex-test",

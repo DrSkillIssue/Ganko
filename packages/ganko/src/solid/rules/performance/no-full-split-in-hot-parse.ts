@@ -46,7 +46,7 @@ export const noFullSplitInHotParse = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "no-full-split-in-hot-parse",

@@ -10,7 +10,7 @@
  * 2. Custom directives: `<div use:myDirective />`
  */
 
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
 import { getVariablesByName } from "../../queries/get";
@@ -110,7 +110,7 @@ export const jsxUsesVars = defineSolidRule({
           if (firstVar && firstVar.reads.length === 0) {
             emit(
               createDiagnostic(
-                graph.file,
+                graph.filePath,
                 spec.node,
                 graph.sourceFile,
                 "jsx-uses-vars",
@@ -130,7 +130,7 @@ export const jsxUsesVars = defineSolidRule({
             if (firstVar && firstVar.reads.length === 0) {
               emit(
                 createDiagnostic(
-                  graph.file,
+                  graph.filePath,
                   spec.node,
                   graph.sourceFile,
                   "jsx-uses-vars",

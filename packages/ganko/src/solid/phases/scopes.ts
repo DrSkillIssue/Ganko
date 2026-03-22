@@ -15,7 +15,7 @@
  * - Read/write reference classification via checker.getSymbolAtLocation
  */
 import ts from "typescript"
-import type { SolidGraph } from "../impl"
+import type { SolidBuildContext } from "../impl"
 import type { SolidInput } from "../input"
 import type { ScopeEntity } from "../entities/scope"
 import type { VariableEntity } from "../entities/variable"
@@ -27,7 +27,7 @@ import { isInLoop, isInConditional } from "../util/expression"
 /** Map from ts.Symbol to VariableEntity for read/write classification */
 type SymbolVarMap = Map<ts.Symbol, VariableEntity>
 
-export function runScopesPhase(graph: SolidGraph, input: SolidInput): void {
+export function runScopesPhase(graph: SolidBuildContext, input: SolidInput): void {
   const file = graph.fileEntity
   const sourceFile = input.sourceFile
   const checker = input.checker
@@ -72,7 +72,7 @@ function getNearestFunctionScope(scope: ScopeEntity): ScopeEntity {
 function registerVariable(
   variable: VariableEntity,
   scope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
 ): void {
   graph.addVariable(variable)
   scope.variables.push(variable)
@@ -156,7 +156,7 @@ function walkNode(
   node: ts.Node,
   currentScope: ScopeEntity,
   currentFunctionScope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   file: FileEntity,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
@@ -254,7 +254,7 @@ function walkNode(
 function collectVariableDeclaration(
   node: ts.VariableDeclaration,
   targetScope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   file: FileEntity,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
@@ -282,7 +282,7 @@ function collectVariableDeclaration(
 function collectFunctionParameters(
   node: ts.Node,
   scope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   file: FileEntity,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
@@ -317,7 +317,7 @@ function collectFunctionParameters(
 function collectDestructuredBindings(
   pattern: ts.BindingPattern | ts.BindingName,
   scope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   file: FileEntity,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
@@ -354,7 +354,7 @@ function collectDestructuredBindings(
 function collectImportDeclaration(
   node: ts.ImportDeclaration,
   scope: ScopeEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   file: FileEntity,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
@@ -420,7 +420,7 @@ function collectImportDeclaration(
  */
 function classifyReferences(
   sourceFile: ts.SourceFile,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
   programScope: ScopeEntity,
@@ -441,7 +441,7 @@ function classifyReferences(
  */
 function classifyIdentifier(
   id: ts.Identifier,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   checker: ts.TypeChecker,
   symbolVarMap: SymbolVarMap,
   programScope: ScopeEntity,
@@ -693,7 +693,7 @@ function isProperAccess(id: ts.Identifier): boolean {
  */
 function findScopeForNode(
   node: ts.Node,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   fallback: ScopeEntity,
 ): ScopeEntity {
   let current: ts.Node | undefined = node.parent

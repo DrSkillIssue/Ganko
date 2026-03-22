@@ -1,7 +1,7 @@
 /**
  * Predicate-based search: find, some, every, filter, count
  */
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import { queryOps } from "../../util/query-ops";
 
 const ruleOps = queryOps<CSSGraph, CSSGraph["rules"][number]>((g) => g.rules);
