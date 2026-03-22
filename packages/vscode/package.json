@@ -3500,13 +3500,14 @@
   },
   "scripts": {
     "generate": "bun run scripts/generate-package-json.ts",
+    "prebuild": "bun run generate",
     "build": "tsup",
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await Promise.all(['dist', 'node_modules'].map((p) => rm(p, { recursive: true, force: true })));\"",
     "lint": "eslint src",
     "dev": "tsup --watch",
     "package": "bun run generate && vsce package --no-dependencies && code-insiders --install-extension ganko-vscode-$(node -p \"require('./package.json').version\").vsix --force",
     "tsc": "tsc --noEmit",
-    "publish:vsce": "vsce publish --no-dependencies"
+    "publish:vsce": "bun run generate && vsce publish --no-dependencies"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
