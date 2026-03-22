@@ -52,6 +52,18 @@ import { cssNoUnknownAnimationName } from "./css-no-unknown-animation-name"
 import { cssNoUnusedKeyframes } from "./css-no-unused-keyframes"
 import { cssNoUnknownContainerName } from "./css-no-unknown-container-name"
 import { cssNoUnusedContainerName } from "./css-no-unused-container-name"
+import { cssRequireReducedMotionOverride } from "./css-require-reduced-motion-override"
+import { cssNoOutlineNoneWithoutFocusVisible } from "./css-no-outline-none-without-focus-visible"
+import { cssPolicyContrast } from "./css-policy-contrast"
+import { cssPolicyTypography } from "./css-policy-typography"
+import { cssPolicySpacing } from "./css-policy-spacing"
+import { cssNoLayoutPropertyAnimation } from "./css-no-layout-property-animation"
+import { cssLayerRequirementForComponentRules } from "./css-layer-requirement-for-component-rules"
+import { cssNoCustomPropertyCycle } from "./css-no-custom-property-cycle"
+import { cssNoLayerOrderInversion } from "./css-no-layer-order-inversion"
+import { cssNoRedundantOverridePairs } from "./css-no-redundant-override-pairs"
+import { cssMediaQueryOverlapConflict } from "./css-media-query-overlap-conflict"
+import { cssNoDescendingSpecificityConflict } from "./css-no-descending-specificity-conflict"
 
 export const allRules: readonly AnalysisRule[] = [
   cssLayoutTransitionLayoutProperty,
@@ -106,4 +118,16 @@ export const allRules: readonly AnalysisRule[] = [
   cssNoUnusedKeyframes,
   cssNoUnknownContainerName,
   cssNoUnusedContainerName,
+  cssRequireReducedMotionOverride,
+  cssNoOutlineNoneWithoutFocusVisible,
+  cssPolicyContrast,
+  cssPolicyTypography,
+  cssPolicySpacing,
+  cssNoLayoutPropertyAnimation,
+  cssLayerRequirementForComponentRules,
+  cssNoCustomPropertyCycle,
+  cssNoLayerOrderInversion,
+  cssNoRedundantOverridePairs,
+  cssMediaQueryOverlapConflict,
+  cssNoDescendingSpecificityConflict,
 ]
