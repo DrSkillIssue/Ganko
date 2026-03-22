@@ -276,9 +276,16 @@ export async function runLint(args: readonly string[]): Promise<void> {
     // Cross-file analysis via AnalysisDispatcher
     if (options.crossFile) {
       let tailwind = null;
-      try { tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot); } catch { /* no tailwind */ }
+      try {
+        tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot);
+        if (tailwind) log.info("tailwind: resolved");
+        else log.info("tailwind: not found");
+      } catch (err) {
+        log.warning(`tailwind: resolution failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       const layout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
       const externalCustomProperties = scanDependencyCustomProperties(layout);
+      if (externalCustomProperties.size > 0) log.info(`library analysis: ${externalCustomProperties.size} external custom properties`);
 
       const { compilation } = buildFullCompilation({
         solidFiles: fileRegistry.solidFiles,

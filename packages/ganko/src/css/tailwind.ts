@@ -450,9 +450,10 @@ function defaultSyncEvaluator(
   ].join("\n")
 
   try {
-    const result = Bun.spawnSync(["bun", "-e", script], { cwd: params.entryBase })
-    if (result.exitCode !== 0) return null
-    const text = result.stdout.toString()
+    const { spawnSync } = require("node:child_process") as typeof import("node:child_process")
+    const result = spawnSync("bun", ["-e", script], { cwd: params.entryBase, encoding: "utf-8", timeout: 30000 })
+    if (result.status !== 0) return null
+    const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "")
     if (text.length === 0) return null
     const data = JSON.parse(text)
     return { utilities: data.u, variants: data.v }
