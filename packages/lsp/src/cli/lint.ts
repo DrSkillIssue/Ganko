@@ -287,9 +287,10 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
       const crossResult = dispatcher.run(compilation);
       const hasOverrides = Object.keys(eslintResult.overrides).length > 0;
+      const lintSet = hasExplicitTargets ? new Set(filesToLint) : null;
       const crossEmit = hasOverrides
-        ? createOverrideEmit((d: Diagnostic) => allDiagnostics.push(d), eslintResult.overrides)
-        : (d: Diagnostic) => allDiagnostics.push(d);
+        ? createOverrideEmit((d: Diagnostic) => { if (!lintSet || lintSet.has(d.file)) allDiagnostics.push(d); }, eslintResult.overrides)
+        : (d: Diagnostic) => { if (!lintSet || lintSet.has(d.file)) allDiagnostics.push(d); };
 
       for (let i = 0; i < crossResult.diagnostics.length; i++) {
         const d = crossResult.diagnostics[i];
