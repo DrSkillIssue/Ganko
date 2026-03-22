@@ -23,7 +23,8 @@ import {
   type Connection,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { GraphCache } from "@drskillissue/ganko";
+import { createCompilationTracker, createStyleCompilation } from "@drskillissue/ganko";
+import type { CompilationTracker } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import {
   classifyFile,
@@ -38,7 +39,7 @@ import type { Project } from "../core/project";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
 import type { LifecyclePhase } from "./server-state";
 import { readFileSync } from "node:fs";
-import { buildSolidGraphForPath } from "../core/analyze";
+import { buildSolidSyntaxTreeForPath } from "../core/analyze";
 import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
@@ -60,7 +61,7 @@ import { setupFeatureHandlers } from "./routing/feature";
 function createFeatureHandlerContext(
   tsService: TsService,
   project: Project,
-  graphCache: GraphCache,
+  graphCache: CompilationTracker,
   diagCache: ResourceMap<readonly Diagnostic[]>,
   handlerLog: Logger,
 ): FeatureHandlerContext {
@@ -95,12 +96,12 @@ function createFeatureHandlerContext(
       return tsService.getSourceFile(path)?.text ?? null;
     },
 
-    getSolidGraph(path) {
+    getSolidSyntaxTree(path) {
       if (classifyFile(path) !== "solid") return null;
       const sourceFile = tsService.getSourceFile(path);
       if (!sourceFile) return null;
       const version = contentHash(sourceFile.text);
-      return graphCache.getSolidGraph(path, version, buildSolidGraphForPath(project, path, graphCache.logger));
+      return graphCache.getSolidSyntaxTree(path, version, buildSolidSyntaxTreeForPath(project, path, graphCache.logger));
     },
   };
 }
@@ -113,7 +114,7 @@ export interface ServerContext {
   readonly log: LeveledLogger
   readonly serverState: ServerState
   readonly diagCache: ResourceMap<readonly Diagnostic[]>
-  readonly graphCache: GraphCache
+  readonly graphCache: CompilationTracker
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
   readonly identity: ResourceIdentity
@@ -163,7 +164,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   });
 
   const diagCache = new ResourceMap<readonly Diagnostic[]>();
-  const graphCache = new GraphCache(prefixLogger(log, "cache"));
+  const graphCache = createCompilationTracker(createStyleCompilation(), { logger: prefixLogger(log, "cache") });
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 

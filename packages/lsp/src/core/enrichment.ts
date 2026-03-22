@@ -6,7 +6,7 @@
  * can batch-validate arbitrary value classes before rule execution.
  */
 import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import type { TailwindValidator, BatchableTailwindValidator, GraphCache, Diagnostic } from "@drskillissue/ganko";
+import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, Diagnostic } from "@drskillissue/ganko";
 import { acceptProjectRoot, buildWorkspaceLayout, Level } from "@drskillissue/ganko-shared";
 import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createFileRegistry, type FileRegistry } from "./file-registry";
@@ -27,7 +27,7 @@ export interface EnrichmentResult {
 }
 
 export interface EnrichmentDeps {
-  readonly graphCache: GraphCache
+  readonly graphCache: CompilationTracker
   readonly diagCache: ResourceMap<readonly Diagnostic[]>
   readonly log: Logger
 }
@@ -119,7 +119,7 @@ export async function runEnrichment(
  * to the evaluator's candidatesToCss in one request, and preloads the
  * results into the BatchableTailwindValidator's cache.
  *
- * Call this AFTER building SolidGraphs and CSSGraph, BEFORE running cross-file rules.
+ * Call this AFTER building SolidSyntaxTrees and CSSGraph, BEFORE running cross-file rules.
  *
  * @param classNames - Class names to validate
  * @param validator - Batchable validator to preload

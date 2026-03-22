@@ -13,7 +13,7 @@
 declare const self: Worker;
 
 import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
+import { buildSolidSyntaxTree, runSolidRules, createSolidInput, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
@@ -74,7 +74,7 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
     if (!sourceFile) continue;
 
     const input = createSolidInput(key, program);
-    const graph = buildSolidGraph(input);
+    const graph = buildSolidSyntaxTree(input, "");
 
     fileDiags.length = 0;
     runSolidRules(graph, input.sourceFile, emit);

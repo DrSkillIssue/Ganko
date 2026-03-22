@@ -14,9 +14,9 @@
 import { resolve, dirname, sep } from "node:path";
 import { statSync, globSync } from "node:fs";
 import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
+import { buildSolidSyntaxTree, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
 import { evaluateWorkspace, spawnWorkspaceEvaluator } from "../core/workspace-eval";
-import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
+import type { Diagnostic, SolidSyntaxTree } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, ACCESSIBILITY_POLICIES, resolveProjectRoot, acceptProjectRoot, buildWorkspaceLayout, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { createBatchProgram } from "../core/batch-program";
 import { createFileRegistry } from "../core/file-registry";
@@ -550,7 +550,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
   let serialBatch: ReturnType<typeof createBatchProgram> | undefined;
   /* Collected during serial analysis for cross-file reuse — avoids double graph build.
      Empty after parallel path (workers can't share ts.Node references across threads). */
-  const solidGraphsForCrossFile: SolidGraph[] = [];
+  const solidGraphsForCrossFile: SolidSyntaxTree[] = [];
 
   if (useWorkers) {
     /* ── Parallel path: dispatch file chunks to worker threads ── */
@@ -609,30 +609,30 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (options.crossFile) {
       /* Cross-file analysis builds all three graphs (Solid, CSS, Layout) on the
          main thread and calls runCrossFileRules directly — no intermediary Project
-         or GraphCache version negotiation. The CLI owns the full pipeline. */
+         or CompilationTracker version negotiation. The CLI owns the full pipeline. */
       const batch = serialBatch ?? createBatchProgram(projectRoot, allSolidFiles);
       const ownsBatch = serialBatch === undefined;
       const program = batch.program;
 
-      /* 1. Collect SolidGraphs — reuse from serial path or rebuild after parallel path. */
-      let solidGraphs: SolidGraph[];
+      /* 1. Collect SolidSyntaxTrees — reuse from serial path or rebuild after parallel path. */
+      let solidGraphs: SolidSyntaxTree[];
       let solidGraphRebuilt = 0;
       if (solidGraphsForCrossFile.length > 0) {
         solidGraphs = solidGraphsForCrossFile;
       } else {
         solidGraphs = [];
         solidGraphRebuilt = allSolidFiles.length;
-        if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
+        if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: building ${allSolidFiles.length} SolidSyntaxTrees for cross-file analysis`);
         for (let i = 0, len = allSolidFiles.length; i < len; i++) {
           const path = allSolidFiles[i];
           if (!path) continue;
           const key = canonicalPath(path);
           if (program.getSourceFile(key) === undefined) continue;
           const input = createSolidInput(key, program, log);
-          solidGraphs.push(buildSolidGraph(input));
+          solidGraphs.push(buildSolidSyntaxTree(input, ""));
         }
       }
-      if (log.isLevelEnabled(Level.Info)) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidGraphs`);
+      if (log.isLevelEnabled(Level.Info)) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidSyntaxTrees`);
 
       /* 2. Build CSSGraph via FileRegistry — single construction point for CSSInput. */
       const cssInput = registry.buildCSSInput(tailwind, externalCustomProperties, log);
@@ -768,7 +768,7 @@ function partitionFiles(files: readonly string[], count: number): string[][] {
 }
 
 /**
- * Serial single-file analysis. Builds SolidGraph per file, runs rules,
+ * Serial single-file analysis. Builds SolidSyntaxTree per file, runs rules,
  * collects diagnostics, and accumulates graphs for cross-file reuse.
  */
 function runSerialAnalysis(
@@ -776,7 +776,7 @@ function runSerialAnalysis(
   files: readonly string[],
   overrides: RuleOverrides,
   allDiagnostics: Diagnostic[],
-  solidGraphsOut: SolidGraph[],
+  solidGraphsOut: SolidSyntaxTree[],
   log: Logger,
 ): void {
   const hasOverrides = Object.keys(overrides).length > 0;
@@ -797,7 +797,7 @@ function runSerialAnalysis(
 
     if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
     const input = createSolidInput(key, program, log);
-    const graph = buildSolidGraph(input);
+    const graph = buildSolidSyntaxTree(input, "");
     solidGraphsOut.push(graph);
 
     fileDiags.length = 0;

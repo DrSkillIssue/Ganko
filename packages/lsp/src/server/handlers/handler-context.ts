@@ -1,5 +1,5 @@
 import type ts from "typescript";
-import type { Diagnostic, SolidGraph } from "@drskillissue/ganko";
+import type { Diagnostic, SolidSyntaxTree } from "@drskillissue/ganko";
 import type { Logger, LeveledLogger } from "@drskillissue/ganko-shared";
 import type { Connection } from "vscode-languageserver/node";
 import type { ResourceIdentity } from "../resource-identity";
@@ -20,7 +20,7 @@ export interface FeatureHandlerContext {
   getAST(path: string): ts.SourceFile | null
   getDiagnostics(path: string): readonly Diagnostic[]
   getContent(path: string): string | null
-  getSolidGraph(path: string): SolidGraph | null
+  getSolidSyntaxTree(path: string): SolidSyntaxTree | null
 }
 
 export interface DocumentHandlerContext {

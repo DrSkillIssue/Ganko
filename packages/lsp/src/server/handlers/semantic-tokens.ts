@@ -5,7 +5,7 @@
  * TypeScript's built-in semantic tokens (variables, functions, types, etc.)
  * are left to vscode-typescript — this handler only highlights what
  * TypeScript cannot: signals, stores, memos, effects, and other
- * reactive primitives from the SolidGraph.
+ * reactive primitives from the SolidSyntaxTree.
  */
 import type {
   SemanticTokensParams,
@@ -13,7 +13,7 @@ import type {
 } from "vscode-languageserver";
 import type { FeatureHandlerContext } from "./handler-context";
 import type ts from "typescript";
-import type { SolidGraph, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
+import type { SolidSyntaxTree, ReactiveKind, VariableEntity, ReadEntity } from "@drskillissue/ganko";
 import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /**
@@ -83,7 +83,7 @@ interface RawToken {
 /**
  * Handle textDocument/semanticTokens/full request.
  *
- * Builds (or retrieves from cache) a SolidGraph for the file, then
+ * Builds (or retrieves from cache) a SolidSyntaxTree for the file, then
  * emits semantic tokens for reactive variable declarations, reads,
  * and computation call sites.
  */
@@ -94,7 +94,7 @@ export function handleSemanticTokens(
   const { log } = ctx;
   const path = uriToCanonicalPath(params.textDocument.uri);
   if (path === null) return null;
-  const graph = ctx.getSolidGraph(path);
+  const graph = ctx.getSolidSyntaxTree(path);
   if (!graph) return null;
 
   const tokens: RawToken[] = [];
@@ -198,7 +198,7 @@ function emitReads(
  * The callee identifier (e.g. "createEffect") gets the solidEffect token type.
  */
 function emitComputations(
-  graph: SolidGraph,
+  graph: SolidSyntaxTree,
   tokens: RawToken[],
 ): void {
   const computations = graph.computations;

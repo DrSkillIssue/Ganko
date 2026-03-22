@@ -16,7 +16,8 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, readFileSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
+import { SolidPlugin, createCompilationTracker, createStyleCompilation, buildSolidSyntaxTree, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, setActivePolicy } from "@drskillissue/ganko";
+import type { CompilationTracker } from "@drskillissue/ganko";
 import { evaluateWorkspace } from "../core/workspace-eval";
 import type { Diagnostic, TailwindValidator } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, contentHash, createLogger, Level, type ESLintConfigResult } from "@drskillissue/ganko-shared";
@@ -54,7 +55,7 @@ interface DaemonState {
   idleTimer: ReturnType<typeof setTimeout> | null
   log: Logger
   closeLogFile: () => Promise<void>
-  cache: GraphCache | null
+  cache: CompilationTracker | null
   fileIndex: FileRegistry | null
   tailwind: TailwindValidator | null
   externalCustomProperties: ReadonlySet<string> | null
@@ -207,7 +208,7 @@ async function handleLintRequest(
   state.fileIndex = createFileRegistry(daemonLayout, effectiveExclude, log);
   const fileIndex = state.fileIndex;
 
-  /** H2: Evict GraphCache entries for files that no longer exist.
+  /** H2: Evict CompilationTracker entries for files that no longer exist.
    * Prevents phantom diagnostics from deleted files in cross-file rules. */
   if (state.cache !== null && previousSolidFiles !== null) {
     for (const oldPath of previousSolidFiles) {
@@ -256,7 +257,7 @@ async function handleLintRequest(
   }
 
   /** Re-read CSS files from disk and diff against cached content.
-   * Only invalidate the GraphCache CSS generation when content actually
+   * Only invalidate the CompilationTracker CSS generation when content actually
    * changed, so cross-file results remain cached across no-op runs. */
   {
     const allCSSFiles = fileIndex.loadAllCSSContent();
@@ -338,13 +339,13 @@ async function handleLintRequest(
     state.externalCustomProperties = nextExternal;
   }
 
-  /** H2: Persist GraphCache across requests. */
+  /** H2: Persist CompilationTracker across requests. */
   if (state.cache === null) {
-    state.cache = new GraphCache(log);
+    state.cache = createCompilationTracker(createStyleCompilation(), { logger: log });
   }
   const cache = state.cache;
 
-  /** Only rebuild SolidGraphs when the content hash changed —
+  /** Only rebuild SolidSyntaxTrees when the content hash changed —
    * avoids bumping solidGeneration on no-op runs, which would
    * invalidate CSSGraph/LayoutGraph/cross-file caches. */
   const program = project.getProgram();
@@ -359,12 +360,12 @@ async function handleLintRequest(
     }
 
     const version = contentHash(content);
-    const needsRebuild = !cache.hasSolidGraph(key, version);
+    const needsRebuild = !cache.hasSolidSyntaxTree(key, version);
 
     if (needsRebuild) {
       const input = createSolidInput(key, program, log);
-      const graph = buildSolidGraph(input);
-      cache.setSolidGraph(key, version, graph);
+      const graph = buildSolidSyntaxTree(input, "");
+      cache.setSolidSyntaxTree(key, version, graph);
 
       const { results, emit } = createEmit(eslintResult.overrides);
       runSolidRules(graph, input.sourceFile, emit);
@@ -376,10 +377,10 @@ async function handleLintRequest(
     } else {
       // File unchanged — re-run rules on cached graph, no re-parse needed.
       // The cached graph contains all resolved type information from
-      // buildSolidGraph. Rules read entity data, not the TypeChecker.
-      const graph = cache.getCachedSolidGraph(key, version);
+      // buildSolidSyntaxTree. Rules read entity data, not the TypeChecker.
+      const graph = cache.getCachedSolidSyntaxTree(key, version);
       if (graph === null) {
-        log.warning(`getCachedSolidGraph miss after hasSolidGraph hit for ${key} v=${version}`);
+        log.warning(`getCachedSolidSyntaxTree miss after hasSolidSyntaxTree hit for ${key} v=${version}`);
         continue;
       }
       const sourceFile = program.getSourceFile(key);

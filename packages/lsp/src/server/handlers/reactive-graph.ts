@@ -2,12 +2,12 @@
  * Reactive Graph Handler
  *
  * Implements the `solid/showReactiveGraph` custom LSP request.
- * Builds a SolidGraph from the target file, extracts computation
+ * Builds a SolidSyntaxTree from the target file, extracts computation
  * entities and dependency/ownership edges, then serializes them
  * as Mermaid and DOT diagrams for the VS Code webview.
  */
 import type { FeatureHandlerContext } from "./handler-context";
-import type { SolidGraph, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
+import type { SolidSyntaxTree, ComputationEntity, DependencyEdge } from "@drskillissue/ganko";
 import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 /** Node in the reactive graph response. */
@@ -43,7 +43,7 @@ interface ReactiveGraphParams {
 /**
  * Handle the solid/showReactiveGraph request.
  *
- * Builds a SolidGraph for the requested file and serializes
+ * Builds a SolidSyntaxTree for the requested file and serializes
  * the reactive dependency graph to Mermaid/DOT formats.
  */
 export function handleReactiveGraph(
@@ -54,9 +54,9 @@ export function handleReactiveGraph(
   const path = uriToCanonicalPath(params.textDocument.uri);
   if (path === null) return null;
 
-  const graph = ctx.getSolidGraph(path);
+  const graph = ctx.getSolidSyntaxTree(path);
   if (!graph) {
-    if (log.isLevelEnabled(Level.Trace)) log.trace(`reactiveGraph: no SolidGraph for ${path}`);
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`reactiveGraph: no SolidSyntaxTree for ${path}`);
     return null;
   }
 
@@ -84,7 +84,7 @@ export function handleReactiveGraph(
  * - All ComputationEntity values (effects, memos, computed, roots, etc.)
  * - Standalone reactive variables (signals/stores not produced by a computation)
  */
-function buildNodes(graph: SolidGraph): ReactiveGraphNode[] {
+function buildNodes(graph: SolidSyntaxTree): ReactiveGraphNode[] {
   const nodes: ReactiveGraphNode[] = [];
   const coveredVarIds = new Set<number>();
   const sf = graph.sourceFile;
@@ -131,7 +131,7 @@ function buildNodes(graph: SolidGraph): ReactiveGraphNode[] {
 /**
  * Builds response edges from dependency and ownership edges.
  */
-function buildEdges(graph: SolidGraph): ReactiveGraphEdge[] {
+function buildEdges(graph: SolidSyntaxTree): ReactiveGraphEdge[] {
   const edges: ReactiveGraphEdge[] = [];
 
   // Dependency edges: source → consumer
@@ -169,7 +169,7 @@ function buildEdges(graph: SolidGraph): ReactiveGraphEdge[] {
  * If the source variable is produced by a computation (memo/resource),
  * returns that computation's ID. Otherwise returns the variable's ID.
  */
-function sourceNodeId(graph: SolidGraph, dep: DependencyEdge): string {
+function sourceNodeId(graph: SolidSyntaxTree, dep: DependencyEdge): string {
   const source = dep.source;
   const computations = graph.computations;
   for (let i = 0, len = computations.length; i < len; i++) {

@@ -50,6 +50,7 @@ export { createCompilationTracker } from "./compilation/incremental/tracker"
 export type { CompilationTracker } from "./compilation/incremental/tracker"
 export { createAnalysisDispatcher } from "./compilation/dispatch/dispatcher"
 export type { AnalysisDispatcher } from "./compilation/dispatch/dispatcher"
+export { allRules } from "./compilation/dispatch/rules/index"
 
 // Rule manifest (auto-generated)
 export { RULES, RULES_BY_CATEGORY, getRule } from "./generated/rules-manifest"

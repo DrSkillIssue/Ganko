@@ -11,7 +11,7 @@
  * Replaces the scattered fileIndex.add/remove + evictCachesForPath
  * calls in routing/lifecycle.ts with a single coherent pipeline.
  */
-import type { GraphCache } from "@drskillissue/ganko";
+import type { CompilationTracker } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
@@ -51,7 +51,7 @@ export interface ChangePipeline {
 export interface ChangePipelineDeps {
   readonly registry: FileRegistry
   readonly layout: WorkspaceLayout
-  readonly graphCache: GraphCache
+  readonly graphCache: CompilationTracker
   readonly diagCache: ResourceMap<readonly Diagnostic[]>
   readonly tailwindState: TailwindState
   readonly log: Logger

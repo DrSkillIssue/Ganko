@@ -14,7 +14,7 @@
 import {
   type Diagnostic as LSPDiagnostic,
 } from "vscode-languageserver/node";
-import { createSolidInput, buildSolidGraph, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
+import { createSolidInput, buildSolidSyntaxTree, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { RuleOverrides } from "@drskillissue/ganko-shared";
@@ -73,7 +73,7 @@ export function publishTier1Diagnostics(
   if (!sourceFile) return;
 
   const input = createSolidInput(path, program, context.log);
-  const graph = buildSolidGraph(input);
+  const graph = buildSolidSyntaxTree(input, "");
 
   const diagnostics: Diagnostic[] = [];
   const rawEmit = (d: Diagnostic) => diagnostics.push(d);

@@ -9,7 +9,6 @@
 import type { Diagnostic } from "../../diagnostic"
 import type { StyleCompilation } from "../core/compilation"
 import type { SymbolTable } from "../symbols/symbol-table"
-import type { DependencyGraph } from "../incremental/dependency-graph"
 import type { FileSemanticModel } from "../binding/semantic-model"
 import type { AnalysisRule, Emit } from "./rule"
 import { ComputationTier } from "./rule"
@@ -23,7 +22,7 @@ export interface AnalysisResult {
 
 export interface AnalysisDispatcher {
   register(rule: AnalysisRule): void
-  run(compilation: StyleCompilation, symbolTable: SymbolTable, dependencyGraph: DependencyGraph, createSemanticModel: (solidFilePath: string) => FileSemanticModel): AnalysisResult
+  run(compilation: StyleCompilation): AnalysisResult
 }
 
 export function createAnalysisDispatcher(): AnalysisDispatcher {
@@ -34,7 +33,9 @@ export function createAnalysisDispatcher(): AnalysisDispatcher {
       rules.push(rule)
     },
 
-    run(compilation, symbolTable, _dependencyGraph, createSemanticModel): AnalysisResult {
+    run(compilation): AnalysisResult {
+      const symbolTable = compilation.symbolTable
+      const createSemanticModel = (solidFilePath: string) => compilation.getSemanticModel(solidFilePath)
       const { registry, actions } = createActionRegistry()
 
       for (let i = 0; i < rules.length; i++) {
