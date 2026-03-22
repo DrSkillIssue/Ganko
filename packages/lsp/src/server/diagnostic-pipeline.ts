@@ -62,47 +62,45 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
 
   if (token.isCancelled) return;
 
-  // Publish single-file immediately (user sees results before cross-file)
+  // All phases publish in a single batch so the client receives ONE
+  // combined notification with ganko + cross-file + TypeScript diagnostics.
   context.diagManager.beginBatch();
   try {
+    // Phase 1 result
     context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors), singleFile);
-  } finally {
-    context.diagManager.endBatch();
-  }
-
-  if (token.isCancelled) return;
-
-  // ── Phase 2: Cross-file ganko diagnostics via IncrementalAnalyzer ──
-  const phase = context.phase;
-  let crossFile: readonly Diagnostic[] = [];
-  if (includeCrossFile && phase.tag === "enriched") {
-    const analyzer = createIncrementalAnalyzer();
-    const compilation = context.graphCache.currentCompilation;
-    const crossByFile = analyzer.analyzeAffected([key], compilation, context.serverState.config.ruleOverrides);
-    crossFile = crossByFile.get(key) ?? [];
 
     if (token.isCancelled) return;
 
-    if (crossFile.length > 0) {
-      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
-    }
-  } else if (phase.tag === "enriched") {
-    // Use cached cross-file if available but not re-running
-    crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
-    if (crossFile.length > 0) {
-      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
-    }
-  }
+    // ── Phase 2: Cross-file ganko diagnostics via IncrementalAnalyzer ──
+    const phase = context.phase;
+    if (includeCrossFile && phase.tag === "enriched") {
+      const analyzer = createIncrementalAnalyzer();
+      const compilation = context.graphCache.currentCompilation;
+      const crossByFile = analyzer.analyzeAffected([key], compilation, context.serverState.config.ruleOverrides);
+      const crossFile = crossByFile.get(key) ?? [];
 
-  if (token.isCancelled) return;
-
-  // ── Phase 3: TypeScript diagnostics (sync per-file portion) ──
-  if (context.serverState.config.enableTsDiagnostics && (phase.tag === "running" || phase.tag === "enriched") && kind === "solid") {
-    if (resolvedContent !== undefined) {
-      const ls = project.getLanguageService();
-      const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
-      context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
+      if (!token.isCancelled && crossFile.length > 0) {
+        context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
+      }
+    } else if (phase.tag === "enriched") {
+      const crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
+      if (crossFile.length > 0) {
+        context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
+      }
     }
+
+    if (token.isCancelled) return;
+
+    // ── Phase 3: TypeScript diagnostics (sync per-file portion) ──
+    if (context.serverState.config.enableTsDiagnostics && (phase.tag === "running" || phase.tag === "enriched") && kind === "solid") {
+      if (resolvedContent !== undefined) {
+        const ls = project.getLanguageService();
+        const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
+        context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
+      }
+    }
+  } finally {
+    context.diagManager.endBatch();
   }
 
   if (log.isLevelEnabled(Level.Debug)) {

@@ -21,7 +21,14 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
   const fileVersions = new Map<string, number>();
 
   const servicesHost: ts.LanguageServiceHost = {
-    getScriptFileNames: () => parsedConfig.fileNames,
+    getScriptFileNames: () => {
+      const base = parsedConfig.fileNames;
+      const extra: string[] = [];
+      for (const key of fileContents.keys()) {
+        if (!base.includes(key)) extra.push(key);
+      }
+      return extra.length > 0 ? [...base, ...extra] : base;
+    },
     getScriptVersion: (fileName) => String(fileVersions.get(fileName) ?? 0),
     getScriptSnapshot: (fileName) => {
       const content = fileContents.get(fileName);
