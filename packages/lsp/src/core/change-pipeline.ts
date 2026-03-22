@@ -69,7 +69,7 @@ export function createChangePipeline(deps: ChangePipelineDeps): ChangePipeline {
   function evictCaches(path: string): void {
     const key = canonicalPath(path);
     diagCache.delete(key);
-    graphCache.invalidate(key);
+    graphCache.setCachedCrossFileResults([]);
   }
 
   return {
@@ -104,7 +104,7 @@ export function createChangePipeline(deps: ChangePipelineDeps): ChangePipeline {
         tailwindState.reResolve(registry, layout, log).catch(() => {});
       }
 
-      graphCache.invalidateAll();
+      graphCache.setCachedCrossFileResults([]);
 
       if (log.isLevelEnabled(Level.Debug)) log.debug(`changePipeline: processed ${processed.length} file changes`);
 
@@ -112,7 +112,7 @@ export function createChangePipeline(deps: ChangePipelineDeps): ChangePipeline {
     },
 
     processRegistryRebuild(_newRegistry: FileRegistry): void {
-      graphCache.invalidateAll();
+      graphCache.setCachedCrossFileResults([]);
       diagCache.clear();
       if (log.isLevelEnabled(Level.Info)) log.info("changePipeline: registry rebuilt, all caches invalidated");
     },

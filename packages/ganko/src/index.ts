@@ -34,7 +34,7 @@ export type { CSSBuildContext } from "./css/build-context"
 export type { CSSWorkspaceView } from "./css/workspace-view"
 export type { CSSInput } from "./css"
 export type { TailwindValidator } from "./css"
-export { prepareTailwindEval, buildTailwindValidatorFromEval } from "./css"
+export { prepareTailwindEval, buildTailwindValidatorFromEval, resolveTailwindValidatorSync } from "./css"
 export type { TailwindEvalParams, BatchableTailwindValidator } from "./css"
 export { scanDependencyCustomProperties } from "./css/library-analysis"
 

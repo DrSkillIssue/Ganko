@@ -2,70 +2,54 @@
  * CLI Lint Command
  *
  * Headless lint runner that analyzes Solid.js projects from the command line.
- * Reuses the same analysis pipeline as the LSP server: createProject,
- * createFileIndex, and the shared analyze module.
- *
- * Usage:
- *   ganko lint                     # Lint entire project
- *   ganko lint src/App.tsx         # Lint specific files
- *   ganko lint --format json       # JSON output for CI
- *   ganko lint --no-cross-file     # Skip cross-file analysis
+ * Uses buildSolidSyntaxTree for single-file and AnalysisDispatcher for cross-file.
  */
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
-import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import type { Diagnostic } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import {
+  SolidPlugin,
+  buildSolidSyntaxTree,
+  buildCSSResult,
+  runSolidRules,
+  createSolidInput,
+  createOverrideEmit,
+  createStyleCompilation,
+  createAnalysisDispatcher,
+  allRules,
+  scanDependencyCustomProperties,
+  resolveTailwindValidatorSync,
+} from "@drskillissue/ganko";
+import type { Diagnostic, CSSInput } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile, contentHash, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
 import { createProject } from "../core/project";
-import { createFileIndex } from "../core/file-index";
+import { createFileRegistry } from "../core/file-registry";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
-import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
+import { createEmit } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
-import { createLogger, parseLogLevel, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
+import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
 import { ensureDaemon, requestLint } from "./daemon-client";
 import type { LintRequestParams } from "./daemon-protocol";
-import { createWorkerPool, defaultWorkerCount } from "./worker-pool";
 
 function die(message: string): never {
   process.stderr.write(message + "\n");
   process.exit(2);
 }
 
-/** Parsed CLI arguments for the lint command. */
 interface LintOptions {
-  /** File paths or glob patterns to lint (empty = entire project) */
   readonly files: readonly string[]
-  /** Glob patterns to exclude from linting (matched relative to project root) */
   readonly exclude: readonly string[]
-  /** Output format */
   readonly format: "text" | "json"
-  /** Whether to run cross-file analysis */
   readonly crossFile: boolean
-  /** Explicit ESLint config path */
   readonly eslintConfig: string | undefined
-  /** Whether to skip reading ESLint config */
   readonly noEslintConfig: boolean
-  /** Whether to treat warnings as errors */
   readonly maxWarnings: number
-  /** Project root directory */
   readonly cwd: string
-  /** Log level for stderr output */
   readonly logLevel: LogLevel
-  /** Path to log file (writes to both stderr and file when set) */
   readonly logFile: string | undefined
-  /** Skip the daemon and run analysis in-process */
   readonly noDaemon: boolean
-  /** Maximum number of parallel workers (0 = auto, 1 = serial) */
-  readonly maxWorkers: number
 }
 
-/**
- * Parse lint command arguments.
- *
- * @param args - CLI arguments after "lint"
- * @returns Parsed options
- */
 function parseLintArgs(args: readonly string[]): LintOptions {
   const files: string[] = [];
   const exclude: string[] = [];
@@ -77,7 +61,6 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let logLevel: LogLevel = "off";
   let logFile: string | undefined;
   let noDaemon = false;
-  let maxWorkers = 0;
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -86,123 +69,52 @@ function parseLintArgs(args: readonly string[]): LintOptions {
 
     if (arg === "--format" || arg === "-f") {
       const next = args[i + 1];
-      if (next === "json") {
-        format = "json";
-      } else if (next === "text") {
-        format = "text";
-      } else {
-        die(`Unknown format: ${next ?? "(missing)"}. Use "text" or "json".`);
-      }
-      i++;
-      continue;
+      if (next === "json") format = "json";
+      else if (next === "text") format = "text";
+      else die(`Unknown format: ${next ?? "(missing)"}. Use "text" or "json".`);
+      i++; continue;
     }
-
-    if (arg === "--no-cross-file") {
-      crossFile = false;
-      continue;
-    }
-
+    if (arg === "--no-cross-file") { crossFile = false; continue; }
     if (arg === "--eslint-config") {
       eslintConfig = args[i + 1];
-      if (eslintConfig === undefined) {
-        die("--eslint-config requires a path argument.");
-      }
-      i++;
-      continue;
+      if (eslintConfig === undefined) die("--eslint-config requires a path argument.");
+      i++; continue;
     }
-
-    if (arg === "--no-eslint-config") {
-      noEslintConfig = true;
-      continue;
-    }
-
-    if (arg === "--verbose" || arg === "-v") {
-      logLevel = "debug";
-      continue;
-    }
-
+    if (arg === "--no-eslint-config") { noEslintConfig = true; continue; }
+    if (arg === "--verbose" || arg === "-v") { logLevel = "debug"; continue; }
     if (arg === "--log-level") {
       const next = args[i + 1];
-      if (next === undefined) {
-        die("--log-level requires one of: trace, debug, info, warning, error, critical, off. Got: (missing)");
-      }
+      if (next === undefined) die("--log-level requires one of: trace, debug, info, warning, error, critical, off. Got: (missing)");
       const parsed = parseLogLevel(next, "off");
-      if (parsed === "off" && next !== "off") {
-        die(`--log-level requires one of: trace, debug, info, warning, error, critical, off. Got: ${next}`);
-      }
-      logLevel = parsed;
-      i++;
-      continue;
+      if (parsed === "off" && next !== "off") die(`--log-level requires one of: trace, debug, info, warning, error, critical, off. Got: ${next}`);
+      logLevel = parsed; i++; continue;
     }
-
     if (arg === "--log-file") {
       const next = args[i + 1];
-      if (next === undefined || next.startsWith("-")) {
-        die("--log-file requires a file path argument.");
-      }
-      logFile = resolve(cwd, next);
-      i++;
-      continue;
+      if (next === undefined || next.startsWith("-")) die("--log-file requires a file path argument.");
+      logFile = resolve(cwd, next); i++; continue;
     }
-
     if (arg === "--max-warnings") {
       const next = args[i + 1];
       const parsed = Number(next);
-      if (Number.isNaN(parsed) || parsed < 0) {
-        die(`--max-warnings requires a non-negative integer. Got: ${next ?? "(missing)"}`);
-      }
-      maxWarnings = parsed;
-      i++;
-      continue;
+      if (Number.isNaN(parsed) || parsed < 0) die(`--max-warnings requires a non-negative integer. Got: ${next ?? "(missing)"}`);
+      maxWarnings = parsed; i++; continue;
     }
-
-    if (arg === "--no-daemon") {
-      noDaemon = true;
-      continue;
-    }
-
-    if (arg === "--max-workers") {
-      const next = args[i + 1];
-      const parsed = Number(next);
-      if (!Number.isInteger(parsed) || parsed < 1) {
-        die(`--max-workers requires a positive integer. Got: ${next ?? "(missing)"}`);
-      }
-      maxWorkers = parsed;
-      i++;
-      continue;
-    }
-
+    if (arg === "--no-daemon") { noDaemon = true; continue; }
     if (arg === "--exclude") {
       const next = args[i + 1];
-      if (next === undefined || next.startsWith("-")) {
-        die("--exclude requires a glob pattern argument.");
-      }
-      exclude.push(next);
-      i++;
-      continue;
+      if (next === undefined || next.startsWith("-")) die("--exclude requires a glob pattern argument.");
+      exclude.push(next); i++; continue;
     }
-
-    if (!arg) continue;
-    if (arg.startsWith("-")) {
-      die(`Unknown option: ${arg}`);
-    }
-
+    if (arg.startsWith("-")) die(`Unknown option: ${arg}`);
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, maxWorkers };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon };
 }
 
-/** Glob metacharacters — presence means the arg is a pattern, not a literal path. */
 const GLOB_CHARS = /[*?{]/;
 
-/**
- * Add a single file path to the result set if ganko recognizes its extension.
- *
- * @param absolute - Resolved absolute path
- * @param seen - Dedup set
- * @param result - Output array
- */
 function addFileIfLintable(absolute: string, seen: Set<string>, result: string[]): void {
   const key = canonicalPath(absolute);
   if (seen.has(key)) return;
@@ -211,90 +123,40 @@ function addFileIfLintable(absolute: string, seen: Set<string>, result: string[]
   result.push(key);
 }
 
-/**
- * Resolve file arguments to canonical paths.
- *
- * Handles three kinds of arguments:
- * - Glob patterns (e.g. `src/` with wildcards) — expanded via `globSync`
- * - Directories (`src/components`) — recursively scanned via `createFileIndex`
- * - Plain file paths (`src/App.tsx`) — resolved directly
- *
- * All results are filtered to file kinds ganko understands and deduped.
- *
- * @param patterns - User-supplied file paths, directories, or globs
- * @param cwd - Working directory
- * @param exclude - Glob patterns to exclude (passed to createFileIndex for directory targets)
- * @returns Resolved canonical paths
- */
 function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonly string[] = []): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
-
-  for (let i = 0, len = patterns.length; i < len; i++) {
+  for (let i = 0; i < patterns.length; i++) {
     const pattern = patterns[i];
     if (!pattern) continue;
-
     if (GLOB_CHARS.test(pattern)) {
       const matches = globSync(pattern, { cwd, exclude });
-      for (let j = 0, mLen = matches.length; j < mLen; j++) {
-        const m = matches[j];
-        if (!m) continue;
-        addFileIfLintable(resolve(cwd, m), seen, result);
-      }
+      for (let j = 0; j < matches.length; j++) { const m = matches[j]; if (m) addFileIfLintable(resolve(cwd, m), seen, result) }
       continue;
     }
-
     const absolute = resolve(cwd, pattern);
-
     let isDir = false;
-    try {
-      isDir = statSync(absolute).isDirectory();
-    } catch {
-      /* path doesn't exist — addFileIfLintable will filter it via classifyFile */
-    }
-
+    try { isDir = statSync(absolute).isDirectory() } catch { /* doesn't exist */ }
     if (isDir) {
-      const index = createFileIndex(absolute, exclude);
-      const files = index.allFiles();
-      for (let j = 0, fLen = files.length; j < fLen; j++) {
-        const f = files[j];
-        if (!f) continue;
-        addFileIfLintable(f, seen, result);
-      }
+      const registry = createFileRegistry(buildWorkspaceLayout(acceptProjectRoot(absolute)), exclude);
+      for (const f of registry.solidFiles) addFileIfLintable(f, seen, result);
+      for (const f of registry.cssFiles) addFileIfLintable(f, seen, result);
     } else {
       addFileIfLintable(absolute, seen, result);
     }
   }
-
   return result;
 }
 
-/** Markers that identify a project root (nearest-first, like TypeScript). */
 const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
 
-/**
- * Find the project root by walking up from a starting directory.
- *
- * Stops at the **nearest** `tsconfig.json` or `package.json` — the same
- * strategy TypeScript and oxlint use. In a monorepo this finds the
- * sub-package root, not the workspace/lockfile root. The CLI lint scope
- * should match the package being linted, not the entire monorepo.
- *
- * Falls back to the starting directory if no marker is found.
- *
- * @param from - Directory to start searching from
- * @returns Project root directory
- */
 function findProjectRoot(from: string): string {
   let dir = from;
   for (;;) {
-    for (let i = 0, len = PROJECT_MARKERS.length; i < len; i++) {
+    for (let i = 0; i < PROJECT_MARKERS.length; i++) {
       const marker = PROJECT_MARKERS[i];
       if (!marker) continue;
-      try {
-        statSync(resolve(dir, marker));
-        return dir;
-      } catch { /* not found */ }
+      try { statSync(resolve(dir, marker)); return dir } catch { /* not found */ }
     }
     const parent = dirname(dir);
     if (parent === dir) return from;
@@ -302,20 +164,13 @@ function findProjectRoot(from: string): string {
   }
 }
 
-/**
- * Determine the common ancestor directory of a set of file paths.
- *
- * @param files - Resolved absolute file paths
- * @returns Lowest common ancestor directory
- */
 function commonAncestor(files: readonly string[]): string {
   if (files.length === 0) return process.cwd();
   const first = files[0];
   if (!first) return process.cwd();
   if (files.length === 1) return dirname(first);
-
   let common = dirname(first);
-  for (let i = 1, len = files.length; i < len; i++) {
+  for (let i = 1; i < files.length; i++) {
     const f = files[i];
     if (!f) continue;
     const dir = dirname(f);
@@ -328,146 +183,57 @@ function commonAncestor(files: readonly string[]): string {
   return common;
 }
 
-/**
- * Attempt to lint via the daemon. Returns diagnostics on success, null if
- * the daemon is unavailable or the request fails.
- */
 async function tryDaemonLint(
-  options: LintOptions,
-  projectRoot: string,
-  filesToLint: readonly string[],
-  log: Logger,
+  options: LintOptions, projectRoot: string, filesToLint: readonly string[], _log: Logger,
 ): Promise<readonly Diagnostic[] | null> {
   const socket = await ensureDaemon(projectRoot).catch(() => null);
   if (socket === null) return null;
-
   try {
-    const base = {
-      projectRoot,
-      files: filesToLint,
-      exclude: options.exclude,
-      crossFile: options.crossFile,
-      noEslintConfig: options.noEslintConfig,
-      logLevel: options.logLevel,
-    };
-    const params: LintRequestParams = options.eslintConfig !== undefined
-      ? { ...base, eslintConfigPath: options.eslintConfig }
-      : base;
-
+    const base = { projectRoot, files: filesToLint, exclude: options.exclude, crossFile: options.crossFile, noEslintConfig: options.noEslintConfig, logLevel: options.logLevel };
+    const params: LintRequestParams = options.eslintConfig !== undefined ? { ...base, eslintConfigPath: options.eslintConfig } : base;
     const response = await requestLint(socket, params);
-    if (response.kind === "lint-response") {
-      if (log.enabled) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
-      return response.diagnostics;
-    }
-    if (response.kind === "error-response") {
-      if (log.enabled) log.warning(`daemon error: ${response.message}`);
-      return null;
-    }
+    if (response.kind === "lint-response") return response.diagnostics;
     return null;
-  } catch (err: unknown) {
-    if (log.enabled) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  } finally {
-    socket.destroy();
-  }
+  } catch { return null } finally { socket.destroy() }
 }
 
-/**
- * Format diagnostics, print output, and exit with appropriate code.
- * Shared by both daemon and in-process paths.
- */
-function outputAndExit(
-  allDiagnostics: readonly Diagnostic[],
-  options: LintOptions,
-): never {
-  if (options.format === "json") {
-    console.log(formatJSON(allDiagnostics));
-  } else if (allDiagnostics.length > 0) {
-    console.log(formatText(allDiagnostics, options.cwd));
-  }
-
-  const counts = countDiagnostics(allDiagnostics);
-  let exitCode = 0;
-  if (counts.errors > 0) {
-    exitCode = 1;
-  } else if (options.maxWarnings >= 0 && counts.warnings > options.maxWarnings) {
-    if (options.format !== "json") {
-      process.stderr.write(`\nganko: too many warnings (${counts.warnings}). Max allowed: ${options.maxWarnings}.\n`);
-    }
-    exitCode = 1;
-  }
-  process.exit(exitCode);
-}
-
-/**
- * Run the lint command.
- *
- * The project root is the nearest directory containing `tsconfig.json` or
- * `package.json`, following the same nearest-first strategy as TypeScript
- * and oxlint. In a monorepo this scopes to the sub-package, not the
- * workspace root. File discovery, TypeScript project service, ESLint
- * config, and cross-file analysis all operate within this boundary.
- *
- * @param args - CLI arguments after "lint"
- */
 export async function runLint(args: readonly string[]): Promise<void> {
   const options = parseLintArgs(args);
   const cwd = options.cwd;
 
   const fileHandle = options.logFile !== undefined && options.logLevel !== "off"
-    ? createFileWriter(options.logFile)
-    : undefined;
+    ? createFileWriter(options.logFile) : undefined;
 
   let log: Logger;
-  if (options.logLevel === "off") {
-    log = noopLogger;
-  } else if (fileHandle !== undefined) {
-    log = createLogger(createCompositeWriter(createStderrWriter(), fileHandle.writer), options.logLevel);
-  } else {
-    log = createLogger(createStderrWriter(), options.logLevel);
-  }
-
-  if (log.enabled) log.info(`cwd: ${cwd}`);
-  if (log.enabled) log.info(`args: ${JSON.stringify(options)}`);
+  if (options.logLevel === "off") log = noopLogger;
+  else if (fileHandle !== undefined) log = createLogger(createCompositeWriter(createStderrWriter(), fileHandle.writer), options.logLevel);
+  else log = createLogger(createStderrWriter(), options.logLevel);
 
   const hasExplicitTargets = options.files.length > 0;
-
   let projectRoot: string;
   let resolvedTargets: readonly string[] | undefined;
 
   if (hasExplicitTargets) {
     resolvedTargets = resolveFiles(options.files, cwd, options.exclude);
-    if (log.enabled) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
     const ancestor = commonAncestor(resolvedTargets);
     projectRoot = findProjectRoot(ancestor);
-    if (log.enabled) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
   } else {
     projectRoot = findProjectRoot(cwd);
-    if (log.enabled) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
   }
-
-  if (log.enabled) log.info(`project root: ${projectRoot}`);
 
   const eslintResult = options.noEslintConfig
     ? EMPTY_ESLINT_RESULT
     : await loadESLintConfig(projectRoot, options.eslintConfig, log).catch(() => EMPTY_ESLINT_RESULT);
 
-  if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores`);
-
   const effectiveExclude = eslintResult.globalIgnores.length > 0
-    ? [...options.exclude, ...eslintResult.globalIgnores]
-    : options.exclude;
+    ? [...options.exclude, ...eslintResult.globalIgnores] : options.exclude;
 
   if (hasExplicitTargets && eslintResult.globalIgnores.length > 0) {
     resolvedTargets = resolveFiles(options.files, cwd, effectiveExclude);
   }
 
-  const fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
-  if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
-
-  const filesToLint = resolvedTargets ?? fileIndex.allFiles();
-
-  if (log.enabled) log.info(`resolved ${filesToLint.length} files to lint`);
+  const fileRegistry = createFileRegistry(buildWorkspaceLayout(acceptProjectRoot(projectRoot), log), effectiveExclude, log);
+  const filesToLint = resolvedTargets ?? [...fileRegistry.solidFiles, ...fileRegistry.cssFiles];
 
   if (!options.noDaemon) {
     const daemonResult = await tryDaemonLint(options, projectRoot, filesToLint, log);
@@ -475,200 +241,102 @@ export async function runLint(args: readonly string[]): Promise<void> {
       if (fileHandle !== undefined) await fileHandle.close();
       outputAndExit(daemonResult, options);
     }
-    if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
-  if (log.enabled) log.trace(`lint: creating project with SolidPlugin only (root=${projectRoot})`);
-  const project = createProject({
-    rootPath: projectRoot,
-    plugins: [SolidPlugin],
-    rules: eslintResult.overrides,
-    log,
-  });
-
+  const project = createProject({ rootPath: projectRoot, plugins: [SolidPlugin], rules: eslintResult.overrides, log });
   let exitCode = 0;
-  try {
 
+  try {
     if (filesToLint.length === 0) {
-      if (options.format === "json") {
-        console.log("[]");
-      } else {
-        console.log("No files to lint.");
-      }
+      if (options.format === "json") console.log("[]");
+      else console.log("No files to lint.");
       return process.exit(0);
     }
 
     const allDiagnostics: Diagnostic[] = [];
-
-    /* FIX #3: Read CSS files once, build a content map for cross-file reuse. */
-    const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    const cssContentMap = new Map<string, string>();
-    for (let i = 0, len = allCSSFiles.length; i < len; i++) {
-      const cssFile = allCSSFiles[i];
-      if (!cssFile) continue;
-      cssContentMap.set(cssFile.path, cssFile.content);
-    }
-
-    if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
-
-    const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
-    if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
-
-    const tLib = performance.now();
-    const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
-    if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
-
-    /* FIX #1: Build SolidGraph once per file, run single-file rules, then cache
-       the graph for cross-file reuse — eliminates double parse + double graph build. */
-    const cache = new GraphCache(log);
+    const program = project.getProgram();
     const t0 = performance.now();
 
-    for (let i = 0, len = filesToLint.length; i < len; i++) {
+    // Single-file analysis
+    for (let i = 0; i < filesToLint.length; i++) {
       const path = filesToLint[i];
       if (!path) continue;
       if (classifyFile(path) === "css") continue;
-      let content: string;
-      try {
-        content = readFileSync(path, "utf-8");
-      } catch {
-        if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
-        continue;
-      }
 
-      const key = canonicalPath(path);
-      if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key} (${content.length} chars)`);
-      project.updateFile(key, content);
-      const program = project.getLanguageService(key)?.getProgram() ?? null;
-      if (log.enabled) log.trace(`lint: ${key} program=${program !== null ? "yes" : "NO"}`);
-      const input = parseWithOptionalProgram(key, content, program, log);
-      const graph = buildSolidGraph(input);
+      const sourceFile = program.getSourceFile(canonicalPath(path));
+      if (!sourceFile) continue;
 
-      const version = project.getScriptVersion(key) ?? "0";
-      cache.setSolidGraph(key, version, graph);
+      const input = createSolidInput(canonicalPath(path), program, log);
+      const tree = buildSolidSyntaxTree(input, contentHash(sourceFile.text));
 
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(graph, input.sourceCode, emit);
-      if (log.enabled) log.trace(`lint: ${key} → ${results.length} single-file diags`);
-      for (let j = 0, dLen = results.length; j < dLen; j++) {
-        const result = results[j];
-        if (!result) continue;
-        allDiagnostics.push(result);
-      }
+      runSolidRules(tree, input.sourceFile, emit);
+      for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d) }
     }
 
     const t1 = performance.now();
-    if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
+    log.info(`single-file: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
 
+    // Cross-file analysis via AnalysisDispatcher
     if (options.crossFile) {
-      /* FIX #3 (cont.): Serve CSS content from the pre-read map instead of re-reading from disk. */
-      const readContent = (path: string): string | null => {
-        const cached = cssContentMap.get(path);
-        if (cached !== undefined) return cached;
-        try {
-          return readFileSync(path, "utf-8");
-        } catch {
-          return null;
-        }
-      };
+      let compilation = createStyleCompilation();
 
-      /* 1. Collect SolidGraphs — reuse from serial path or rebuild after parallel path. */
-      let solidGraphs: SolidGraph[];
-      if (solidGraphsForCrossFile.length > 0) {
-        solidGraphs = solidGraphsForCrossFile;
-      } else {
-        solidGraphs = [];
-        if (log.enabled) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
-        for (let i = 0, len = allSolidFiles.length; i < len; i++) {
-          const path = allSolidFiles[i];
-          if (!path) continue;
-          const key = canonicalPath(path);
-          if (program.getSourceFile(key) === undefined) continue;
-          const input = createSolidInput(key, program, log);
-          solidGraphs.push(buildSolidGraph(input));
-        }
+      // Add solid trees
+      for (const solidPath of fileRegistry.solidFiles) {
+        const sourceFile = program.getSourceFile(solidPath);
+        if (!sourceFile) continue;
+        const input = createSolidInput(solidPath, program, log);
+        const tree = buildSolidSyntaxTree(input, contentHash(sourceFile.text));
+        compilation = compilation.withSolidTree(tree);
       }
 
-      /* 2. Build CSSGraph from pre-read CSS content map. */
+      // Add CSS trees
       const cssFiles: { path: string; content: string }[] = [];
-      for (const cssPath of fileIndex.cssFiles) {
-        const content = cssContentMap.get(cssPath);
-        if (content !== undefined) {
-          cssFiles.push({ path: cssPath, content });
-        } else {
-          try {
-            cssFiles.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") });
-          } catch { /* skip unreadable */ }
-        }
-      }
-      const cssInput: CSSInput = buildCSSInputForLint(cssFiles, log, tailwind, externalCustomProperties);
-      const cssGraph = buildCSSGraph(cssInput);
-
-      /* 3. Build LayoutGraph from Solid + CSS graphs. */
-      const layoutGraph = buildLayoutGraph(solidGraphs, cssGraph, log);
-
-      /* 4. Run cross-file rules with override-aware emit. */
-      const crossDiagnostics: Diagnostic[] = [];
-      const crossRawEmit = (d: Diagnostic) => crossDiagnostics.push(d);
-      const crossHasOverrides = Object.keys(eslintResult.overrides).length > 0;
-      const crossEmit = crossHasOverrides ? createOverrideEmit(crossRawEmit, eslintResult.overrides) : crossRawEmit;
-      runCrossFileRules(
-        { solids: solidGraphs, css: cssGraph, layout: layoutGraph, logger: log },
-        crossEmit,
-        log,
-      );
-
-      /* 5. Collect cross-file diagnostics — filter to explicit targets if specified. */
-      if (hasExplicitTargets) {
-        const lintSet = new Set(filesToLint);
-        let crossCount = 0;
-        for (let i = 0, len = crossDiagnostics.length; i < len; i++) {
-          const d = crossDiagnostics[i];
-          if (!d) continue;
-          if (lintSet.has(d.file)) {
-            allDiagnostics.push(d);
-            crossCount++;
-          }
-        }
-        if (log.enabled) {
-          const t2 = performance.now();
-          log.info(`cross-file analysis: ${crossCount} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
-        }
-      } else {
-        for (let i = 0, len = crossDiagnostics.length; i < len; i++) {
-          const cd = crossDiagnostics[i];
-          if (!cd) continue;
-          allDiagnostics.push(cd);
-        }
-        if (log.enabled) {
-          const t2 = performance.now();
-          log.info(`cross-file analysis: ${crossDiagnostics.length} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
-        }
+      for (const cssPath of fileRegistry.cssFiles) {
+        try { cssFiles.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") }) } catch { /* skip */ }
       }
 
-      if (ownsBatch) batch.dispose();
+      if (cssFiles.length > 0) {
+        let tailwind = null;
+        try { tailwind = resolveTailwindValidatorSync(cssFiles, projectRoot) } catch { /* no tailwind */ }
+        const layout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
+        const externalCustomProperties = scanDependencyCustomProperties(layout);
+        const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
+        if (tailwind !== null) cssInput.tailwind = tailwind;
+        if (externalCustomProperties.size > 0) cssInput.externalCustomProperties = externalCustomProperties;
+        const { trees } = buildCSSResult(cssInput);
+        compilation = compilation.withCSSTrees(trees);
+      }
+
+      const dispatcher = createAnalysisDispatcher();
+      for (let i = 0; i < allRules.length; i++) dispatcher.register(allRules[i]!);
+
+      const crossResult = dispatcher.run(compilation);
+      const hasOverrides = Object.keys(eslintResult.overrides).length > 0;
+      const crossEmit = hasOverrides
+        ? createOverrideEmit((d: Diagnostic) => allDiagnostics.push(d), eslintResult.overrides)
+        : (d: Diagnostic) => allDiagnostics.push(d);
+
+      for (let i = 0; i < crossResult.diagnostics.length; i++) {
+        const d = crossResult.diagnostics[i];
+        if (d) crossEmit(d);
+      }
+
+      const t2 = performance.now();
+      log.info(`cross-file: ${crossResult.diagnostics.length} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
     }
 
-    /* Sort diagnostics for deterministic output regardless of parallel execution order. */
     allDiagnostics.sort(compareDiagnostics);
 
-    if (options.format === "json") {
-      console.log(formatJSON(allDiagnostics));
-    } else if (allDiagnostics.length > 0) {
-      console.log(formatText(allDiagnostics, cwd));
-    }
+    if (options.format === "json") console.log(formatJSON(allDiagnostics));
+    else if (allDiagnostics.length > 0) console.log(formatText(allDiagnostics, cwd));
 
     const counts = countDiagnostics(allDiagnostics);
-    if (log.enabled) log.info(`total: ${allDiagnostics.length} diagnostics (${counts.errors} errors, ${counts.warnings} warnings) in ${(performance.now() - t0).toFixed(0)}ms`);
-
-    if (counts.errors > 0) {
-      exitCode = 1;
-    } else if (options.maxWarnings >= 0 && counts.warnings > options.maxWarnings) {
-      if (options.format !== "json") {
-        process.stderr.write(`\nganko: too many warnings (${counts.warnings}). Max allowed: ${options.maxWarnings}.\n`);
-      }
+    if (counts.errors > 0) exitCode = 1;
+    else if (options.maxWarnings >= 0 && counts.warnings > options.maxWarnings) {
+      if (options.format !== "json") process.stderr.write(`\nganko: too many warnings (${counts.warnings}). Max allowed: ${options.maxWarnings}.\n`);
       exitCode = 1;
     }
-
   } finally {
     project.dispose();
     if (fileHandle !== undefined) await fileHandle.close();
@@ -677,85 +345,19 @@ export async function runLint(args: readonly string[]): Promise<void> {
   process.exit(exitCode);
 }
 
-/* ── Helpers ── */
-
-/**
- * Round-robin partition files into N chunks.
- * File analysis cost is dominated by graph building (~5-13ms per file),
- * which is roughly constant — round-robin gives even distribution.
- */
-function partitionFiles(files: readonly string[], count: number): string[][] {
-  const chunks: string[][] = Array.from({ length: count }, () => []);
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    if (!f) continue;
-    const chunk = chunks[i % count];
-    if (!chunk) continue;
-    chunk.push(f);
+function outputAndExit(diagnostics: readonly Diagnostic[], options: LintOptions): never {
+  if (options.format === "json") console.log(formatJSON(diagnostics));
+  else if (diagnostics.length > 0) console.log(formatText(diagnostics, options.cwd));
+  const counts = countDiagnostics(diagnostics);
+  let exitCode = 0;
+  if (counts.errors > 0) exitCode = 1;
+  else if (options.maxWarnings >= 0 && counts.warnings > options.maxWarnings) {
+    if (options.format !== "json") process.stderr.write(`\nganko: too many warnings (${counts.warnings}). Max allowed: ${options.maxWarnings}.\n`);
+    exitCode = 1;
   }
-  return chunks.filter((c) => c.length > 0);
+  process.exit(exitCode);
 }
 
-/**
- * Serial single-file analysis. Builds SolidGraph per file, runs rules,
- * collects diagnostics, and accumulates graphs for cross-file reuse.
- */
-function runSerialAnalysis(
-  program: ts.Program,
-  files: readonly string[],
-  overrides: RuleOverrides,
-  allDiagnostics: Diagnostic[],
-  solidGraphsOut: SolidGraph[],
-  log: Logger,
-): void {
-  const hasOverrides = Object.keys(overrides).length > 0;
-
-  for (let i = 0, len = files.length; i < len; i++) {
-    const path = files[i];
-    if (!path) continue;
-    const key = canonicalPath(path);
-
-    const sourceFile = program.getSourceFile(key);
-    if (!sourceFile) {
-      if (log.enabled) log.trace(`lint: skipping ${key} (not in program)`);
-      continue;
-    }
-
-    if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
-    const input = createSolidInput(key, program, log);
-    const graph = buildSolidGraph(input);
-    solidGraphsOut.push(graph);
-
-    const fileDiags: Diagnostic[] = [];
-    const rawEmit = (d: Diagnostic) => fileDiags.push(d);
-    const emit = hasOverrides ? createOverrideEmit(rawEmit, overrides) : rawEmit;
-    runSolidRules(graph, input.sourceFile, emit);
-    if (log.enabled) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
-    for (let j = 0, dLen = fileDiags.length; j < dLen; j++) {
-      const d = fileDiags[j];
-      if (!d) continue;
-      allDiagnostics.push(d);
-    }
-  }
-}
-
-/**
- * Build a CSSInput for the lint pipeline from pre-read CSS files.
- * Includes tailwind validator and external custom properties when available.
- */
-function buildCSSInputForLint(
-  cssFiles: readonly { path: string; content: string }[],
-  log: Logger,
-  tailwind: import("@drskillissue/ganko").TailwindValidator | null,
-  externalCustomProperties: ReadonlySet<string>,
-): CSSInput {
-  const input: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
-  if (tailwind !== null) input.tailwind = tailwind;
-  if (externalCustomProperties.size > 0) input.externalCustomProperties = externalCustomProperties;
-  return input;
-}
-
-/** Sort diagnostics by file, line, column, rule for deterministic output. */
 function compareDiagnostics(a: Diagnostic, b: Diagnostic): number {
   if (a.file < b.file) return -1;
   if (a.file > b.file) return 1;

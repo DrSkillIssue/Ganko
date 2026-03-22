@@ -31,7 +31,7 @@ export function evictCachesForPath(
   const key = canonicalPath(path);
   diagCache.delete(key);
   diagManager.evict(key);
-  graphCache.invalidate(key);
+  graphCache.setCachedCrossFileResults([]);
 }
 
 export interface FileChangeEvent {
@@ -77,7 +77,7 @@ export class ChangeProcessor {
    * Clears all caches and re-diagnoses every open file.
    */
   processWorkspaceChange(clearTsCache = false): void {
-    this.graphCache.invalidateAll();
+    this.graphCache.setCachedCrossFileResults([]);
     const paths = this.documents.openPaths();
     if (this.log.isLevelEnabled(Level.Debug)) {
       this.log.debug(`changeProcessor: workspace change, re-diagnosing ${paths.length} open files`);

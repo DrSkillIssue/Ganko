@@ -247,7 +247,8 @@ export async function handleInitialized(
      enrichment window. Even though fileIndex is set atomically after tailwind
      resolves, belt-and-suspenders: force the re-diagnosis loop to rebuild
      cross-file results with the fully-enriched context. */
-  context.graphCache.invalidateAll();
+  // Force cross-file re-analysis by clearing cached results
+  context.graphCache.setCachedCrossFileResults([]);
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 
