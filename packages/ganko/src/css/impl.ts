@@ -107,7 +107,6 @@ export function buildCSSResult(input: CSSInput): CSSBuildResult {
   const effectiveInput = injectExternalPropertiesFile(input)
   const ctx = createCSSBuildContext(effectiveInput)
   runPhases(ctx, effectiveInput)
-  ctx.buildDerivedIndexes()
   return {
     trees: freezeToSyntaxTrees(ctx),
     workspace: freezeToWorkspaceView(ctx),
@@ -234,7 +233,6 @@ function buildTree(file: FileEntity, fileIndex: number, ctx: CSSBuildContext): C
 // ── Freeze to CSSWorkspaceView ────────────────────────────────────────────
 
 function freezeToWorkspaceView(ctx: CSSBuildContext): CSSWorkspaceView {
-  ctx.buildUnusedIndexes()
   return {
     options: ctx.options, interner: ctx.interner, logger: ctx.logger, tailwind: ctx.tailwind,
     hasScssFiles: ctx.hasScssFiles,
