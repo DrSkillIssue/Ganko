@@ -1,19 +1,15 @@
 /**
  * Worker Pool — Thread-based parallelism for CLI lint
  *
- * Dispatches file chunks to Bun Workers, each running its own ts.Program.
+ * Dispatches file chunks to worker_threads, each running its own ts.Program.
  * Workers are long-lived within a single CLI invocation. No shared mutable state.
- *
- * Uses Bun's native Worker API (web-style) instead of node:worker_threads
- * because Bun-compiled binaries have broken worker_threads Worker support.
- * The native Worker API is Bun's primary worker mechanism and works in
- * compiled executables when the worker file is alongside the binary.
  */
+import { Worker } from "node:worker_threads";
 import { availableParallelism } from "node:os";
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import type { Diagnostic } from "@drskillissue/ganko";
-import type { RuleOverrides, AccessibilityPolicy } from "@drskillissue/ganko-shared";
+import type { RuleOverrides } from "@drskillissue/ganko-shared";
 
 export interface WorkerResult {
   readonly file: string
@@ -25,7 +21,6 @@ export interface WorkerTask {
   readonly files: readonly string[]
   readonly rootPath: string
   readonly overrides: RuleOverrides
-  readonly accessibilityPolicy: AccessibilityPolicy | null
 }
 
 interface PendingJob {
@@ -34,19 +29,7 @@ interface PendingJob {
   reject(err: Error): void
 }
 
-/**
- * Resolve the worker script path.
- *
- * In a Bun-compiled binary, `__dirname` points to the embedded virtual FS,
- * not the real filesystem. The worker script lives alongside the binary
- * on disk. We try `__dirname` first (works in dev/test), then fall back
- * to `dirname(process.execPath)` which is the real binary location.
- */
-const WORKER_SCRIPT = (() => {
-  const fromDirname = resolve(__dirname, "lint-worker.js");
-  if (existsSync(fromDirname)) return fromDirname;
-  return resolve(dirname(process.execPath), "lint-worker.js");
-})();
+const WORKER_SCRIPT = resolve(__dirname, "lint-worker.js");
 
 export function defaultWorkerCount(): number {
   return Math.min(4, Math.max(1, availableParallelism() - 1));
@@ -85,27 +68,26 @@ export function createWorkerPool(count: number): WorkerPool {
   }
 
   function runJob(worker: Worker, job: PendingJob): void {
-    const onMessage = (event: MessageEvent) => {
-      worker.removeEventListener("error", onError);
+    const onMessage = (results: readonly WorkerResult[]) => {
+      worker.removeListener("error", onError);
       idle.push(worker);
-      const results: readonly WorkerResult[] = JSON.parse(event.data);
       job.resolve(results);
       tryDispatch();
     };
 
-    const onError = (event: ErrorEvent) => {
-      worker.removeEventListener("message", onMessage);
-      worker.terminate();
+    const onError = (err: Error) => {
+      worker.removeListener("message", onMessage);
+      worker.terminate().catch(() => {});
       const idx = workers.indexOf(worker);
       const replacement = new Worker(WORKER_SCRIPT);
       workers[idx] = replacement;
       idle.push(replacement);
-      job.reject(new Error(event.message));
+      job.reject(err);
       tryDispatch();
     };
 
-    worker.addEventListener("message", onMessage, { once: true });
-    worker.addEventListener("error", onError, { once: true });
+    worker.once("message", onMessage);
+    worker.once("error", onError);
     worker.postMessage(job.task);
   }
 
@@ -121,10 +103,7 @@ export function createWorkerPool(count: number): WorkerPool {
     },
 
     async terminate() {
-      for (let i = 0; i < workers.length; i++) {
-        const w = workers[i];
-        if (w) w.terminate();
-      }
+      await Promise.all(workers.map((w) => w.terminate()));
       workers.length = 0;
       idle.length = 0;
       queue.length = 0;

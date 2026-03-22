@@ -12,18 +12,28 @@
  *   ganko lint --no-cross-file     # Skip cross-file analysis
  */
 import { resolve, dirname, sep } from "node:path";
-import { statSync, globSync } from "node:fs";
-import ts from "typescript";
-import { buildSolidSyntaxTree, runSolidRules, createSolidInput, prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit, setActivePolicy } from "@drskillissue/ganko";
-import { evaluateWorkspace, spawnWorkspaceEvaluator } from "../core/workspace-eval";
-import type { Diagnostic, SolidSyntaxTree } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, ACCESSIBILITY_POLICIES, resolveProjectRoot, acceptProjectRoot, buildWorkspaceLayout, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
-import { createBatchProgram } from "../core/batch-program";
-import { createFileRegistry } from "../core/file-registry";
+import { readFileSync, statSync, globSync } from "node:fs";
+<<<<<<< HEAD
+import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { createProject } from "../core/project";
+import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
+import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
+=======
+import ts from "typescript";
+import { buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit } from "@drskillissue/ganko";
+import type { Diagnostic, SolidGraph, CSSInput } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { createBatchProgram } from "../core/batch-program";
+import { createFileIndex } from "../core/file-index";
+import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
+import { readCSSFilesFromDisk } from "../core/analyze";
+>>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
-import { createLogger, parseLogLevel, Level, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
+import { createLogger, parseLogLevel, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
 import { ensureDaemon, requestLint } from "./daemon-client";
 import type { LintRequestParams } from "./daemon-protocol";
 import { createWorkerPool, defaultWorkerCount } from "./worker-pool";
@@ -59,14 +69,7 @@ interface LintOptions {
   readonly noDaemon: boolean
   /** Maximum number of parallel workers (0 = auto, 1 = serial) */
   readonly maxWorkers: number
-  /** Accessibility policy to enforce (undefined = no policy, rule is silent) */
-  readonly accessibilityPolicy: AccessibilityPolicy | undefined
-  readonly excludeRules: readonly string[]
 }
-
-const ACCESSIBILITY_POLICY_MAP = new Map<string, AccessibilityPolicy>(
-  ACCESSIBILITY_POLICIES.map((p): [string, AccessibilityPolicy] => [p, p]),
-);
 
 /**
  * Parse lint command arguments.
@@ -86,8 +89,6 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let logFile: string | undefined;
   let noDaemon = false;
   let maxWorkers = 0;
-  let accessibilityPolicy: AccessibilityPolicy | undefined;
-  const excludeRules: string[] = [];
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -192,30 +193,6 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       continue;
     }
 
-    if (arg === "--accessibility-policy") {
-      const next = args[i + 1];
-      if (next === undefined) {
-        die(`--accessibility-policy requires a policy name. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
-      }
-      const found = ACCESSIBILITY_POLICY_MAP.get(next);
-      if (found === undefined) {
-        die(`Unknown accessibility policy: ${next}. Valid values: ${ACCESSIBILITY_POLICIES.join(", ")}.`);
-      }
-      accessibilityPolicy = found;
-      i++;
-      continue;
-    }
-
-    if (arg === "--exclude-rule") {
-      const next = args[i + 1];
-      if (next === undefined || next.startsWith("-")) {
-        die("--exclude-rule requires a rule name argument.");
-      }
-      excludeRules.push(next);
-      i++;
-      continue;
-    }
-
     if (!arg) continue;
     if (arg.startsWith("-")) {
       die(`Unknown option: ${arg}`);
@@ -224,7 +201,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, maxWorkers, accessibilityPolicy, excludeRules };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, maxWorkers };
 }
 
 /** Glob metacharacters — presence means the arg is a pattern, not a literal path. */
@@ -288,10 +265,8 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
     }
 
     if (isDir) {
-      const dirRoot = acceptProjectRoot(absolute);
-      const dirLayout = buildWorkspaceLayout(dirRoot);
-      const dirRegistry = createFileRegistry(dirLayout, exclude);
-      const files = dirRegistry.allFiles();
+      const index = createFileIndex(absolute, exclude);
+      const files = index.allFiles();
       for (let j = 0, fLen = files.length; j < fLen; j++) {
         const f = files[j];
         if (!f) continue;
@@ -305,6 +280,38 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
   return result;
 }
 
+/** Markers that identify a project root (nearest-first, like TypeScript). */
+const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
+
+/**
+ * Find the project root by walking up from a starting directory.
+ *
+ * Stops at the **nearest** `tsconfig.json` or `package.json` — the same
+ * strategy TypeScript and oxlint use. In a monorepo this finds the
+ * sub-package root, not the workspace/lockfile root. The CLI lint scope
+ * should match the package being linted, not the entire monorepo.
+ *
+ * Falls back to the starting directory if no marker is found.
+ *
+ * @param from - Directory to start searching from
+ * @returns Project root directory
+ */
+function findProjectRoot(from: string): string {
+  let dir = from;
+  for (;;) {
+    for (let i = 0, len = PROJECT_MARKERS.length; i < len; i++) {
+      const marker = PROJECT_MARKERS[i];
+      if (!marker) continue;
+      try {
+        statSync(resolve(dir, marker));
+        return dir;
+      } catch { /* not found */ }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return from;
+    dir = parent;
+  }
+}
 
 /**
  * Determine the common ancestor directory of a set of file paths.
@@ -354,23 +361,22 @@ async function tryDaemonLint(
       noEslintConfig: options.noEslintConfig,
       logLevel: options.logLevel,
     };
-    const extra: { eslintConfigPath?: string; accessibilityPolicy?: AccessibilityPolicy } = {};
-    if (options.eslintConfig !== undefined) extra.eslintConfigPath = options.eslintConfig;
-    if (options.accessibilityPolicy !== undefined) extra.accessibilityPolicy = options.accessibilityPolicy;
-    const params: LintRequestParams = { ...base, ...extra };
+    const params: LintRequestParams = options.eslintConfig !== undefined
+      ? { ...base, eslintConfigPath: options.eslintConfig }
+      : base;
 
     const response = await requestLint(socket, params);
     if (response.kind === "lint-response") {
-      if (log.isLevelEnabled(Level.Info)) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
+      if (log.enabled) log.info(`daemon returned ${response.diagnostics.length} diagnostics`);
       return response.diagnostics;
     }
     if (response.kind === "error-response") {
-      if (log.isLevelEnabled(Level.Warning)) log.warning(`daemon error: ${response.message}`);
+      if (log.enabled) log.warning(`daemon error: ${response.message}`);
       return null;
     }
     return null;
   } catch (err: unknown) {
-    if (log.isLevelEnabled(Level.Warning)) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (log.enabled) log.warning(`daemon request failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   } finally {
     socket.destroy();
@@ -432,8 +438,8 @@ export async function runLint(args: readonly string[]): Promise<void> {
     log = createLogger(createStderrWriter(), options.logLevel);
   }
 
-  if (log.isLevelEnabled(Level.Info)) log.info(`cwd: ${cwd}`);
-  if (log.isLevelEnabled(Level.Info)) log.info(`args: ${JSON.stringify(options)}`);
+  if (log.enabled) log.info(`cwd: ${cwd}`);
+  if (log.enabled) log.info(`args: ${JSON.stringify(options)}`);
 
   const hasExplicitTargets = options.files.length > 0;
 
@@ -442,26 +448,22 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   if (hasExplicitTargets) {
     resolvedTargets = resolveFiles(options.files, cwd, options.exclude);
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
+    if (log.enabled) log.debug(`resolveFiles: ${options.files.length} patterns → ${resolvedTargets.length} files`);
     const ancestor = commonAncestor(resolvedTargets);
-    projectRoot = resolveProjectRoot(ancestor).path;
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
+    projectRoot = findProjectRoot(ancestor);
+    if (log.enabled) log.debug(`findProjectRoot: ancestor=${ancestor} → root=${projectRoot}`);
   } else {
-    projectRoot = resolveProjectRoot(cwd).path;
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
+    projectRoot = findProjectRoot(cwd);
+    if (log.enabled) log.debug(`findProjectRoot: cwd=${cwd} → root=${projectRoot}`);
   }
 
-  if (log.isLevelEnabled(Level.Info)) log.info(`project root: ${projectRoot}`);
+  if (log.enabled) log.info(`project root: ${projectRoot}`);
 
   const eslintResult = options.noEslintConfig
     ? EMPTY_ESLINT_RESULT
     : await loadESLintConfig(projectRoot, options.eslintConfig, log).catch(() => EMPTY_ESLINT_RESULT);
 
-  if (options.accessibilityPolicy !== undefined) {
-    setActivePolicy(options.accessibilityPolicy);
-  }
-  const ruleOverrides = buildRuleOverrides(eslintResult.overrides, options.excludeRules);
-  if (log.isLevelEnabled(Level.Info)) log.info(`overrides: ${Object.keys(ruleOverrides).length} rules (${options.excludeRules.length} excluded), ${eslintResult.globalIgnores.length} global ignores, policy: ${options.accessibilityPolicy ?? "none"}`);
+  if (log.enabled) log.info(`eslint overrides: ${Object.keys(eslintResult.overrides).length} rules, ${eslintResult.globalIgnores.length} global ignores`);
 
   const effectiveExclude = eslintResult.globalIgnores.length > 0
     ? [...options.exclude, ...eslintResult.globalIgnores]
@@ -471,14 +473,12 @@ export async function runLint(args: readonly string[]): Promise<void> {
     resolvedTargets = resolveFiles(options.files, cwd, effectiveExclude);
   }
 
-  const root = acceptProjectRoot(projectRoot);
-  const layout = buildWorkspaceLayout(root, log);
-  const registry = createFileRegistry(layout, effectiveExclude, log);
-  if (log.isLevelEnabled(Level.Info)) log.info(`file registry: ${registry.solidFiles.size} solid, ${registry.cssFiles.size} css`);
+  const fileIndex = createFileIndex(projectRoot, effectiveExclude, log);
+  if (log.enabled) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
 
-  const filesToLint = resolvedTargets ?? registry.allFiles();
+  const filesToLint = resolvedTargets ?? fileIndex.allFiles();
 
-  if (log.isLevelEnabled(Level.Info)) log.info(`resolved ${filesToLint.length} files to lint`);
+  if (log.enabled) log.info(`resolved ${filesToLint.length} files to lint`);
 
   if (!options.noDaemon) {
     const daemonResult = await tryDaemonLint(options, projectRoot, filesToLint, log);
@@ -486,9 +486,103 @@ export async function runLint(args: readonly string[]): Promise<void> {
       if (fileHandle !== undefined) await fileHandle.close();
       outputAndExit(daemonResult, options);
     }
-    if (log.isLevelEnabled(Level.Info)) log.info("daemon unavailable, falling back to in-process analysis");
+    if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
+<<<<<<< HEAD
+  if (log.enabled) log.trace(`lint: creating project with SolidPlugin only (root=${projectRoot})`);
+  const project = createProject({
+    rootPath: projectRoot,
+    plugins: [SolidPlugin],
+    rules: eslintResult.overrides,
+    log,
+  });
+
+  let exitCode = 0;
+  try {
+
+    if (filesToLint.length === 0) {
+      if (options.format === "json") {
+        console.log("[]");
+      } else {
+        console.log("No files to lint.");
+      }
+      return process.exit(0);
+    }
+
+    const allDiagnostics: Diagnostic[] = [];
+
+    /* FIX #3: Read CSS files once, build a content map for cross-file reuse. */
+    const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
+    const cssContentMap = new Map<string, string>();
+    for (let i = 0, len = allCSSFiles.length; i < len; i++) {
+      const cssFile = allCSSFiles[i];
+      if (!cssFile) continue;
+      cssContentMap.set(cssFile.path, cssFile.content);
+    }
+
+    if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
+
+    const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
+    if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
+
+    const tLib = performance.now();
+    const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
+    if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
+
+    /* FIX #1: Build SolidGraph once per file, run single-file rules, then cache
+       the graph for cross-file reuse — eliminates double parse + double graph build. */
+    const cache = new GraphCache(log);
+    const t0 = performance.now();
+
+    for (let i = 0, len = filesToLint.length; i < len; i++) {
+      const path = filesToLint[i];
+      if (!path) continue;
+      if (classifyFile(path) === "css") continue;
+      let content: string;
+      try {
+        content = readFileSync(path, "utf-8");
+      } catch {
+        if (log.enabled) log.trace(`lint: skipping unreadable file ${path}`);
+        continue;
+      }
+
+      const key = canonicalPath(path);
+      if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${filesToLint.length}: ${key} (${content.length} chars)`);
+      project.updateFile(key, content);
+      const program = project.getLanguageService(key)?.getProgram() ?? null;
+      if (log.enabled) log.trace(`lint: ${key} program=${program !== null ? "yes" : "NO"}`);
+      const input = parseWithOptionalProgram(key, content, program, log);
+      const graph = buildSolidGraph(input);
+
+      const version = project.getScriptVersion(key) ?? "0";
+      cache.setSolidGraph(key, version, graph);
+
+      const { results, emit } = createEmit(eslintResult.overrides);
+      runSolidRules(graph, input.sourceCode, emit);
+      if (log.enabled) log.trace(`lint: ${key} → ${results.length} single-file diags`);
+      for (let j = 0, dLen = results.length; j < dLen; j++) {
+        const result = results[j];
+        if (!result) continue;
+        allDiagnostics.push(result);
+      }
+    }
+
+    const t1 = performance.now();
+    if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
+
+    if (options.crossFile) {
+      /* FIX #3 (cont.): Serve CSS content from the pre-read map instead of re-reading from disk. */
+      const readContent = (path: string): string | null => {
+        const cached = cssContentMap.get(path);
+        if (cached !== undefined) return cached;
+        try {
+          return readFileSync(path, "utf-8");
+        } catch {
+          return null;
+        }
+      };
+=======
   if (filesToLint.length === 0) {
     if (options.format === "json") {
       console.log("[]");
@@ -501,29 +595,23 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   const allDiagnostics: Diagnostic[] = [];
 
-  /* Load CSS files into the registry cache for Tailwind detection and cross-file reuse. */
-  const allCSSFiles = registry.loadAllCSSContent();
-  if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: loaded ${allCSSFiles.length} CSS files into registry`);
-
-  const wsPackagePaths = Array.from(layout.packagePaths);
-  const twParams = prepareTailwindEval(allCSSFiles, projectRoot, wsPackagePaths, log);
-  let tailwind = null;
-  if (twParams !== null) {
-    const twResponse = await evaluateWorkspace(projectRoot, {
-      type: "tailwind-init",
-      tailwindModulePath: twParams.modulePath,
-      tailwindEntryCss: twParams.entryCss,
-      tailwindEntryBase: twParams.entryBase,
-    }, log).catch(() => null);
-    if (twResponse !== null && twResponse.tailwind !== undefined) {
-      tailwind = buildTailwindValidatorFromEval(twResponse.tailwind.utilities, twResponse.tailwind.variants, log);
-    }
+  /* Read CSS files once, build a content map for cross-file reuse. */
+  const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
+  const cssContentMap = new Map<string, string>();
+  for (let i = 0, len = allCSSFiles.length; i < len; i++) {
+    const cssFile = allCSSFiles[i];
+    if (!cssFile) continue;
+    cssContentMap.set(cssFile.path, cssFile.content);
   }
-  if (log.isLevelEnabled(Level.Info)) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
+
+  if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
+
+  const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
+  if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
 
   const tLib = performance.now();
-  const externalCustomProperties = scanDependencyCustomProperties(layout);
-  if (log.isLevelEnabled(Level.Info)) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
+  const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
+  if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
 
   const tsconfigPath = ts.findConfigFile(projectRoot, ts.sys.fileExists, "tsconfig.json");
   if (!tsconfigPath) die(`No tsconfig.json found in ${projectRoot}`);
@@ -538,7 +626,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
   /* All solid files in the project — used as rootNames for ts.createProgram
      when tsconfig doesn't include them (e.g. monorepo with `files: []`). */
-  const allSolidFiles = Array.from(registry.solidFiles);
+  const allSolidFiles = Array.from(fileIndex.solidFiles);
 
   const WORKER_THRESHOLD = 20;
   const workerCount = options.maxWorkers > 0
@@ -550,12 +638,12 @@ export async function runLint(args: readonly string[]): Promise<void> {
   let serialBatch: ReturnType<typeof createBatchProgram> | undefined;
   /* Collected during serial analysis for cross-file reuse — avoids double graph build.
      Empty after parallel path (workers can't share ts.Node references across threads). */
-  const solidGraphsForCrossFile: SolidSyntaxTree[] = [];
+  const solidGraphsForCrossFile: SolidGraph[] = [];
 
   if (useWorkers) {
     /* ── Parallel path: dispatch file chunks to worker threads ── */
     const chunks = partitionFiles(solidFilesToLint, workerCount);
-    if (log.isLevelEnabled(Level.Info)) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
+    if (log.enabled) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
 
     const pool = createWorkerPool(chunks.length);
     try {
@@ -563,8 +651,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
         tsconfigPath,
         files,
         rootPath: projectRoot,
-        overrides: ruleOverrides,
-        accessibilityPolicy: options.accessibilityPolicy ?? null,
+        overrides: eslintResult.overrides,
       }));
 
       /* Start building main-thread program concurrently while workers run.
@@ -587,93 +674,74 @@ export async function runLint(args: readonly string[]): Promise<void> {
         }
       }
     } catch (err: unknown) {
-      if (log.isLevelEnabled(Level.Warning)) log.warning(`worker error: ${err instanceof Error ? err.message : String(err)}, falling back to serial`);
+      if (log.enabled) log.warning(`worker error: ${err instanceof Error ? err.message : String(err)}, falling back to serial`);
       allDiagnostics.length = 0;
       serialBatch ??= createBatchProgram(projectRoot, allSolidFiles);
-      runSerialAnalysis(serialBatch.program, solidFilesToLint, ruleOverrides, allDiagnostics, solidGraphsForCrossFile, log);
+      runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
     } finally {
       await pool.terminate();
     }
   } else {
     /* ── Serial path: few files, no worker overhead ── */
-    if (log.isLevelEnabled(Level.Info)) log.info(`serial analysis: ${solidFilesToLint.length} files`);
+    if (log.enabled) log.info(`serial analysis: ${solidFilesToLint.length} files`);
     serialBatch = createBatchProgram(projectRoot, allSolidFiles);
-    runSerialAnalysis(serialBatch.program, solidFilesToLint, ruleOverrides, allDiagnostics, solidGraphsForCrossFile, log);
+    runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
   }
 
   const t1 = performance.now();
-  if (log.isLevelEnabled(Level.Info)) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
+  if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
 
   let exitCode = 0;
   try {
     if (options.crossFile) {
       /* Cross-file analysis builds all three graphs (Solid, CSS, Layout) on the
          main thread and calls runCrossFileRules directly — no intermediary Project
-         or CompilationTracker version negotiation. The CLI owns the full pipeline. */
+         or GraphCache version negotiation. The CLI owns the full pipeline. */
       const batch = serialBatch ?? createBatchProgram(projectRoot, allSolidFiles);
       const ownsBatch = serialBatch === undefined;
       const program = batch.program;
+>>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
 
-      /* 1. Collect SolidSyntaxTrees — reuse from serial path or rebuild after parallel path. */
-      let solidGraphs: SolidSyntaxTree[];
-      let solidGraphRebuilt = 0;
+      /* 1. Collect SolidGraphs — reuse from serial path or rebuild after parallel path. */
+      let solidGraphs: SolidGraph[];
       if (solidGraphsForCrossFile.length > 0) {
         solidGraphs = solidGraphsForCrossFile;
       } else {
         solidGraphs = [];
-        solidGraphRebuilt = allSolidFiles.length;
-        if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: building ${allSolidFiles.length} SolidSyntaxTrees for cross-file analysis`);
+        if (log.enabled) log.trace(`lint: building ${allSolidFiles.length} SolidGraphs for cross-file analysis`);
         for (let i = 0, len = allSolidFiles.length; i < len; i++) {
           const path = allSolidFiles[i];
           if (!path) continue;
           const key = canonicalPath(path);
           if (program.getSourceFile(key) === undefined) continue;
           const input = createSolidInput(key, program, log);
-          solidGraphs.push(buildSolidSyntaxTree(input, ""));
+          solidGraphs.push(buildSolidGraph(input));
         }
       }
-      if (log.isLevelEnabled(Level.Info)) log.info(`crossFile: rebuilt ${solidGraphRebuilt}/${solidGraphs.length} SolidSyntaxTrees`);
 
-      /* 2. Build CSSGraph via FileRegistry — single construction point for CSSInput. */
-      const cssInput = registry.buildCSSInput(tailwind, externalCustomProperties, log);
+      /* 2. Build CSSGraph from pre-read CSS content map. */
+      const cssFiles: { path: string; content: string }[] = [];
+      for (const cssPath of fileIndex.cssFiles) {
+        const content = cssContentMap.get(cssPath);
+        if (content !== undefined) {
+          cssFiles.push({ path: cssPath, content });
+        } else {
+          try {
+            cssFiles.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") });
+          } catch { /* skip unreadable */ }
+        }
+      }
+      const cssInput: CSSInput = buildCSSInputForLint(cssFiles, log, tailwind, externalCustomProperties);
       const cssGraph = buildCSSGraph(cssInput);
 
-      /* 3. Batch-validate Tailwind arbitrary classes before rules run. */
-      if (tailwind !== null && "preloadBatch" in tailwind && twParams !== null) {
-        const allClassTokens = new Set<string>();
-        for (let i = 0; i < solidGraphs.length; i++) {
-          const sg = solidGraphs[i];
-          if (!sg) continue;
-          for (const [, idx] of sg.staticClassTokensByElementId) {
-            for (let j = 0; j < idx.tokens.length; j++) {
-              const t = idx.tokens[j];
-              if (t && !cssGraph.classNameIndex.has(t)) allClassTokens.add(t);
-            }
-          }
-        }
-        if (allClassTokens.size > 0) {
-          const unknowns = Array.from(allClassTokens);
-          const batchEval = spawnWorkspaceEvaluator(projectRoot, log);
-          try {
-            await batchEval.request({ id: 0, type: "tailwind-init", tailwindModulePath: twParams.modulePath, tailwindEntryCss: twParams.entryCss, tailwindEntryBase: twParams.entryBase });
-            const batchResult = await batchEval.request({ id: 1, type: "tailwind-validate", classNames: unknowns });
-            if (batchResult.validation !== undefined) {
-              (tailwind).preloadBatch(unknowns, batchResult.validation);
-            }
-          } catch { /* batch validation failed — static set is fallback */ } finally {
-            batchEval.dispose();
-          }
-        }
-      }
-
-      /* 4. Build LayoutGraph from Solid + CSS graphs. */
+      /* 3. Build LayoutGraph from Solid + CSS graphs. */
       const layoutGraph = buildLayoutGraph(solidGraphs, cssGraph, log);
 
-      /* 5. Run cross-file rules with override-aware emit. */
+      /* 4. Run cross-file rules with override-aware emit. */
       const crossDiagnostics: Diagnostic[] = [];
       const crossRawEmit = (d: Diagnostic) => crossDiagnostics.push(d);
-      const crossHasOverrides = Object.keys(ruleOverrides).length > 0;
-      const crossEmit = crossHasOverrides ? createOverrideEmit(crossRawEmit, ruleOverrides) : crossRawEmit;
+      const crossHasOverrides = Object.keys(eslintResult.overrides).length > 0;
+      const crossEmit = crossHasOverrides ? createOverrideEmit(crossRawEmit, eslintResult.overrides) : crossRawEmit;
       runCrossFileRules(
         { solids: solidGraphs, css: cssGraph, layout: layoutGraph, logger: log },
         crossEmit,
@@ -692,7 +760,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
             crossCount++;
           }
         }
-        if (log.isLevelEnabled(Level.Info)) {
+        if (log.enabled) {
           const t2 = performance.now();
           log.info(`cross-file analysis: ${crossCount} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
         }
@@ -702,15 +770,12 @@ export async function runLint(args: readonly string[]): Promise<void> {
           if (!cd) continue;
           allDiagnostics.push(cd);
         }
-        if (log.isLevelEnabled(Level.Info)) {
+        if (log.enabled) {
           const t2 = performance.now();
           log.info(`cross-file analysis: ${crossDiagnostics.length} diagnostics in ${(t2 - t1).toFixed(0)}ms`);
         }
       }
 
-      /* Save .tsbuildinfo for future warm starts. The main thread is the
-         sole writer — workers read but never write to avoid corruption. */
-      batch.saveBuildInfo();
       if (ownsBatch) batch.dispose();
     }
 
@@ -724,7 +789,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
     const counts = countDiagnostics(allDiagnostics);
-    if (log.isLevelEnabled(Level.Info)) log.info(`total: ${allDiagnostics.length} diagnostics (${counts.errors} errors, ${counts.warnings} warnings) in ${(performance.now() - t0).toFixed(0)}ms`);
+    if (log.enabled) log.info(`total: ${allDiagnostics.length} diagnostics (${counts.errors} errors, ${counts.warnings} warnings) in ${(performance.now() - t0).toFixed(0)}ms`);
 
     if (counts.errors > 0) {
       exitCode = 1;
@@ -736,12 +801,11 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
   } finally {
-    /* Save .tsbuildinfo from the serial batch if cross-file didn't already
-       save it (cross-file creates its own batch when parallel path was used). */
-    if (serialBatch) {
-      if (!options.crossFile) serialBatch.saveBuildInfo();
-      serialBatch.dispose();
-    }
+<<<<<<< HEAD
+    project.dispose();
+=======
+    serialBatch?.dispose();
+>>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
     if (fileHandle !== undefined) await fileHandle.close();
   }
 
@@ -768,7 +832,7 @@ function partitionFiles(files: readonly string[], count: number): string[][] {
 }
 
 /**
- * Serial single-file analysis. Builds SolidSyntaxTree per file, runs rules,
+ * Serial single-file analysis. Builds SolidGraph per file, runs rules,
  * collects diagnostics, and accumulates graphs for cross-file reuse.
  */
 function runSerialAnalysis(
@@ -776,13 +840,10 @@ function runSerialAnalysis(
   files: readonly string[],
   overrides: RuleOverrides,
   allDiagnostics: Diagnostic[],
-  solidGraphsOut: SolidSyntaxTree[],
+  solidGraphsOut: SolidGraph[],
   log: Logger,
 ): void {
   const hasOverrides = Object.keys(overrides).length > 0;
-  const fileDiags: Diagnostic[] = [];
-  const rawEmit = (d: Diagnostic) => fileDiags.push(d);
-  const emit = hasOverrides ? createOverrideEmit(rawEmit, overrides) : rawEmit;
 
   for (let i = 0, len = files.length; i < len; i++) {
     const path = files[i];
@@ -791,18 +852,20 @@ function runSerialAnalysis(
 
     const sourceFile = program.getSourceFile(key);
     if (!sourceFile) {
-      if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: skipping ${key} (not in program)`);
+      if (log.enabled) log.trace(`lint: skipping ${key} (not in program)`);
       continue;
     }
 
-    if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
+    if (log.enabled) log.trace(`lint: analyzing file ${i + 1}/${files.length}: ${key}`);
     const input = createSolidInput(key, program, log);
-    const graph = buildSolidSyntaxTree(input, "");
+    const graph = buildSolidGraph(input);
     solidGraphsOut.push(graph);
 
-    fileDiags.length = 0;
+    const fileDiags: Diagnostic[] = [];
+    const rawEmit = (d: Diagnostic) => fileDiags.push(d);
+    const emit = hasOverrides ? createOverrideEmit(rawEmit, overrides) : rawEmit;
     runSolidRules(graph, input.sourceFile, emit);
-    if (log.isLevelEnabled(Level.Trace)) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
+    if (log.enabled) log.trace(`lint: ${key} → ${fileDiags.length} single-file diags`);
     for (let j = 0, dLen = fileDiags.length; j < dLen; j++) {
       const d = fileDiags[j];
       if (!d) continue;
@@ -811,21 +874,20 @@ function runSerialAnalysis(
   }
 }
 
-function buildRuleOverrides(
-  eslintOverrides: Readonly<Record<string, "error" | "warn" | "off">>,
-  excludeRules: readonly string[],
-): Readonly<Record<string, "error" | "warn" | "off">> {
-  if (excludeRules.length === 0) return eslintOverrides;
-  const merged = new Map<string, "error" | "warn" | "off">();
-  for (const key of Object.keys(eslintOverrides)) {
-    const val = eslintOverrides[key];
-    if (val !== undefined) merged.set(key, val);
-  }
-  for (let i = 0; i < excludeRules.length; i++) {
-    const rule = excludeRules[i];
-    if (rule) merged.set(rule, "off");
-  }
-  return Object.fromEntries(merged);
+/**
+ * Build a CSSInput for the lint pipeline from pre-read CSS files.
+ * Includes tailwind validator and external custom properties when available.
+ */
+function buildCSSInputForLint(
+  cssFiles: readonly { path: string; content: string }[],
+  log: Logger,
+  tailwind: import("@drskillissue/ganko").TailwindValidator | null,
+  externalCustomProperties: ReadonlySet<string>,
+): CSSInput {
+  const input: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
+  if (tailwind !== null) input.tailwind = tailwind;
+  if (externalCustomProperties.size > 0) input.externalCustomProperties = externalCustomProperties;
+  return input;
 }
 
 /** Sort diagnostics by file, line, column, rule for deterministic output. */
