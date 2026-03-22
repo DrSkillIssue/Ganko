@@ -209,13 +209,14 @@ The tables below are synced with the current generated manifest and include Soli
 | `solid/css-layout-unsized-replaced-element` | Require stable reserved geometry for replaced media elements to prevent layout shifts. | warn |
 
 
-### CSS Property Rules (7)
+### CSS Property Rules (8)
 
 | Rule | Description | Recommended |
 |------|-------------|:-----------:|
 | `solid/css-no-custom-property-cycle` | Disallow cycles in custom property references. | error |
 | `solid/css-no-hardcoded-z-index` | Disallow hardcoded positive z-index literals. | warn |
 | `solid/css-no-legacy-vh-100` | Disallow 100vh in viewport sizing declarations. | warn |
+| `solid/css-prefer-logical-properties` | Prefer logical properties over physical left/right properties. | warn |
 | `solid/css-z-index-requires-positioned-context` | Require positioned context when using z-index. | warn |
 | `solid/no-important` | Disallow !important declarations. | warn |
 | `solid/no-unresolved-custom-properties` | Disallow unresolved custom property references. | error |

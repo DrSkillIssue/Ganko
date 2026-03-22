@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
 import { analyzeCSSInput } from "../../src/css/plugin"
 import { buildCSSResult } from "../../src/css/impl"
+import { createCSSInput } from "../../src/css/input"
 import { selectorMaxAttributeAndUniversal } from "../../src/css/rules/selector"
 import { setActivePolicy } from "../../src/css/policy"
 
@@ -13,25 +14,13 @@ function first(arr: readonly Diagnostic[]): Diagnostic {
 
 function lint(css: string): readonly Diagnostic[] {
   const ds: Diagnostic[] = []
-
-  analyzeCSSInput(
-    {
-      files: [{ path: "test.css", content: css }],
-    },
-    (d) => ds.push(d),
-  )
-
+  analyzeCSSInput(createCSSInput([{ path: "test.css", content: css }]), (d) => ds.push(d))
   return ds
 }
 
 function lintFiles(files: readonly { path: string; content: string }[]): readonly Diagnostic[] {
   const ds: Diagnostic[] = []
-
-  analyzeCSSInput(
-    { files },
-    (d) => ds.push(d),
-  )
-
+  analyzeCSSInput(createCSSInput(files), (d) => ds.push(d))
   return ds
 }
 
@@ -338,20 +327,18 @@ describe("CSS rules", () => {
 
   it("reports attribute and universal selector threshold violations", () => {
     const ds: Diagnostic[] = []
-    const { workspace: graph } = buildCSSResult({
-      files: [{
-        path: "test.css",
-        content: `
-          [data-state="open"] .item {
-            color: red;
-          }
+    const { workspace: graph } = buildCSSResult(createCSSInput([{
+      path: "test.css",
+      content: `
+        [data-state="open"] .item {
+          color: red;
+        }
 
-          * .card {
-            color: blue;
-          }
-        `,
-      }],
-    })
+        * .card {
+          color: blue;
+        }
+      `,
+    }]))
     selectorMaxAttributeAndUniversal.check(graph, (d) => ds.push(d))
 
     const selectorThresholds = ds.filter((d) => d.rule === "selector-max-attribute-and-universal")
@@ -1291,45 +1278,18 @@ describe("CSS policy rules", () => {
   describe("library analysis (external custom properties)", () => {
     it("resolves external custom properties provided via externalCustomProperties", () => {
       const ds: Diagnostic[] = []
-      analyzeCSSInput(
-        {
-          files: [
-            {
-              path: "component.css",
-              content: `
-                .accordion-content {
-                  height: var(--kb-accordion-content-height);
-                }
-              `,
-            },
-          ],
-          externalCustomProperties: new Set(["--kb-accordion-content-height"]),
-        },
-        (d) => ds.push(d),
-      )
+      const input = createCSSInput([{ path: "component.css", content: `.accordion-content { height: var(--kb-accordion-content-height); }` }])
+      input.externalCustomProperties = new Set(["--kb-accordion-content-height"])
+      analyzeCSSInput(input, (d) => ds.push(d))
       const unresolved = ds.filter((d) => d.rule === "no-unresolved-custom-properties")
       expect(unresolved).toHaveLength(0)
     })
 
     it("still reports unresolved properties not in external set", () => {
       const ds: Diagnostic[] = []
-      analyzeCSSInput(
-        {
-          files: [
-            {
-              path: "component.css",
-              content: `
-                .accordion-content {
-                  height: var(--kb-accordion-content-height);
-                  width: var(--kb-nonexistent);
-                }
-              `,
-            },
-          ],
-          externalCustomProperties: new Set(["--kb-accordion-content-height"]),
-        },
-        (d) => ds.push(d),
-      )
+      const input = createCSSInput([{ path: "component.css", content: `.accordion-content { height: var(--kb-accordion-content-height); width: var(--kb-nonexistent); }` }])
+      input.externalCustomProperties = new Set(["--kb-accordion-content-height"])
+      analyzeCSSInput(input, (d) => ds.push(d))
       const unresolved = ds.filter((d) => d.rule === "no-unresolved-custom-properties")
       expect(unresolved).toHaveLength(1)
       expect(first(unresolved).message).toContain("--kb-nonexistent")

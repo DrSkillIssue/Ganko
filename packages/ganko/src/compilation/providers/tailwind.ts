@@ -1,5 +1,8 @@
 import type { ClassNameSymbol } from "../symbols/class-name"
-import type { TailwindSymbolContribution } from "../symbols/declaration-table"
+
+export interface TailwindSymbolContribution {
+  readonly classNames: ReadonlyMap<string, ClassNameSymbol>
+}
 
 export interface TailwindParsedCandidate {
   readonly raw: string
@@ -66,8 +69,6 @@ export interface TailwindDesignSystem {
   getVariants(): { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[]
 }
 
-export { TailwindSymbolContribution }
-
 export interface TailwindProvider {
   readonly kind: "tailwind"
   readonly designSystem: TailwindDesignSystem
@@ -108,7 +109,8 @@ function parseBasicCandidate(raw: string): TailwindParsedCandidate {
   }
 
   const segments = splitByColon(working)
-  const base = segments[segments.length - 1]!
+  const base = segments[segments.length - 1]
+  if (!base) return { raw, variants: [], utility: "", value: null, modifier: null, important, negative }
   const variantSegments = segments.length > 1 ? segments.slice(0, segments.length - 1) : []
 
   const variants: TailwindParsedVariant[] = []

@@ -1394,6 +1394,25 @@
             "Use default severity (warn)"
           ]
         },
+        "solid.rules.css-prefer-logical-properties": {
+          "scope": "language-overridable",
+          "order": 100,
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Prefer logical properties over physical left/right properties.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
         "solid.rules.css-z-index-requires-positioned-context": {
           "scope": "language-overridable",
           "order": 100,

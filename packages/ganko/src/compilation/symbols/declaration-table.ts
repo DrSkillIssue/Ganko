@@ -1,17 +1,13 @@
 import type { CSSSyntaxTree } from "../core/css-syntax-tree"
 import type { SymbolTable } from "./symbol-table"
-import type { ClassNameSymbol } from "./class-name"
+import type { TailwindValidator } from "../../css/tailwind"
 import { buildSymbolTable } from "./symbol-table"
-
-export interface TailwindSymbolContribution {
-  readonly classNames: ReadonlyMap<string, ClassNameSymbol>
-}
 
 export interface DeclarationTable {
   readonly generation: number
   withTree(tree: CSSSyntaxTree): DeclarationTable
   withoutTree(filePath: string): DeclarationTable
-  withTailwindSymbols(symbols: TailwindSymbolContribution): DeclarationTable
+  withTailwindValidator(validator: TailwindValidator | null): DeclarationTable
   materialize(): SymbolTable
 }
 
@@ -20,20 +16,20 @@ class DeclarationTableImpl implements DeclarationTable {
   private readonly _olderTrees: ReadonlyMap<string, CSSSyntaxTree>
   private readonly _latestTree: CSSSyntaxTree | null
   private _cachedTable: SymbolTable | null
-  private readonly _tailwindContribution: TailwindSymbolContribution | null
+  private readonly _tailwindValidator: TailwindValidator | null
 
   constructor(
     olderTrees: ReadonlyMap<string, CSSSyntaxTree>,
     latestTree: CSSSyntaxTree | null,
     cachedTable: SymbolTable | null,
     generation: number,
-    tailwindContribution: TailwindSymbolContribution | null,
+    tailwindValidator: TailwindValidator | null,
   ) {
     this._olderTrees = olderTrees
     this._latestTree = latestTree
     this._cachedTable = cachedTable
     this.generation = generation
-    this._tailwindContribution = tailwindContribution
+    this._tailwindValidator = tailwindValidator
   }
 
   withTree(tree: CSSSyntaxTree): DeclarationTable {
@@ -52,7 +48,7 @@ class DeclarationTableImpl implements DeclarationTable {
       tree,
       null,
       this.generation + 1,
-      this._tailwindContribution,
+      this._tailwindValidator,
     )
   }
 
@@ -63,7 +59,7 @@ class DeclarationTableImpl implements DeclarationTable {
         null,
         null,
         this.generation + 1,
-        this._tailwindContribution,
+        this._tailwindValidator,
       )
     }
 
@@ -78,17 +74,17 @@ class DeclarationTableImpl implements DeclarationTable {
       this._latestTree,
       null,
       this.generation + 1,
-      this._tailwindContribution,
+      this._tailwindValidator,
     )
   }
 
-  withTailwindSymbols(symbols: TailwindSymbolContribution): DeclarationTable {
+  withTailwindValidator(validator: TailwindValidator | null): DeclarationTable {
     return new DeclarationTableImpl(
       this._olderTrees,
       this._latestTree,
       null,
       this.generation + 1,
-      symbols,
+      validator,
     )
   }
 
@@ -105,7 +101,7 @@ class DeclarationTableImpl implements DeclarationTable {
       allTrees.push(this._latestTree)
     }
 
-    const table = buildSymbolTable(allTrees, this._tailwindContribution)
+    const table = buildSymbolTable(allTrees, this._tailwindValidator)
     this._cachedTable = table
     return table
   }

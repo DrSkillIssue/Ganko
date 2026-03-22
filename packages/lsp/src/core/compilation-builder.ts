@@ -16,8 +16,9 @@ import {
   buildSolidSyntaxTree,
   buildCSSResult,
   createStyleCompilation,
+  createCSSInput,
 } from "@drskillissue/ganko";
-import type { StyleCompilation, TailwindValidator, CSSInput, SolidSyntaxTree } from "@drskillissue/ganko";
+import type { StyleCompilation, TailwindValidator, SolidSyntaxTree } from "@drskillissue/ganko";
 import { canonicalPath, contentHash } from "@drskillissue/ganko-shared";
 import type { Logger } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
@@ -72,13 +73,22 @@ export function buildFullCompilation(options: FullBuildOptions): CompilationBuil
     }
 
     if (cssFileContents.length > 0) {
-      const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFileContents };
+      const cssInput = createCSSInput(cssFileContents);
       if (logger !== undefined) cssInput.logger = logger;
       if (tailwindValidator !== null) cssInput.tailwind = tailwindValidator;
       if (externalCustomProperties !== undefined) cssInput.externalCustomProperties = externalCustomProperties;
       const { trees } = buildCSSResult(cssInput);
       compilation = compilation.withCSSTrees(trees);
     }
+  }
+
+  if (tailwindValidator !== null) {
+    compilation = compilation.withTailwindConfig({
+      kind: "tailwind-config",
+      filePath: "",
+      version: "4",
+      validator: tailwindValidator,
+    });
   }
 
   return { compilation, solidTrees: solidTreeMap };
@@ -145,9 +155,7 @@ export function applyFileChange(
 
   // CSS file — re-parse and replace
   let next = compilation.withoutFile(key);
-  const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = {
-    files: [{ path: key, content }],
-  };
+  const cssInput = createCSSInput([{ path: key, content }]);
   if (logger !== undefined) cssInput.logger = logger;
   if (tailwindValidator != null) cssInput.tailwind = tailwindValidator;
   if (externalCustomProperties !== undefined) cssInput.externalCustomProperties = externalCustomProperties;
@@ -155,6 +163,7 @@ export function applyFileChange(
   next = next.withCSSTrees(trees);
   return { compilation: next, tree: null };
 }
+
 
 // ── Project root discovery + ProjectFactory ─────────────────────────
 

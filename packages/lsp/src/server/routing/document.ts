@@ -59,6 +59,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
     // One dependency graph rebuild for the entire batch.
     const solidTrees = new Map<string, SolidSyntaxTree>();
     const batchChanges: { path: string; content: string; version: string }[] = [];
+    const getProgram = () => project.getProgram();
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
@@ -66,7 +67,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       context.diagManager.evict(change.path);
       batchChanges.push({ path: change.path, content: change.content, version: String(change.version) });
       if (classifyFile(change.path) === "solid") {
-        const tree = buildSolidTreeForFile(change.path, () => project.getProgram());
+        const tree = buildSolidTreeForFile(change.path, getProgram);
         if (tree) solidTrees.set(change.path, tree);
       }
     }
@@ -176,6 +177,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
     // Sync TS + build solid trees + evict diagnostic caches, then batch apply.
     const saveSolidTrees = new Map<string, SolidSyntaxTree>();
     const saveBatch: { path: string; content: string; version: string }[] = [];
+    const getSaveProgram = () => project.getProgram();
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
@@ -183,7 +185,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       context.diagManager.evict(change.path);
       saveBatch.push({ path: change.path, content: change.content, version: String(change.version) });
       if (classifyFile(change.path) === "solid") {
-        const tree = buildSolidTreeForFile(change.path, () => project.getProgram());
+        const tree = buildSolidTreeForFile(change.path, getSaveProgram);
         if (tree) saveSolidTrees.set(change.path, tree);
       }
     }

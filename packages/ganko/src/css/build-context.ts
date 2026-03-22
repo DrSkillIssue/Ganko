@@ -9,7 +9,6 @@ import type { Rule, AtRule } from "postcss"
 import type { CSSInput, CSSOptions } from "./input"
 import type { TailwindValidator } from "./tailwind"
 import type { Logger } from "@drskillissue/ganko-shared"
-import { noopLogger } from "@drskillissue/ganko-shared"
 import { extractKeyframeNames } from "@drskillissue/ganko-shared"
 import type { StringInterner } from "@drskillissue/ganko-shared"
 import { createCSSInterner } from "./intern"
@@ -190,10 +189,10 @@ export interface CSSBuildContext {
 // ── Factory ───────────────────────────────────────────────────────────────
 
 export function createCSSBuildContext(input: CSSInput): CSSBuildContext {
-  const options = input.options ?? {}
-  const tailwind = input.tailwind ?? null
+  const options = input.options
+  const tailwind = input.tailwind
   const interner = createCSSInterner()
-  const logger = input.logger ?? noopLogger
+  const logger = input.logger
 
   const files: FileEntity[] = []
   const rules: RuleEntity[] = []

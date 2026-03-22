@@ -1,3 +1,4 @@
+import type { TailwindValidator } from "../../css/tailwind"
 import type { SelectorEntity } from "../../css/entities/selector"
 import type { DeclarationEntity } from "../../css/entities/declaration"
 import type { RuleEntity } from "../../css/entities/rule"
@@ -230,7 +231,7 @@ function pushToMapArray<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else map.set(key, [value])
 }
 
-export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContribution?: { readonly classNames: ReadonlyMap<string, ClassNameSymbol> } | null): SymbolTable {
+export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValidator?: TailwindValidator | null): SymbolTable {
   const classNamesMap = new Map<string, { selectors: SelectorEntity[]; filePaths: Set<string> }>()
   const selectorsMap = new Map<number, SelectorSymbol>()
   const customPropertiesMap = new Map<string, CustomPropertySymbol>()
@@ -354,7 +355,8 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
         if (dups) {
           dups.rules.push(rule)
         } else {
-          const first = dedupExisting[0]!
+          const first = dedupExisting[0]
+          if (!first) continue
           duplicateSelectorsMap.set(selectorText, { selector: selectorText, rules: [first, rule] })
         }
       } else {
@@ -461,13 +463,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     classNameSymbols.set(name, createClassNameSymbol(name, entry.selectors, [...entry.filePaths]))
   }
 
-  if (tailwindContribution) {
-    for (const [name, symbol] of tailwindContribution.classNames) {
-      if (!classNameSymbols.has(name)) {
-        classNameSymbols.set(name, symbol)
-      }
-    }
-  }
+  const twValidator = tailwindValidator ?? null
 
   // Build keyframe indexes
   const knownKeyframeNames = new Set<string>()
@@ -871,7 +867,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     tokenCategories: [...tokensByCategoryMap.keys()],
 
     hasClassName(name: string): boolean {
-      return classNameSymbols.has(name)
+      return classNameSymbols.has(name) || (twValidator !== null && twValidator.has(name))
     },
     getClassName(name: string): ClassNameSymbol | null {
       return classNameSymbols.get(name) ?? null

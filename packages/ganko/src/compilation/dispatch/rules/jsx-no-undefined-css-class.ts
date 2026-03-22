@@ -28,7 +28,7 @@ export const jsxNoUndefinedCssClass = defineAnalysisRule({
           const existing = seenByElementId.get(elementId)
           if (existing) { if (existing.has(name)) continue; existing.add(name) }
           else { const next = new Set<string>(); next.add(name); seenByElementId.set(elementId, next) }
-          if (symbolTable.classNames.has(name)) continue
+          if (symbolTable.hasClassName(name)) continue
           if (solidTree.inlineStyleClassNames.has(name)) continue
 
           const element = solidTree.jsxElements.find(e => e.id === elementId)
@@ -50,7 +50,7 @@ export const jsxNoUndefinedCssClass = defineAnalysisRule({
           const existing = seenByElementId.get(elementId)
           if (existing) { if (existing.has(name)) continue; existing.add(name) }
           else { const next = new Set<string>(); next.add(name); seenByElementId.set(elementId, next) }
-          if (symbolTable.classNames.has(name)) continue
+          if (symbolTable.hasClassName(name)) continue
           if (solidTree.inlineStyleClassNames.has(name)) continue
 
           const element = solidTree.jsxElements.find(e => e.id === elementId)

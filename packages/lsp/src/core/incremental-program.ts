@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 export interface IncrementalTypeScriptService {
+  readonly tsconfigPath: string
   getProgram(): ts.Program
   getLanguageService(): ts.LanguageService
   updateFile(path: string, content: string): void
@@ -23,9 +24,11 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
   const servicesHost: ts.LanguageServiceHost = {
     getScriptFileNames: () => {
       const base = parsedConfig.fileNames;
+      if (fileContents.size === 0) return base;
+      const baseSet = new Set(base);
       const extra: string[] = [];
       for (const key of fileContents.keys()) {
-        if (!base.includes(key)) extra.push(key);
+        if (!baseSet.has(key)) extra.push(key);
       }
       return extra.length > 0 ? [...base, ...extra] : base;
     },
@@ -69,6 +72,7 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
   });
 
   return {
+    tsconfigPath,
     getProgram(): ts.Program {
       const program = languageService.getProgram();
       if (!program) throw new Error("Failed to get program from language service");

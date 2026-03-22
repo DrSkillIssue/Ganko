@@ -10,10 +10,9 @@
  * Run: bun run scripts/generate-rules-manifest.ts
  */
 
+import { allRules } from "../src/compilation/dispatch/rules"
 import { rules as solidRules } from "../src/solid/rules"
 import { rules as cssRules } from "../src/css/rules"
-import { rules as crossFileRules } from "../src/cross-file/rules"
-import type { RuleCategory } from "../src/graph"
 import { fileURLToPath } from "node:url"
 
 interface ManifestEntry {
@@ -21,13 +20,16 @@ interface ManifestEntry {
   readonly severity: "error" | "warn" | "off"
   readonly description: string
   readonly fixable: boolean
-  readonly category: RuleCategory
+  readonly category: string
   readonly plugin: "solid" | "css" | "cross-file"
   readonly messages: Record<string, string>
 }
 
 function collectEntries(): readonly ManifestEntry[] {
   const entries: ManifestEntry[] = []
+
+  const solidIds = new Set(solidRules.map(r => r.id))
+  const cssIds = new Set(cssRules.map(r => r.id))
 
   for (const rule of solidRules) {
     entries.push({
@@ -53,7 +55,8 @@ function collectEntries(): readonly ManifestEntry[] {
     })
   }
 
-  for (const rule of crossFileRules) {
+  for (const rule of allRules) {
+    if (solidIds.has(rule.id) || cssIds.has(rule.id)) continue
     entries.push({
       id: rule.id,
       severity: rule.severity,

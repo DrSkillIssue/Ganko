@@ -16,6 +16,7 @@
  *
  * One subprocess, one persistent connection, zero per-query spawn overhead.
  */
+import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import type { Logger } from "@drskillissue/ganko-shared";
 import { Level } from "@drskillissue/ganko-shared";
 
@@ -140,7 +141,6 @@ export interface WorkspaceEvaluator {
  * @returns Evaluator with request/response interface
  */
 export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEvaluator {
-  const { spawn: nodeSpawn } = require("node:child_process") as typeof import("node:child_process");
   const proc = nodeSpawn("bun", ["-e", EVAL_SCRIPT], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
@@ -170,8 +170,10 @@ export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEva
     }
   }
 
-  proc.stdout!.setEncoding("utf-8");
-  proc.stdout!.on("data", (chunk: string) => processChunk(chunk));
+  const stdout = proc.stdout;
+  if (!stdout) throw new Error("workspace evaluator: stdout not available (stdio misconfigured)");
+  stdout.setEncoding("utf-8");
+  stdout.on("data", (chunk: string) => processChunk(chunk));
   proc.on("close", () => {
     for (const [, entry] of pending) {
       entry.reject(new Error("workspace evaluator subprocess exited"));
@@ -274,7 +276,6 @@ process.stdout.write(JSON.stringify(res));
 `;
 
   try {
-    const { spawnSync: nodeSpawnSync } = require("node:child_process") as typeof import("node:child_process");
     const result = nodeSpawnSync("bun", ["-e", script], { cwd, encoding: "utf-8", timeout: 30000 });
     if (result.status !== 0 && (!result.stdout || result.stdout.length === 0)) return null;
     const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");

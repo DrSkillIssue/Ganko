@@ -1,6 +1,7 @@
 import type { Emit, Plugin } from "../graph"
 import { runRules } from "../graph"
-import type { CSSInput, CSSFile } from "./input"
+import type { CSSFile, CSSInput } from "./input"
+import { createCSSInput } from "./input"
 import { buildCSSResult } from "./impl"
 import { rules } from "./rules"
 import { readFileSync } from "node:fs"
@@ -23,7 +24,7 @@ export const CSSPlugin: Plugin<"css"> = {
       cssFiles.push({ path: file, content })
     }
     if (cssFiles.length === 0) return
-    const { workspace } = buildCSSResult({ files: cssFiles })
+    const { workspace } = buildCSSResult(createCSSInput(cssFiles))
     runRules(rules, workspace, emit)
   },
 }

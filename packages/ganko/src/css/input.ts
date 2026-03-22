@@ -6,7 +6,7 @@
  * CSSInput supports multi-file graphs with explicit file content.
  */
 
-import type { Logger } from "@drskillissue/ganko-shared"
+import { noopLogger, type Logger } from "@drskillissue/ganko-shared"
 import type { TailwindValidator } from "./tailwind"
 
 /**
@@ -23,25 +23,23 @@ export interface CSSFile {
  * Input for building a CSSGraph from CSS/SCSS source files.
  */
 export interface CSSInput {
-  /** Files to process */
   readonly files: readonly CSSFile[]
-  /** Optional build options */
-  readonly options?: CSSOptions
-  /** Pre-resolved Tailwind validator for utility class validation */
-  readonly tailwind?: TailwindValidator
-  /** Logger for diagnostic output from CSS rules */
-  readonly logger?: Logger
-  /**
-   * CSS custom property names provided by external libraries at runtime.
-   *
-   * These are discovered by scanning dependency packages for CSS custom property
-   * definitions injected via JavaScript (e.g., inline style attributes in JSX).
-   * Properties in this set are registered in the CSS graph as globally-scoped
-   * definitions so the resolution engine treats them as defined.
-   *
-   * Use `scanDependencyCustomProperties()` from `./library-analysis` to populate this.
-   */
-  readonly externalCustomProperties?: ReadonlySet<string>
+  readonly options: CSSOptions
+  readonly tailwind: TailwindValidator | null
+  readonly logger: Logger
+  readonly externalCustomProperties: ReadonlySet<string> | null
+}
+
+export interface CSSInputBuilder {
+  files: readonly CSSFile[]
+  options: CSSOptions
+  tailwind: TailwindValidator | null
+  logger: Logger
+  externalCustomProperties: ReadonlySet<string> | null
+}
+
+export function createCSSInput(files: readonly CSSFile[]): CSSInputBuilder {
+  return { files, options: {}, tailwind: null, logger: noopLogger, externalCustomProperties: null }
 }
 
 /**

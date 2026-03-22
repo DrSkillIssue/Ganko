@@ -20,7 +20,7 @@ export const cssLayoutFontSwapInstability = defineAnalysisRule({
   },
   requirement: { tier: ComputationTier.CSSSyntax },
   register(registry) {
-    registry.registerCompilationAction((compilation, symbolTable, emit) => {
+    registry.registerCompilationAction((_compilation, symbolTable, emit) => {
       const usedFamilies = symbolTable.usedFontFamilies
       if (usedFamilies.size === 0) return
 

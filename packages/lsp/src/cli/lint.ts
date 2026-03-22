@@ -8,9 +8,7 @@ import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
 import {
   SolidPlugin,
-  buildSolidSyntaxTree,
   runSolidRules,
-  createSolidInput,
   createOverrideEmit,
   createAnalysisDispatcher,
   allRules,
@@ -18,7 +16,7 @@ import {
   resolveTailwindValidatorSync,
 } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, contentHash, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
 import { createProject } from "../core/project";
 import { createFileRegistry } from "../core/file-registry";
 import { buildFullCompilation, findProjectRoot as findProjectRootShared } from "../core/compilation-builder";
@@ -217,7 +215,8 @@ export async function runLint(args: readonly string[]): Promise<void> {
     resolvedTargets = resolveFiles(options.files, cwd, effectiveExclude);
   }
 
-  const fileRegistry = createFileRegistry(buildWorkspaceLayout(acceptProjectRoot(projectRoot), log), effectiveExclude, log);
+  const workspaceLayout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
+  const fileRegistry = createFileRegistry(workspaceLayout, effectiveExclude, log);
   const filesToLint = resolvedTargets ?? [...fileRegistry.solidFiles, ...fileRegistry.cssFiles];
 
   if (!options.noDaemon) {
@@ -235,7 +234,9 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (filesToLint.length === 0) {
       if (options.format === "json") console.log("[]");
       else console.log("No files to lint.");
-      return process.exit(0);
+      project.dispose();
+      if (fileHandle !== undefined) await fileHandle.close();
+      process.exit(0);
     }
 
     log.info(`project root: ${projectRoot}`);
@@ -249,54 +250,53 @@ export async function runLint(args: readonly string[]): Promise<void> {
       try { project.updateFile(solidPath, readFileSync(solidPath, "utf-8")); } catch { /* skip unreadable */ }
     }
 
-    const allDiagnostics: Diagnostic[] = [];
     const program = project.getProgram();
+    const allDiagnostics: Diagnostic[] = [];
     const t0 = performance.now();
 
-    // Single-file analysis
+    // ── Build compilation ONCE with all trees ─────────────────────────
+    let tailwind = null;
+    try {
+      tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot);
+      if (tailwind) log.info("tailwind: resolved");
+      else log.info("tailwind: not found");
+    } catch (err) {
+      log.warning(`tailwind: resolution failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const externalCustomProperties = scanDependencyCustomProperties(workspaceLayout);
+    if (externalCustomProperties.size > 0) log.info(`library analysis: ${externalCustomProperties.size} external custom properties`);
+
+    const { compilation } = buildFullCompilation({
+      solidFiles: fileRegistry.solidFiles,
+      cssFiles: fileRegistry.cssFiles,
+      getProgram: () => program,
+      tailwindValidator: tailwind,
+      externalCustomProperties: externalCustomProperties.size > 0 ? externalCustomProperties : undefined,
+      resolveContent: (p) => { try { return readFileSync(p, "utf-8"); } catch { return null; } },
+      logger: log,
+    });
+
+    const tBuild = performance.now();
+    log.info(`compilation: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css trees in ${(tBuild - t0).toFixed(0)}ms`);
+
+    // ── Solid rules on targeted files (trees already in compilation) ──
     for (let i = 0; i < filesToLint.length; i++) {
       const path = filesToLint[i];
       if (!path) continue;
       if (classifyFile(path) === "css") continue;
-
-      const sourceFile = program.getSourceFile(canonicalPath(path));
-      if (!sourceFile) continue;
-
-      const input = createSolidInput(canonicalPath(path), program, log);
-      const tree = buildSolidSyntaxTree(input, contentHash(sourceFile.text));
-
+      const tree = compilation.getSolidTree(path);
+      if (!tree) continue;
       const { results, emit } = createEmit(eslintResult.overrides);
-      runSolidRules(tree, input.sourceFile, emit);
+      runSolidRules(tree, tree.sourceFile, emit);
       for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d); }
     }
 
     const t1 = performance.now();
-    log.info(`single-file: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
+    log.info(`single-file: ${allDiagnostics.length} diagnostics in ${(t1 - tBuild).toFixed(0)}ms`);
 
-    // Cross-file analysis via AnalysisDispatcher
+    // ── Cross-file analysis ───────────────────────────────────────────
     if (options.crossFile) {
-      let tailwind = null;
-      try {
-        tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot);
-        if (tailwind) log.info("tailwind: resolved");
-        else log.info("tailwind: not found");
-      } catch (err) {
-        log.warning(`tailwind: resolution failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      const layout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
-      const externalCustomProperties = scanDependencyCustomProperties(layout);
-      if (externalCustomProperties.size > 0) log.info(`library analysis: ${externalCustomProperties.size} external custom properties`);
-
-      const { compilation } = buildFullCompilation({
-        solidFiles: fileRegistry.solidFiles,
-        cssFiles: fileRegistry.cssFiles,
-        getProgram: () => program,
-        tailwindValidator: tailwind,
-        externalCustomProperties: externalCustomProperties.size > 0 ? externalCustomProperties : undefined,
-        resolveContent: (path) => { try { return readFileSync(path, "utf-8"); } catch { return null; } },
-        logger: log,
-      });
-
       const dispatcher = createAnalysisDispatcher();
       for (let i = 0; i < allRules.length; i++) { const rule = allRules[i]; if (rule) dispatcher.register(rule); }
 

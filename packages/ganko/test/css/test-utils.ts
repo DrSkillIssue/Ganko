@@ -1,29 +1,26 @@
 import { buildCSSResult } from "../../src/css/impl"
+import { createCSSInput } from "../../src/css/input"
 import type { CSSWorkspaceView } from "../../src/css/workspace-view"
 import type { CSSSyntaxTree } from "../../src/compilation/core/css-syntax-tree"
-import type { CSSInput } from "../../src/css"
-
-type CSSOptions = CSSInput["options"]
+import type { CSSOptions } from "../../src/css/input"
 
 export function buildGraph(
   css: string,
   filePath = "test.css",
   options: CSSOptions = {},
 ): CSSWorkspaceView {
-  return buildCSSResult({
-    files: [{ path: filePath, content: css }],
-    options,
-  }).workspace
+  const input = createCSSInput([{ path: filePath, content: css }])
+  input.options = options
+  return buildCSSResult(input).workspace
 }
 
 export function buildGraphMultiple(
   files: Array<{ path: string; content: string }>,
   options: CSSOptions = {},
 ): CSSWorkspaceView {
-  return buildCSSResult({
-    files,
-    options,
-  }).workspace
+  const input = createCSSInput(files)
+  input.options = options
+  return buildCSSResult(input).workspace
 }
 
 export function buildTrees(
@@ -31,20 +28,18 @@ export function buildTrees(
   filePath = "test.css",
   options: CSSOptions = {},
 ): readonly CSSSyntaxTree[] {
-  return buildCSSResult({
-    files: [{ path: filePath, content: css }],
-    options,
-  }).trees
+  const input = createCSSInput([{ path: filePath, content: css }])
+  input.options = options
+  return buildCSSResult(input).trees
 }
 
 export function buildTreesMultiple(
   files: Array<{ path: string; content: string }>,
   options: CSSOptions = {},
 ): readonly CSSSyntaxTree[] {
-  return buildCSSResult({
-    files,
-    options,
-  }).trees
+  const input = createCSSInput(files)
+  input.options = options
+  return buildCSSResult(input).trees
 }
 
 export function at<T>(arr: readonly T[], index: number): T {

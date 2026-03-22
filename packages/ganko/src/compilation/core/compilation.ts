@@ -5,11 +5,13 @@ import { buildSymbolTable } from "../symbols/symbol-table";
 import type { DependencyGraph } from "../incremental/dependency-graph";
 import { buildDependencyGraph } from "../incremental/dependency-graph";
 import { createFileSemanticModel, type FileSemanticModel } from "../binding/semantic-model";
+import type { TailwindValidator } from "../../css/tailwind";
 
 export interface TailwindConfigInput {
   readonly kind: "tailwind-config";
   readonly filePath: string;
   readonly version: string;
+  readonly validator: TailwindValidator | null;
 }
 
 export interface PackageManifestInput {
@@ -83,7 +85,7 @@ function makeCompilation(
       if (cachedSymbolTable === null) {
         const allCssTrees: CSSSyntaxTree[] = []
         for (const tree of cssTrees.values()) allCssTrees.push(tree)
-        cachedSymbolTable = buildSymbolTable(allCssTrees)
+        cachedSymbolTable = buildSymbolTable(allCssTrees, tailwindConfig?.validator ?? null)
       }
       return cachedSymbolTable
     },

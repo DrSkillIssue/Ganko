@@ -14,6 +14,7 @@
  */
 import { dirname, join, sep } from "node:path"
 import { existsSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { Level } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
@@ -450,7 +451,6 @@ function defaultSyncEvaluator(
   ].join("\n")
 
   try {
-    const { spawnSync } = require("node:child_process") as typeof import("node:child_process")
     const result = spawnSync("bun", ["-e", script], { cwd: params.entryBase, encoding: "utf-8", timeout: 30000 })
     if (result.status !== 0) return null
     const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "")

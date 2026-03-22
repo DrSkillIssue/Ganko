@@ -12,6 +12,7 @@ import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative, matchesGlob } from "node:path";
 import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
+import { createCSSInput } from "@drskillissue/ganko";
 import type { CSSInput, TailwindValidator } from "@drskillissue/ganko";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".output", "coverage"]);
@@ -381,8 +382,7 @@ export function createFileRegistry(
       externalCustomProperties: ReadonlySet<string> | undefined,
       logger?: Logger,
     ): CSSInput {
-      const files = this.loadAllCSSContent();
-      const input: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files };
+      const input = createCSSInput(this.loadAllCSSContent());
       if (logger !== undefined) input.logger = logger;
       if (tailwind !== null) input.tailwind = tailwind;
       if (externalCustomProperties !== undefined) input.externalCustomProperties = externalCustomProperties;

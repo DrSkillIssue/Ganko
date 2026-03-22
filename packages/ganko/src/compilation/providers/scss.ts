@@ -1,6 +1,7 @@
 import type { CSSSourceProvider, CSSSymbolContribution } from "./provider"
 import type { CSSSyntaxTree } from "../core/css-syntax-tree"
 import { buildCSSResult } from "../../css/impl"
+import { createCSSInput } from "../../css/input"
 import { createPlainCSSProvider } from "./plain-css"
 
 export interface SCSSProvider extends CSSSourceProvider {
@@ -14,10 +15,8 @@ export function createSCSSProvider(): SCSSProvider {
     kind: "scss",
 
     parse(filePath: string, content: string, sourceOrderBase: number): CSSSyntaxTree {
-      const input = {
-        files: [{ path: filePath, content }],
-        options: { scss: true },
-      }
+      const input = createCSSInput([{ path: filePath, content }])
+      input.options = { scss: true }
       const result = buildCSSResult(input)
       const trees = result.trees
       const tree = trees[0]!
