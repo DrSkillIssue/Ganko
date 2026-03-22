@@ -22,32 +22,21 @@ Replace `ServerContext` with a `ServerSession` — an immutable snapshot that ha
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * ServerSession — snapshot of server state with snapshot semantics.
+ * ServerSession — immutable snapshot of server state.
  *
  * Like Roslyn's Solution: document changes produce new sessions.
  * Handlers receive a typed session, never a mutable bag.
- *
- * SNAPSHOT SEMANTICS, NOT DEEP IMMUTABILITY. Like Roslyn's Solution
- * which wraps SolutionCompilationState with mutable lazy Compilation
- * fields behind an immutable facade. The StyleCompilation referenced
- * by a session is immutable. The IncrementalTypeScriptService is
- * shared mutable infrastructure (like Roslyn's Workspace updating
- * the host) — handlers see "latest content from TS" while compilation
- * snapshots are structurally immutable. Mutable infrastructure
- * (CompilationTracker, TsService, FileRegistry) lives on Server.
- *
- * Diagnostic results are NOT on the session. Roslyn's Solution does
- * NOT store diagnostics — DiagnosticAnalyzerService is a workspace-level
- * service. Diagnostics live in DiagnosticsPublisher on Server.
+ * The compilation tracker is the session's compilation state —
+ * it holds ALL cached analysis, ALL dependency tracking.
  */
 interface ServerSession {
   readonly id: number
   readonly rootPath: string
   readonly config: Readonly<ServerConfig>
-  /** The immutable compilation snapshot. Tracker lives on Server. */
-  readonly compilation: StyleCompilation
+  readonly compilation: CompilationTracker
   readonly tsProgram: TsProgramState
   readonly workspace: WorkspaceState
+  readonly diagnosticState: DiagnosticSnapshot
 }
 
 /**
@@ -71,26 +60,37 @@ interface QuickProgramHost {
  *
  * Replaces the phase.tag === "enriched" checks.
  * Before enrichment: no registry, no tailwind.
- * After enrichment: file set snapshots, tailwind, evaluator all guaranteed.
- *
- * FileRegistry is MUTABLE infrastructure (addFile/removeFile/updateCSSContent).
- * The session holds an immutable snapshot of the file sets for consistency;
- * the mutable FileRegistry lives on Server. When didChangeWatchedFiles fires,
- * the registry is mutated on Server, then a new session is produced with
- * updated snapshots.
+ * After enrichment: registry, tailwind, evaluator all guaranteed.
  */
 type WorkspaceState =
   | { readonly enriched: false }
   | {
       readonly enriched: true
-      readonly solidFiles: ReadonlySet<string>
-      readonly cssFiles: ReadonlySet<string>
+      readonly registry: FileRegistry
       readonly layout: WorkspaceLayout
       readonly tailwindValidator: TailwindValidator | null
       readonly batchableValidator: BatchableTailwindValidator | null
       readonly externalCustomProperties: ReadonlySet<string> | undefined
       readonly evaluator: WorkspaceEvaluator | null
     }
+
+/**
+ * DiagnosticSnapshot — immutable diagnostic state derived from compilation.
+ *
+ * Replaces diagCache + graphCache + tsDiagCache as three separate caches.
+ * ONE snapshot per session, automatically consistent because it's derived
+ * from the compilation snapshot.
+ */
+interface DiagnosticSnapshot {
+  readonly version: number
+  get(path: string): FileDiagnosticState
+}
+
+interface FileDiagnosticState {
+  readonly ganko: readonly Diagnostic[]
+  readonly crossFile: readonly Diagnostic[]
+  readonly typescript: readonly LspDiagnostic[]
+}
 ```
 
 ### Server Infrastructure
@@ -119,32 +119,7 @@ interface Server {
   readonly documentTracker: DocumentTracker
   readonly diagnosticsPublisher: DiagnosticsPublisher
 
-  // ── Mutable infrastructure (like Roslyn's Workspace) ──
-  // These are SHARED MUTABLE state. Handlers don't receive them.
-  // The session holds immutable snapshots derived from these.
-
-  /** The CompilationTracker — mutable, produces new compilations.
-   *  applyChange()/applyDeletion() return NEW tracker instances.
-   *  setCachedCrossFileDiagnostics() mutates in-place (diagnostic cache).
-   *  Lives here, NOT on the session. */
-  tracker: CompilationTracker
-
-  /** The IncrementalTypeScriptService — shared mutable LanguageService.
-   *  updateFile() mutates internal fileContents Map.
-   *  Handlers see latest content; compilation snapshots are immutable. */
-  readonly tsService: TsService
-
-  /** The FileRegistry — mutable, mutated by didChangeWatchedFiles.
-   *  Session gets immutable file set snapshots (ReadonlySet<string>). */
-  fileRegistry: FileRegistry | null
-
-  /** Tailwind state — mutable, async re-resolution on CSS entry changes. */
-  tailwindState: TailwindState | null
-
-  /** Current diagnostic cancellation source — cancelled on each change. */
-  diagnosticCancellation: CancellationSource | null
-
-  /** Current session snapshot. */
+  /** Current session — the ONLY mutable field. */
   session: ServerSession | null
 
   /** Lifecycle state machine. */
@@ -155,14 +130,12 @@ interface Server {
  * ServerLifecycle — discriminated union for server lifecycle.
  *
  * Like typescript-language-server's ServerState (None | Running | Errored).
- * Tracks infrastructure state.
- * Server.session is the sole authority for whether a session exists.
- * No session field on any lifecycle variant — avoids dual source of truth.
+ * Not a bag of nullable fields.
  */
 type ServerLifecycle =
   | { readonly state: "created" }
   | { readonly state: "initializing"; readonly rootPath: string; readonly config: ServerConfig }
-  | { readonly state: "running" }
+  | { readonly state: "running"; readonly session: ServerSession }
   | { readonly state: "shutting-down" }
   | { readonly state: "errored"; readonly error: Error }
 ```
@@ -193,12 +166,7 @@ interface FeatureContext {
   getLanguageService(): ts.LanguageService | null
   getSolidSyntaxTree(path: string): SolidSyntaxTree | null
   getSemanticModel(path: string): FileSemanticModel | null
-  /** Backed by DiagnosticsPublisher.getRawDiagnostics() — stores raw
-   *  ganko Diagnostic[] alongside LSP-converted diagnostics. Handlers
-   *  like code-action need raw diagnostics for fix operations. */
   getDiagnostics(path: string): readonly Diagnostic[]
-  /** Content resolution chain: (1) open document buffer from DocumentTracker,
-   *  (2) FileRegistry.getCSSContent() for CSS files, (3) readFileSync fallback. */
   getContent(path: string): string | null
 }
 
@@ -227,74 +195,63 @@ interface DiagnosticContext {
 
 ### Design
 
-`DocumentTracker` is a PURE document state machine — open/close/change/save. It does NOT know about compilations, sessions, or diagnostics. Compilation mutation is the SERVER's responsibility, triggered by the tracker's change events.
-
-Debounce and cancellation solve DIFFERENT problems. typescript-language-server uses BOTH: a `Delayer<any>(300)` coalesces rapid keystrokes, and `GetErrRequest` cancellation aborts stale diagnostic runs. This spec does the same: a coalescing delay (200-300ms) prevents 60 diagnostic runs/sec during fast typing, while cancellation tokens abort stale pipeline runs when the debounce fires again.
+Replace debounce-and-drain with a `DocumentTracker` that produces new sessions on change. Request cancellation replaces debouncing — when a new change arrives, the pending diagnostic computation is cancelled and restarted with the new compilation snapshot.
 
 ```typescript
 // ═══════════════════════════════════════════════════════════════════
-// server/document-tracker.ts — Pure document lifecycle state machine
+// server/document-tracker.ts — Document lifecycle state machine
 // ═══════════════════════════════════════════════════════════════════
 
 /**
  * DocumentTracker — coherent document lifecycle.
  *
  * Like typescript-language-server's LspDocuments: document open/close/change
- * flows through a single path with version tracking and URI↔path lookup.
+ * flows through a single path. Each change produces a new compilation
+ * snapshot via tracker.applyChange().
  *
- * PURE STATE MACHINE. Does NOT hold a compilation reference. Does NOT
- * compute affected files. Returns DocumentChange events; the server's
- * change handler calls SessionMutator separately.
- *
- * Coalescing delay (200-300ms) gates diagnostic triggers. The delay
- * prevents 60 keystroke/sec from saturating the event loop. When the
- * delay fires, the server cancels the previous CancellationSource and
- * starts a new pipeline run.
+ * No debounce timer. No pending changes to drain. Cancellation tokens
+ * replace debouncing — stale diagnostic computations are cancelled
+ * when new changes arrive.
  */
 interface DocumentTracker {
-  open(uri: string, path: string, version: number, content: string): DocumentChange | null
-  change(uri: string, version: number, content: string): boolean
-  save(uri: string): string | null
+  open(uri: string, path: string, version: number, content: string): DocumentChangeResult
+  change(uri: string, version: number, content: string): DocumentChangeResult
+  save(uri: string): void
   close(uri: string): string | null
 
   getByUri(uri: string): TrackedDocument | null
   getByPath(path: string): TrackedDocument | null
   openPaths(): readonly string[]
   readonly openCount: number
-
-  /** Consume coalesced pending changes. Returns changed paths + content. */
-  drainPendingChanges(): readonly DocumentChange[]
-
-  /** Register callback for when coalescing delay fires. */
-  onCoalescedChanges(callback: () => void): void
-
-  /** Flush immediately (on save, on shutdown). */
-  flush(): void
-
-  /** Coalescing delay in ms. */
-  readonly coalescingDelayMs: number
 }
 
 interface TrackedDocument {
   readonly uri: string
   readonly path: string
   readonly version: number
-}
-
-/** What a document change produces — path + content, no compilation data. */
-interface DocumentChange {
-  readonly path: string
   readonly content: string
-  readonly version: number
 }
 
 /**
- * CancellationToken — request cancellation for stale diagnostic runs.
+ * DocumentChangeResult — what a document change produces.
+ *
+ * Contains the new compilation snapshot and the set of files
+ * that need re-diagnosis. The caller doesn't need to know about
+ * cache eviction — the compilation tracker handled it.
+ */
+interface DocumentChangeResult {
+  readonly path: string
+  readonly content: string
+  readonly affectedPaths: readonly string[]
+  readonly cancellationToken: CancellationToken
+}
+
+/**
+ * CancellationToken — request cancellation instead of debouncing.
  *
  * Like typescript-language-server's GetErrRequest cancellation.
- * When the coalescing delay fires with new changes, the server
- * cancels the previous token before starting a new pipeline run.
- * Diagnostic producers check the token between phases and between files.
+ * When a new document change arrives, the previous token is cancelled.
+ * Diagnostic producers check the token between phases.
  */
 interface CancellationToken {
   readonly isCancelled: boolean
@@ -312,51 +269,19 @@ declare function createCancellationSource(): CancellationSource
 ### Change Flow
 
 ```
-document change arrives (keystroke)
+document change arrives
   → DocumentTracker.change(uri, version, content)
-    → stores content, starts/resets coalescing delay (200-300ms)
-    → returns true (change queued)
-
-coalescing delay fires (200-300ms after last keystroke)
-  → DocumentTracker.onCoalescedChanges callback fires
-    → server.diagnosticCancellation?.cancel()   // abort stale pipeline
-    → server.diagnosticCancellation = createCancellationSource()
-    → changes = tracker.drainPendingChanges()
-    → // Step 1: Sync TS service for ALL changes (batch before getProgram)
-    → for each change:
-      → server.tsService.updateFile(path, content)
-    → // Step 2: Build all trees, then apply as a single batch.
-    → //   CSS files: tracker parses via CSSSourceProvider internally.
-    → //   Solid files: tracker.applyChange() removes old tree + marks stale but
-    → //     does NOT parse (needs ts.Program). Caller builds SolidSyntaxTree
-    → //     and adds it to the compilation via withSolidTree().
-    → //   applyBatch() applies all mutations then rebuilds the dependency
-    → //   graph ONCE — not N times for N changes.
-    → solidTrees = new Map()
-    → for each change:
-      → if solid file:
-        → tree = buildSolidTreeForPath(path, () => server.tsService.getProgram())
-        → solidTrees.set(path, tree)
-    → server.tracker = server.tracker.applyBatch(changes, solidTrees)
-    → affectedPaths = server.tracker.getStaleFiles()
-    → server.session = buildSession(server)  // new session from current state
-    → DiagnosticPipeline.run(changes, affectedPaths, server.session, token)
-      → Phase 1: single-file ganko diagnostics (5-20ms per file)
-        → if token.isCancelled: abort
-      → Phase 2: cross-file diagnostics (if workspace enriched)
-        → if token.isCancelled: abort
-      → Phase 3 (async): TypeScript diagnostics (yields between files via setImmediate)
-        → if token.isCancelled: abort between files
-      → publish all results via DiagnosticsPublisher
-
-document open arrives
-  → DocumentTracker.open(uri, path, version, content)
-  → immediate diagnosis (no coalescing delay for opens)
-  → same pipeline, own CancellationSource
-
-document save arrives
-  → DocumentTracker.flush() // drain any pending coalesced changes
-  → immediate full re-diagnosis with cross-file
+    → cancel previous CancellationSource
+    → create new CancellationSource
+    → server.session.compilation.applyFileChange(path, tree)
+      → CompilationTracker produces new compilation
+      → dependency graph identifies affected files
+    → return DocumentChangeResult { path, content, affectedPaths, token }
+  → DiagnosticPipeline.run(result)
+    → for each affected file:
+      → if token.isCancelled: abort
+      → produce diagnostics from current compilation
+      → publish via DiagnosticsPublisher
 ```
 
 ---
@@ -386,44 +311,38 @@ One `DiagnosticsPublisher` that owns all diagnostic state per file. Diagnostics 
  */
 interface DiagnosticsPublisher {
   /**
-   * Update diagnostics for a file by kind.
-   * Publishes merged results to the LSP connection immediately
-   * unless inside a batch. Stores BOTH raw Diagnostic[] (for handlers
-   * like code-action) and converted LspDiagnostic[] (for publication).
-   * rawDiags REQUIRED for Ganko and CrossFile kinds — code-action handler
-   * needs raw Diagnostic[] for fix extraction. Omitting rawDiags for
-   * Ganko/CrossFile kinds is a compile-time error (overload enforces this).
-   * TypeScript kind does not produce raw diagnostics.
+   * Run diagnostics for a file and publish results.
+   *
+   * Produces ganko single-file + cross-file + TypeScript diagnostics
+   * in one call. No manual merging. No separate cache eviction.
+   * Checks cancellation token between phases.
    */
-  update(path: string, kind: DiagnosticKind.Ganko | DiagnosticKind.CrossFile, lspDiags: readonly LspDiagnostic[], rawDiags: readonly Diagnostic[]): void
-  update(path: string, kind: DiagnosticKind.TypeScript, lspDiags: readonly LspDiagnostic[]): void
+  diagnoseAndPublish(
+    path: string,
+    context: DiagnosticContext,
+    token: CancellationToken,
+  ): void
 
-  /** Get merged LSP diagnostics for a file (all kinds combined). */
-  getLspDiagnostics(path: string): readonly LspDiagnostic[]
+  /**
+   * Publish diagnostics for multiple affected files.
+   *
+   * Used after a document change when the dependency graph
+   * identifies transitively affected files.
+   */
+  diagnoseAffected(
+    paths: readonly string[],
+    context: DiagnosticContext,
+    token: CancellationToken,
+  ): void
 
-  /** Get raw ganko diagnostics for a file (for code-action, hover, etc.). */
-  getRawDiagnostics(path: string): readonly Diagnostic[]
-
-  /** Get diagnostics by kind. */
-  getDiagnosticsByKind(path: string, kind: DiagnosticKind): readonly LspDiagnostic[]
-
-  /** Batch mode — coalesce multiple kind updates into one publish. */
-  beginBatch(): void
-  endBatch(): void
-
-  /** Republish current state for a file.
-   *  Attaches document version from DocumentTracker for LSP version tagging.
-   *  Without version, VS Code drops stale diagnostics silently. */
-  republish(path: string): void
+  /** Get current diagnostics for a file (for pull diagnostics). */
+  getDiagnostics(path: string): FileDiagnosticState
 
   /** Clear diagnostics for a closed file. */
   clear(path: string): void
 
   /** Clear all diagnostics. */
   clearAll(): void
-
-  /** Evict cached state for a file (before re-diagnosis). */
-  evict(path: string): void
 }
 
 /**
@@ -434,7 +353,7 @@ interface DiagnosticsPublisher {
  * coalesces multiple kind updates into a single publish.
  */
 interface FileDiagnosticEntry {
-  update(kind: DiagnosticKind, diagnostics: readonly LspDiagnostic[], rawDiags?: readonly Diagnostic[]): void
+  update(kind: DiagnosticKind, diagnostics: readonly LspDiagnostic[]): void
   clear(kind: DiagnosticKind): void
   getDiagnostics(): readonly LspDiagnostic[]
   getDiagnosticsByKind(kind: DiagnosticKind): readonly LspDiagnostic[]
@@ -473,59 +392,29 @@ const enum DiagnosticKind {
  */
 interface DiagnosticPipeline {
   /**
-   * Run all diagnostic phases for a file (async).
+   * Run all diagnostic phases for a file.
    *
-   * Phase 1: Single-file ganko diagnostics (sync, 5-20ms)
-   * Phase 2: Cross-file ganko diagnostics (sync, 100-500ms, if enriched)
-   * Phase 3: TypeScript diagnostics (async, yields via setImmediate)
-   *
-   * ASYNC because Phase 3 (TS propagation) must yield between files
-   * to avoid blocking the event loop for 50-200ms per file.
-   * Cancellation token checked between ALL phases and between files.
-   *
-   * Publishes results via DiagnosticsPublisher after each phase
-   * so the user sees single-file results before cross-file completes.
+   * @param path - File to diagnose
+   * @param content - Current content (from editor buffer or disk)
+   * @param session - Current server session
+   * @param token - Cancellation token (cancelled on next document change)
    */
   run(
     path: string,
     content: string | undefined,
     session: ServerSession,
     token: CancellationToken,
-  ): Promise<void>
+  ): void
 
   /**
-   * Run diagnostics for a batch of affected files (async).
-   * Checks cancellation between files and between phases.
+   * Run diagnostics for a batch of affected files.
+   * Checks cancellation between files.
    */
   runBatch(
     paths: readonly string[],
     session: ServerSession,
     token: CancellationToken,
-  ): Promise<void>
-
-  /**
-   * Run diagnostics IMMEDIATELY for pull diagnostics (textDocument/diagnostic).
-   *
-   * AI agents send this request synchronously after editing and expect fresh
-   * results — they cannot wait for the coalescing delay. The ROUTING LAYER
-   * performs the flush/mutation BEFORE calling this method:
-   *   1. Routing: flush pending buffer into TS service (server.tsService.updateFile)
-   *   2. Routing: apply change to tracker if content differs from existing
-   *      (server.tracker = server.tracker.applyChange(...))
-   *   3. Routing: build new session (mutator.buildSession(server))
-   *   4. This method: runs full analysis inline on the fresh session
-   *   5. This method: returns fresh diagnostics + updates publisher
-   *
-   * Takes Server (not just session) because it needs DiagnosticsPublisher
-   * to update cached state for subsequent push publishes.
-   * Does NOT use the coalescing delay. Does NOT cancel pending push runs.
-   * The push pipeline continues operating in parallel.
-   */
-  runImmediate(
-    path: string,
-    content: string | undefined,
-    server: Server,
-  ): readonly LspDiagnostic[]
+  ): void
 }
 ```
 
@@ -539,233 +428,75 @@ The LSP maintains `diagCache` (ResourceMap), cross-file results in `CompilationT
 
 ### Design
 
-The `CompilationTracker` (already built) becomes the SOLE compilation/analysis cache. File changes flow through it. No separate `diagCache` (ResourceMap) in the LSP layer. The `DiagnosticsPublisher` on `Server` owns published diagnostic results (both raw and converted).
-
-The CompilationTracker is MUTABLE INFRASTRUCTURE that lives on `Server`, NOT on the session. Its `applyChange()`/`applyDeletion()` methods return NEW tracker instances (immutable structural sharing). But `setCachedCrossFileDiagnostics()` and `setCachedCrossFileResults()` mutate in-place (the diagnostic cache on the current tracker state). The session holds the immutable `StyleCompilation` snapshot; the tracker lives on `Server`.
+The `CompilationTracker` (already built) becomes the SOLE cache. File changes flow through it. No separate caches in the LSP layer.
 
 ```typescript
 // ═══════════════════════════════════════════════════════════════════
-// The compilation tracker IS the compilation/analysis cache
-// DiagnosticsPublisher IS the published diagnostic cache
-// No diagCache ResourceMap. No manual eviction ordering.
+// The compilation tracker IS the cache — no separate LSP caches
 // ═══════════════════════════════════════════════════════════════════
 
 /**
  * Change flow — how the LSP layer uses the compilation tracker.
  *
- * Coalescing delay fires with pending changes:
- *   1. Sync TS service for ALL changes (batch before getProgram)
- *   2. Build SolidSyntaxTrees for solid files (requires TS program)
- *   3. server.tracker = server.tracker.applyBatch(changes)
- *      → applies all tree mutations, rebuilds dependency graph ONCE
- *      → returns NEW tracker with new compilation
- *   4. affected = server.tracker.getStaleFiles()
- *   5. server.session = mutator.buildSession(server)  // snapshot
- *   6. DiagnosticPipeline.run(changes, affected, session, token)
- *      → Phase 1: for each file, run single-file rules on SolidSyntaxTree
- *      → Phase 2: for affected files, run cross-file via IncrementalAnalyzer
- *      → Phase 3: async TS diagnostics (yields between files)
- *   7. Each phase publishes via DiagnosticsPublisher
+ * Document change arrives:
+ *   1. Parse file → SolidSyntaxTree or CSSSyntaxTree
+ *   2. compilation = compilation.withFile(path, tree)
+ *      → CompilationTracker produces new compilation
+ *      → symbol table lazily recomputed (DeclarationTable caches old contributions)
+ *      → dependency graph updated
+ *   3. affected = compilation.dependencyGraph.getTransitivelyAffected(path)
+ *   4. For each affected file:
+ *      → model = compilation.getSemanticModel(file)
+ *      → diagnostics = dispatcher.runFile(model)
+ *   5. Publish diagnostics
  *
- * No diagCache. No manual eviction ordering.
- * tracker.applyBatch() handles compilation invalidation.
- * Publisher handles diagnostic result storage.
+ * No diagCache. No graphCache. No manual eviction.
+ * The compilation IS the cache. New compilations automatically
+ * invalidate stale data via structural sharing.
  */
 
 /**
- * CompilationTracker extension — applyBatch for coalesced changes.
+ * SessionMutator — produces new sessions from file changes.
  *
- * The existing CompilationTracker.applyChange() rebuilds the dependency
- * graph on every call (buildDependencyGraph + propagateChanges). For N
- * coalesced changes, that's N graph builds. applyBatch applies all tree
- * mutations first, then rebuilds the graph once.
- */
-interface CompilationTrackerBatch {
-  /**
-   * Apply a batch of file changes in one graph rebuild.
-   *
-   * solidTrees: pre-built SolidSyntaxTrees (caller parses these because
-   *   tracker doesn't have a ts.Program). Keyed by canonical path.
-   * changes: all changed files (CSS files parsed internally by tracker
-   *   via CSSSourceProvider; solid files use the pre-built trees).
-   */
-  applyBatch(
-    changes: readonly { path: string; content: string; version: string }[],
-    solidTrees: ReadonlyMap<string, SolidSyntaxTree>,
-  ): CompilationTracker
-}
-
-/**
- * SessionMutator — produces new sessions from state changes.
- *
- * Like Roslyn's Workspace.ApplyDocumentTextChanged(). Takes the
- * current server state, produces a new session snapshot.
- *
- * IMPORTANT: The IncrementalTypeScriptService is SHARED MUTABLE
- * infrastructure. Calling tsService.updateFile() mutates its internal
- * fileContents Map, which affects any handler calling getSourceFile().
- * This is the same model as Roslyn's Workspace — the Workspace holds
- * mutable state; Solution is an immutable snapshot of COMPILATION state.
- * Handlers see latest TS content but immutable compilation snapshots.
- *
- * The mutator reads from Server's mutable infrastructure (tracker,
- * tsService, fileRegistry) and produces an immutable session snapshot.
+ * Like Roslyn's Workspace.ApplyDocumentTextChanged():
+ * takes the current session, applies a change, returns a new session.
+ * The old session remains valid (any in-progress handler using it
+ * sees a consistent snapshot).
  */
 interface SessionMutator {
-  /** Monotonic session ID counter. */
-  readonly nextId: number
-
   /**
-   * Initialize the server — creates tracker, TsService, first session.
-   * Called from handleInitialized Phase A. Populates Server.tracker,
-   * Server.tsService with initial state. Returns the first session
-   * (Quick tier, no workspace enrichment).
+   * Apply a file change to the current session.
    *
-   * Sequence: handleInitialized calls:
-   *   1. mutator.initialize(server, rootPath, config)  → Phase A session
-   *   2. await project.watchProgramReady()
-   *   3. mutator.applyTierTransition(server, project)  → Phase B session
-   *   4. await runEnrichment(...)
-   *   5. mutator.applyEnrichment(server, enrichment)   → Phase C session
+   * Parses the file, updates the compilation, identifies affected files,
+   * returns a new session. The old session is not modified.
    */
-  initialize(
-    server: Server,
-    rootPath: string,
-    config: ServerConfig,
-    project: Project,
-  ): ServerSession
-
-  /**
-   * Build a session from current server state.
-   * Called after any mutation to Server's infrastructure.
-   */
-  buildSession(server: Server): ServerSession
-
-  /**
-   * Apply file changes: sync TS service, apply to tracker, build new session.
-   * Returns affected paths for diagnostic pipeline.
-   */
-  applyFileChanges(
-    server: Server,
-    changes: readonly DocumentChange[],
+  applyFileChange(
+    session: ServerSession,
+    path: string,
+    content: string,
   ): SessionChangeResult
 
   /**
-   * Apply a workspace-level config change.
-   * Creates a new frozen ServerConfig from partial update.
-   * Wired to handleConfigurationChange and reloadESLintConfig.
+   * Apply a workspace-level change (config, excludes, etc.).
    */
-  applyConfigChange(
-    server: Server,
-    update: Partial<ServerConfig>,
+  applyWorkspaceChange(
+    session: ServerSession,
+    config: ServerConfig,
   ): ServerSession
 
   /**
    * Apply workspace enrichment results.
-   * Returns ALL open file paths for re-diagnosis (tier transition).
    */
   applyEnrichment(
-    server: Server,
+    session: ServerSession,
     enrichment: EnrichmentResult,
-  ): SessionChangeResult
-
-  /**
-   * Apply tier transition (Quick → Incremental).
-   * Returns ALL open file paths for re-diagnosis.
-   */
-  applyTierTransition(
-    server: Server,
-    project: Project,
-  ): SessionChangeResult
+  ): ServerSession
 }
 
 interface SessionChangeResult {
   readonly session: ServerSession
   readonly affectedPaths: readonly string[]
 }
-
-/**
- * Frozen config construction. Takes current config + partial update,
- * returns a new frozen config object. Wired to handleConfigurationChange,
- * reloadESLintConfig, handleInitialize.
- *
- * ruleOverrides is a DERIVED field: mergeOverrides(eslintOverrides, vscodeOverrides).
- * mergeServerConfig recomputes it internally from the constituent overrides.
- * Callers NEVER set ruleOverrides directly — they set eslintOverrides and/or
- * vscodeOverrides, and mergeServerConfig derives ruleOverrides.
- */
-declare function mergeServerConfig(
-  current: Readonly<ServerConfig>,
-  update: Partial<Omit<ServerConfig, "ruleOverrides">>,
-): Readonly<ServerConfig>
-```
-
-### Workspace File Events (Finding #10: ChangePipeline)
-
-The `SessionMutator.applyFileChanges()` handles document buffer edits. Workspace file system events (`didChangeWatchedFiles`) are a SEPARATE flow that mutates the `FileRegistry`, checks for Tailwind entry changes, and handles ESLint config detection. This replaces the current `ChangePipeline`.
-
-```typescript
-/**
- * WorkspaceChangeHandler — processes didChangeWatchedFiles events.
- *
- * Replaces both ChangePipeline and the didChangeWatchedFiles handler
- * logic in routing/lifecycle.ts.
- *
- * Distinct from SessionMutator.applyFileChanges() which handles editor
- * buffer changes. This handles files created/deleted/changed ON DISK
- * while not open in the editor.
- *
- * Responsibilities (from current ChangePipeline + routing/lifecycle.ts):
- *   1. Update FileRegistry (addFile/removeFile)
- *   2. Detect ESLint config file changes → reload config
- *   3. Detect Tailwind entry CSS changes → async re-resolve
- *   4. Invalidate tracker (applyChange/applyDeletion)
- *   5. Produce new session with updated file set snapshots
- *   6. Re-diagnose affected open files
- *
- * GATING: processFileEvents is a no-op when server.session?.workspace.enriched
- * is false — FileRegistry and Tailwind state don't exist yet. Before
- * enrichment, file events only invalidate the tracker via applyChange/
- * applyDeletion on Server.tracker (same as current routing/lifecycle.ts
- * lines 111-119 which gates on phase.tag === "enriched").
- */
-interface WorkspaceChangeHandler {
-  processFileEvents(
-    server: Server,
-    events: readonly FileChangeEvent[],
-  ): Promise<void>
-
-  processRegistryRebuild(
-    server: Server,
-    newRegistry: FileRegistry,
-    newLayout: WorkspaceLayout,
-  ): void
-}
-
-interface FileChangeEvent {
-  readonly path: string
-  readonly kind: "created" | "changed" | "deleted"
-}
-```
-
-### Content Resolution (Finding #18)
-
-Cross-file analysis needs content for ALL workspace files, not just open ones.
-
-```typescript
-/**
- * Content resolution chain — used by CompilationBuilder and diagnostic pipeline.
- *
- *   1. Open document buffer from DocumentTracker (in-memory editor state)
- *   2. FileRegistry.getCSSContent() for CSS files (on-disk cache)
- *   3. readFileSync fallback (direct disk read)
- *
- * CompilationBuilder receives this as a function parameter, NOT hardcoded.
- */
-declare function createContentResolver(
-  tracker: DocumentTracker,
-  registry: FileRegistry | null,
-): (path: string) => string | null
 ```
 
 ---
@@ -786,39 +517,43 @@ Cross-file analysis uses the dependency graph to re-analyze only affected files.
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * IncrementalAnalyzer — handles ONLY the cross-file portion.
+ * IncrementalAnalyzer — replaces monolithic refreshCrossFileCache.
  *
- * Replaces monolithic refreshCrossFileCache.
+ * Uses compilation.dependencyGraph.getTransitivelyAffected() to
+ * identify which files need re-analysis after a change. Only those
+ * files' semantic models are recomputed. The dispatcher runs only
+ * the rules whose inputs changed.
  *
- * Single-file and cross-file diagnostics are intentionally separated:
- * single-file rules (runSolidRules) run on a SolidSyntaxTree WITHOUT
- * a compilation (5-20ms, works at Tier 1 / Quick program). Cross-file
- * rules run via AnalysisDispatcher.run(compilation) which executes
- * Tier 0-5 rules (100-500ms, needs full compilation).
- *
- * The DiagnosticPipeline runs them as separate phases. Don't merge
- * what the architecture intentionally separates.
+ * The compilation is NOT rebuilt from scratch. The immutable compilation
+ * with structural sharing means unchanged trees are reused. Only the
+ * changed tree is replaced, and only affected semantic models are
+ * recomputed (they're lazy — untouched models retain their cached
+ * binding results).
  */
 interface IncrementalAnalyzer {
   /**
-   * Run cross-file rules for a subset of affected files.
+   * Analyze a single file using the current compilation.
    *
-   * Uses compilation.dependencyGraph.getTransitivelyAffected() result
-   * to re-analyze only files whose semantic models are stale.
-   * The compilation's structural sharing means unchanged trees are
-   * reused; only affected semantic models are recomputed (they're lazy).
+   * Returns ganko diagnostics (single-file + cross-file combined).
+   * The compilation's semantic model handles the cross-file resolution
+   * transparently — the caller doesn't need to know about scopes,
+   * component hosts, or cascade binding.
+   */
+  analyzeFile(
+    path: string,
+    compilation: StyleCompilation,
+    overrides: RuleOverrides,
+  ): readonly Diagnostic[]
+
+  /**
+   * Analyze a batch of affected files.
+   *
+   * Used after a document change to re-analyze transitively affected files.
+   * The compilation is the same snapshot — only the semantic models
+   * for affected files are recomputed.
    */
   analyzeAffected(
     paths: readonly string[],
-    compilation: StyleCompilation,
-    overrides: RuleOverrides,
-  ): ReadonlyMap<string, readonly Diagnostic[]>
-
-  /**
-   * Run cross-file rules for ALL files in the compilation.
-   * Used for full workspace analysis (initial build, config change).
-   */
-  analyzeAll(
     compilation: StyleCompilation,
     overrides: RuleOverrides,
   ): ReadonlyMap<string, readonly Diagnostic[]>
@@ -831,11 +566,8 @@ interface IncrementalAnalyzer {
  * diagnostics. The dispatcher already knows about tiers — Tier 0 CSS-only
  * rules run on CSS trees alone, Tier 1-5 on semantic models.
  *
- * PREREQUISITE: AnalysisDispatcher must gain a run(compilation, affectedFiles?)
- * overload. The current dispatcher.run(compilation) runs ALL rules on the
- * entire compilation. runSubset() requires the dispatcher to accept a file
- * subset so only rules whose inputs intersect the affected set execute.
- * This is Phase 6 implementation work on the ganko package.
+ * For incremental updates, only re-runs rules whose input files
+ * are in the affected set.
  */
 interface CompilationDiagnosticProducer {
   /**
@@ -850,7 +582,7 @@ interface CompilationDiagnosticProducer {
   /**
    * Run cross-file rules for a subset of files.
    * Only files in `paths` produce diagnostics.
-   * Requires AnalysisDispatcher.run(compilation, affectedFiles) overload.
+   * Rules that don't touch any file in `paths` are skipped.
    */
   runSubset(
     paths: readonly string[],
@@ -891,15 +623,8 @@ interface DaemonState {
   readonly server: NetServer
   readonly log: Logger
 
-  /** Project for TypeScript program access — needed by CompilationBuilder
-   *  to get ts.Program for solid tree parsing. Created via ProjectFactory.create(). */
-  project: Project | null
-
   /** The daemon's session — same type as the LSP's. */
   session: ServerSession | null
-
-  /** CompilationTracker — same as Server.tracker in the LSP. */
-  tracker: CompilationTracker
 
   /** Session mutator — same as the LSP's. */
   readonly mutator: SessionMutator
@@ -972,18 +697,12 @@ interface CompilationBuilder {
   /**
    * Apply a single file change to an existing compilation.
    * Used by LSP and daemon incremental updates.
-   *
-   * Takes getProgram (deferred) instead of a concrete ts.Program because
-   * after IncrementalTypeScriptService.updateFile(), the LanguageService
-   * lazily rebuilds on next getProgram() call. Passing a concrete program
-   * risks staleness. Deferred acquisition ensures the builder gets the
-   * post-update program exactly when needed.
    */
   applyChange(
     compilation: StyleCompilation,
     path: string,
     content: string,
-    getProgram: () => ts.Program,
+    tsProgram: ts.Program,
     logger?: Logger,
   ): CompilationChangeResult
 }
@@ -992,11 +711,10 @@ interface FullBuildOptions {
   readonly rootPath: string
   readonly solidFiles: ReadonlySet<string>
   readonly cssFiles: ReadonlySet<string>
-  readonly getProgram: () => ts.Program
+  readonly tsProgram: ts.Program
   readonly tailwindValidator: TailwindValidator | null
   readonly externalCustomProperties: ReadonlySet<string> | undefined
   readonly logger?: Logger
-  /** Content resolution: buffer → registry → disk. See createContentResolver. */
   readonly resolveContent: (path: string) => string | null
 }
 
@@ -1093,31 +811,22 @@ interface HandlerRouter {
  *
  * For handlers that need cross-file information (e.g., definition
  * across files, workspace symbol search).
- * Uses immutable file set snapshots from WorkspaceState, NOT the mutable
- * FileRegistry. Handlers cannot mutate the registry through the context.
  */
 interface EnrichedFeatureContext extends FeatureContext {
   readonly workspace: {
-    readonly solidFiles: ReadonlySet<string>
-    readonly cssFiles: ReadonlySet<string>
+    readonly registry: FileRegistry
     readonly layout: WorkspaceLayout
     readonly tailwindValidator: TailwindValidator | null
   }
 }
 
 /**
- * FeatureContext construction.
+ * FeatureContext implementation.
  *
- * All queries delegate to the session's compilation and TypeScript state.
- * Requires Server infrastructure for content
- * resolution (DocumentTracker for open buffers, FileRegistry for CSS cache,
- * readFileSync fallback) and DiagnosticsPublisher for raw diagnostic access.
+ * Constructed from a ServerSession. All queries delegate to
+ * the session's compilation and TypeScript state.
  */
-declare function createFeatureContext(
-  session: ServerSession,
-  server: Server,
-  log: Logger,
-): FeatureContext
+declare function createFeatureContext(session: ServerSession, log: Logger): FeatureContext
 ```
 
 ### Handler Signatures (unchanged logic, new context)
@@ -1196,7 +905,7 @@ interface TsProgramAccess {
 declare function createTsProgramAccess(state: TsProgramState): TsProgramAccess
 ```
 
-### Tier Transition (Finding #5: race condition handling)
+### Tier Transition
 
 ```
 initialize →
@@ -1207,35 +916,12 @@ initialize →
     → DiagnosticPipeline uses host.createProgram(path, content) for Tier 1
     → publishes single-file diagnostics immediately
 
-watchProgramReady() resolves (3-8s async) →
-  server.diagnosticCancellation?.cancel()   // CANCEL in-flight Tier 1 runs
-  result = mutator.applyTierTransition(server, project)
-  server.session = result.session
-  // result.affectedPaths = ALL open files (must re-diagnose with full types)
-  → re-diagnose ALL open files with full type information
-  → any Tier 1 pipeline mid-run sees token.isCancelled and aborts
+watchProgramReady() resolves →
+  create IncrementalTypeScriptService
+  session = session with { tsProgram: { tier: "incremental", service, project } }
 
-workspace enrichment completes (5-10s async) →
-  server.diagnosticCancellation?.cancel()   // CANCEL in-flight Tier 2 runs
-  result = mutator.applyEnrichment(server, enrichment)
-  server.session = result.session
-  // result.affectedPaths = ALL open files (cross-file now available)
-  → re-diagnose ALL open files with cross-file results
-```
-
-### Tailwind Re-Resolution (Finding #16: async session transition)
-
-```
-CSS entry file changes (detected by ChangePipeline / isTailwindEntryContent) →
-  // Immediately produce session with tailwindValidator: null
-  server.tailwindState.validator = null
-  server.session = mutator.buildSession(server)
-  // Start async re-resolution
-  await server.tailwindState.reResolve(registry, layout, log)
-  // On completion, produce new session with resolved validator
-  server.session = mutator.buildSession(server)
-  // Re-diagnose all open files with new validator
-  cancel + re-diagnose all open files
+  → subsequent didOpen/didChange uses service.getProgram()
+  → re-diagnose all open files with full type information
 ```
 
 ---
@@ -1248,11 +934,11 @@ CSS entry file changes (detected by ChangePipeline / isTailwindEntryContent) →
 **Files created:** `server/cancellation.ts`, `server/diagnostic-pipeline.ts`
 **Files deleted:** none
 
-Add cancellation tokens to the existing debounce-triggered pipeline:
+Replace the debounce flow with cancellation:
 1. Create `CancellationSource` / `CancellationToken` types
 2. Create `DiagnosticPipeline` that runs phases with cancellation checks
 3. Rewire `processChangesCallback` to cancel previous token + start new pipeline run
-4. The debounce timer REMAINS as the trigger mechanism. Cancellation provides early abort within the pipeline when a new debounce fires before the previous pipeline completes. Both mechanisms coexist through Phases 1-6 — debounce prevents 60 runs/sec, cancellation prevents stale completions. Phase 7 replaces `DocumentManager` with `DocumentTracker` which has its own coalescing delay.
+4. Remove debounce timer from `DocumentManager`
 
 **Validation:** Open file → get diagnostics. Edit file rapidly → only final edit's diagnostics appear. No flicker from intermediate results.
 
@@ -1275,20 +961,12 @@ Merge `diagCache` (ResourceMap) into `DiagnosticsManager`:
 **Files created:** `server/session.ts`, `server/session-mutator.ts`
 **Files deleted:** none (old context preserved as adapter during migration)
 
-Extract `ServerSession` from `ServerContext`. Adapter pattern for coexistence:
+Extract immutable `ServerSession` from `ServerContext`:
 1. Create `ServerSession` type with compilation, ts program, workspace state
-2. Create `SessionMutator` with `initialize`, `buildSession`, `applyFileChanges`, `applyConfigChange`, `applyEnrichment`, `applyTierTransition`
-3. Create `mergeServerConfig()` — frozen config construction from partial updates
-4. `ServerContext` gains `session: ServerSession | null` field — this IS the bridge
-5. `createFeatureContext(session, server, log)` replaces `createFeatureHandlerContext(tsService, project, ...)`
-6. Old phase-checking code reads from `context.session?.workspace.enriched` instead of `context.phase.tag === "enriched"`
-7. Lifecycle handlers call `mutator.buildSession(server)` after state changes instead of mutating `context.phase`
-8. `context.phase` kept as a computed getter during migration: derives from `context.session` state
-9. Convert ALL 12+ `ServerConfig` in-place mutation sites to `mergeServerConfig()`:
-   - `handleInitialize` (lifecycle.ts:119-126): `state.config.vscodeOverrides = ...` × 6 fields
-   - `handleConfigurationChange` (lifecycle.ts:347-353): `state.config.vscodeOverrides = ...` × 5 fields
-   - `reloadESLintConfig` (lifecycle.ts:407-408): `state.config.eslintOverrides = ...` × 2 fields
-   - `applyOverridesIfChanged` (lifecycle.ts:445): `state.config.ruleOverrides = ...`
+2. Create `SessionMutator` that produces new sessions from changes
+3. `ServerContext` holds `session: ServerSession | null`
+4. Feature handlers receive `FeatureContext` created from current session
+5. Lifecycle handlers transition session state
 
 **Validation:** Full LSP test suite passes. Initialize → get diagnostics → edit → updated diagnostics → workspace scan → cross-file diagnostics.
 
@@ -1338,21 +1016,19 @@ Replace monolithic cross-file rebuild with incremental:
 **Files deleted:** `server/document-manager.ts`, `server/change-processor.ts`
 
 Replace debounce + drain with cancellation-based document tracking:
-1. Create `DocumentTracker` with open/change/save/close + coalescing delay
-2. Create `WorkspaceChangeHandler` to replace `ChangePipeline` + lifecycle.ts watcher logic
-3. Each coalesced change batch cancels previous diagnostic run, starts new one
-4. Remove `DocumentManager` with its debounce timer
-5. Remove `ChangeProcessor` — the pipeline handles change propagation
-6. Remove `ChangePipeline` — absorbed into `WorkspaceChangeHandler`
+1. Create `DocumentTracker` with open/change/save/close
+2. Each change cancels previous diagnostic run, starts new one
+3. Remove `DocumentManager` with its debounce timer
+4. Remove `ChangeProcessor` — the pipeline handles change propagation
 
-**Validation:** Rapid typing → diagnostics appear after coalescing delay (200-300ms) + analysis time. Single keystroke → diagnostics within coalescing delay + analysis (~350-400ms total). Document updates sync to TS service immediately on each keystroke (no delay); only the diagnostic pipeline trigger is coalesced.
+**Validation:** Rapid typing → diagnostics appear after typing stops (natural latency from compilation, no artificial debounce). Single keystroke → diagnostics within 100ms.
 
 ### Phase 8: Cleanup
 
 **Files deleted:**
-- `server/diagnostics-push.ts` (absorbed into DiagnosticPipeline)
+- `server/change-processor.ts` (absorbed into pipeline)
+- `server/diagnostics-push.ts` (absorbed into pipeline)
 - `core/tier1-program.ts` (absorbed into TsProgramState)
-- `core/change-pipeline.ts` (absorbed into WorkspaceChangeHandler in Phase 7)
 
 **Files changed:**
 - `connection.ts` → `server.ts` (renamed, simplified)
@@ -1365,9 +1041,7 @@ Replace debounce + drain with cancellation-based document tracking:
 
 These components are architecturally correct and do not change:
 
-- **CompilationTracker and StyleCompilation** — the compilation with structural sharing, dependency graph, DeclarationTable. `applyChange()`/`applyDeletion()` return new tracker instances. The tracker is mutable infrastructure on `Server`; the `StyleCompilation` it produces is immutable. The LSP redesign makes the LSP *worthy* of consuming this engine; the engine itself is complete.
-
-- **DiagnosticsManager** (`diagnostics-manager.ts`) — per-file diagnostic aggregation by kind with batch mode. Promoted to `DiagnosticsPublisher` with added `getRawDiagnostics()` for handler access, but the core implementation (FileDiagnostics, batch coalescing, publish-on-update) is kept.
+- **CompilationTracker and StyleCompilation** — the immutable compilation with structural sharing, dependency graph, DeclarationTable. The LSP redesign makes the LSP *worthy* of consuming this engine; the engine itself is complete.
 
 - **AnalysisDispatcher and tiered rule execution** — Tier 0 CSS-only, Tier 1-5 cross-file with SemanticModel queries. 65 rules registered, dispatched by tier.
 
@@ -1403,6 +1077,6 @@ These components are architecturally correct and do not change:
 
 - **Logger infrastructure** (`logger.ts`) — logging backends. Unchanged.
 
-- **Tailwind state** (`tailwind-state.ts`) — Tailwind resolver state tracking. Mutable infrastructure on `Server`. Async re-resolution modeled as session transition (see Section 9). Implementation unchanged.
+- **Tailwind state** (`tailwind-state.ts`) — Tailwind resolver state tracking. Moves into WorkspaceState but implementation unchanged.
 
 - **Workspace evaluator** (`workspace-eval.ts`) — subprocess for Tailwind v4 evaluation. Unchanged.
