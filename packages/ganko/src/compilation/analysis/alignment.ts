@@ -2235,7 +2235,7 @@ const FINDING_WEIGHT_BY_KIND = new Map<string, number>([
 ])
 
 export function formatAlignmentCauses(findings: readonly AlignmentSignalFinding[]): readonly string[] {
-  const ordered = [...findings].sort((left, right) => {
+  const ordered = findings.toSorted((left, right) => {
     const leftWeight = FINDING_WEIGHT_BY_KIND.get(left.kind) ?? Number.MAX_SAFE_INTEGER
     const rightWeight = FINDING_WEIGHT_BY_KIND.get(right.kind) ?? Number.MAX_SAFE_INTEGER
     if (leftWeight !== rightWeight) return leftWeight - rightWeight

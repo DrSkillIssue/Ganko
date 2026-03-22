@@ -15,6 +15,7 @@ import type { Project } from "../core/project";
 import type { WorkspaceEvaluator } from "../core/workspace-eval";
 import type { ServerConfig } from "./handlers/lifecycle";
 import type { Logger } from "../core/logger";
+import type ts from "typescript";
 
 /**
  * ServerInfrastructure — the subset of mutable server state that
@@ -28,7 +29,7 @@ export interface ServerInfrastructure {
   readonly log: Logger
   tracker: CompilationTracker
   getProject(): Project | null
-  getTsCompilerOptions(): import("typescript").CompilerOptions | null
+  getTsCompilerOptions(): ts.CompilerOptions | null
   getRootPath(): string | null
   getConfig(): ServerConfig
   getFileRegistry(): FileRegistry | null

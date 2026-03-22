@@ -1,4 +1,5 @@
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
+import type { ElementNode } from "../../binding/element-builder"
 import { TextualContentState } from "../../binding/signal-builder"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -51,7 +52,7 @@ export const cssLayoutContentVisibilityNoIntrinsicSize = defineAnalysisRule({
   },
 })
 
-function isDeferredContainerLike(element: import("../../binding/element-builder").ElementNode): boolean {
+function isDeferredContainerLike(element: ElementNode): boolean {
   if (element.siblingCount >= 2) return true
   if (element.textualContent === TextualContentState.Unknown) return true
   if (element.tagName !== null && SECTIONING_CONTAINER_TAGS.has(element.tagName)) return true

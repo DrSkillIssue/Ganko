@@ -383,7 +383,7 @@ export function buildElementNodes(
     nodeByElementId.set(record.element.id, node)
     if (parentElementId !== null) lastChildByParentId.set(parentElementId, node)
     if (parentNode !== null) {
-      (parentNode.childElementNodes as ElementNode[]).push(node)
+      (parentNode.childElementNodes).push(node)
     }
   }
 
@@ -930,7 +930,9 @@ function findNodeModulesPackage(importerFile: string, packageName: string): stri
 
 type ExternalPackageExportNode = { kind: "path"; value: string } | { kind: "array"; values: ExternalPackageExportNode[] } | { kind: "map"; fields: Map<string, ExternalPackageExportNode> }
 
-function parseExternalExportNode(value: unknown): ExternalPackageExportNode | null {
+type JsonValue = string | number | boolean | null | undefined | JsonValue[] | { [key: string]: JsonValue }
+
+function parseExternalExportNode(value: JsonValue): ExternalPackageExportNode | null {
   if (typeof value === "string") return { kind: "path", value }
   if (Array.isArray(value)) {
     const values: ExternalPackageExportNode[] = []
@@ -947,7 +949,7 @@ function resolveExternalExportTarget(node: ExternalPackageExportNode | null, sub
   if (node === null) return null
   if (node.kind === "path") return node.value
   if (node.kind === "array") {
-    for (let i = 0; i < node.values.length; i++) { const r = resolveExternalExportTarget(node.values[i]!, subpath, conditions); if (r !== null) return r }
+    for (let i = 0; i < node.values.length; i++) { const r = resolveExternalExportTarget(node.values[i], subpath, conditions); if (r !== null) return r }
     return null
   }
   const exact = node.fields.get(subpath)
@@ -969,7 +971,7 @@ function resolveExternalExportCondition(node: ExternalPackageExportNode | undefi
   if (node === undefined) return null
   if (node.kind === "path") return node.value
   if (node.kind === "array") {
-    for (let i = 0; i < node.values.length; i++) { const r = resolveExternalExportCondition(node.values[i]!, conditions); if (r !== null) return r }
+    for (let i = 0; i < node.values.length; i++) { const r = resolveExternalExportCondition(node.values[i], conditions); if (r !== null) return r }
     return null
   }
   for (let i = 0; i < conditions.length; i++) { const c = conditions[i]; if (!c) continue; const r = resolveExternalExportCondition(node.fields.get(c), conditions); if (r !== null) return r }

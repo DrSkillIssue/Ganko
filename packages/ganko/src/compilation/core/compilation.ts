@@ -199,13 +199,13 @@ export function createCompilationFromLegacy(
 ): StyleCompilation {
   const solidMap = new Map<string, SolidSyntaxTree>();
   for (let i = 0; i < solidTrees.length; i++) {
-    const t = solidTrees[i]!;
+    const t = solidTrees[i];
     solidMap.set(t.filePath, t);
   }
 
   const cssMap = new Map<string, CSSSyntaxTree>();
   for (let i = 0; i < cssTrees.length; i++) {
-    const t = cssTrees[i]!;
+    const t = cssTrees[i];
     cssMap.set(t.filePath, t);
   }
 

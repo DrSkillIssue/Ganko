@@ -10,6 +10,7 @@ import type { Diagnostic } from "../../diagnostic"
 import type { StyleCompilation } from "../core/compilation"
 import type { SymbolTable } from "../symbols/symbol-table"
 import type { FileSemanticModel } from "../binding/semantic-model"
+import type { ElementNode } from "../binding/element-builder"
 import type { AnalysisRule, Emit } from "./rule"
 import { ComputationTier } from "./rule"
 import { createActionRegistry, type CollectedActions } from "./registry"
@@ -174,7 +175,7 @@ function dispatchCrossSyntaxActionsSubset(actions: CollectedActions, compilation
   }
 }
 
-function dispatchElementActions(actions: CollectedActions, elements: readonly import("../binding/element-builder").ElementNode[], model: FileSemanticModel, emit: Emit): void {
+function dispatchElementActions(actions: CollectedActions, elements: readonly ElementNode[], model: FileSemanticModel, emit: Emit): void {
   if (actions.element.length === 0) return
 
   for (let i = 0; i < elements.length; i++) {
@@ -187,7 +188,7 @@ function dispatchElementActions(actions: CollectedActions, elements: readonly im
   }
 }
 
-function dispatchFactActions(actions: CollectedActions, elements: readonly import("../binding/element-builder").ElementNode[], model: FileSemanticModel, emit: Emit): void {
+function dispatchFactActions(actions: CollectedActions, elements: readonly ElementNode[], model: FileSemanticModel, emit: Emit): void {
   if (actions.factThunks.length === 0) return
 
   for (let i = 0; i < elements.length; i++) {
@@ -195,12 +196,12 @@ function dispatchFactActions(actions: CollectedActions, elements: readonly impor
     if (!element) continue
 
     for (let j = 0; j < actions.factThunks.length; j++) {
-      actions.factThunks[j]!.dispatch(element, model, model, emit)
+      actions.factThunks[j].dispatch(element, model, model, emit)
     }
   }
 }
 
-function dispatchCascadeActions(actions: CollectedActions, elements: readonly import("../binding/element-builder").ElementNode[], model: FileSemanticModel, emit: Emit): void {
+function dispatchCascadeActions(actions: CollectedActions, elements: readonly ElementNode[], model: FileSemanticModel, emit: Emit): void {
   if (actions.cascade.length === 0) return
 
   for (let i = 0; i < elements.length; i++) {
@@ -215,7 +216,7 @@ function dispatchCascadeActions(actions: CollectedActions, elements: readonly im
   }
 }
 
-function dispatchConditionalDeltaActions(actions: CollectedActions, elements: readonly import("../binding/element-builder").ElementNode[], model: FileSemanticModel, emit: Emit): void {
+function dispatchConditionalDeltaActions(actions: CollectedActions, elements: readonly ElementNode[], model: FileSemanticModel, emit: Emit): void {
   if (actions.conditionalDelta.length === 0) return
 
   for (let i = 0; i < elements.length; i++) {
@@ -230,7 +231,7 @@ function dispatchConditionalDeltaActions(actions: CollectedActions, elements: re
   }
 }
 
-function dispatchAlignmentActions(actions: CollectedActions, elements: readonly import("../binding/element-builder").ElementNode[], model: FileSemanticModel, emit: Emit): void {
+function dispatchAlignmentActions(actions: CollectedActions, elements: readonly ElementNode[], model: FileSemanticModel, emit: Emit): void {
   if (actions.alignment.length === 0) return
 
   for (let i = 0; i < elements.length; i++) {

@@ -105,7 +105,7 @@ class FileDiagnostics {
     const ganko = this.rawByKind.get(DiagnosticKind.Ganko);
     const crossFile = this.rawByKind.get(DiagnosticKind.CrossFile);
     if (ganko === undefined && crossFile === undefined) return [];
-    if (ganko === undefined) return crossFile!;
+    if (ganko === undefined) return crossFile;
     if (crossFile === undefined) return ganko;
     const merged: GankoDiagnostic[] = new Array(ganko.length + crossFile.length);
     let idx = 0;

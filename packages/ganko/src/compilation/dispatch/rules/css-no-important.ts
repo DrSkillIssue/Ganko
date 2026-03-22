@@ -7,14 +7,15 @@ const messages = {
   avoidImportant: "Avoid `!important` on `{{property}}`. It increases override cost and usually signals specificity debt.",
 } as const
 
+const SYSTEM_LEVEL_MEDIA_RE = /prefers-reduced-motion|prefers-contrast|prefers-color-scheme|forced-colors|hover\s*:|pointer\s*:/
+
 function isSystemLevelOverride(decl: DeclarationEntity): boolean {
   const rule = decl.rule
   if (!rule) return false
   for (let i = 0; i < rule.containingMediaStack.length; i++) {
     const media = rule.containingMediaStack[i]
     if (!media) continue
-    const params = media.params.toLowerCase()
-    if (params.includes("prefers-reduced-motion") || params.includes("prefers-contrast") || params.includes("prefers-color-scheme") || params.includes("forced-colors") || params.includes("hover:") || params.includes("hover :") || params.includes("pointer:") || params.includes("pointer :")) return true
+    if (SYSTEM_LEVEL_MEDIA_RE.test(media.params.toLowerCase())) return true
   }
   if (rule.selectorText.toLowerCase().includes("[hidden]")) return true
   return false

@@ -1,6 +1,7 @@
 import ts from "typescript"
 import type { SelectorEntity } from "../../../css/entities/selector"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
+import type { SymbolTable } from "../../symbols/symbol-table"
 import { LAYOUT_CLASS_GEOMETRY_PROPERTIES } from "../../../css/layout-taxonomy"
 import { getPropertyKeyName } from "../../../solid/util/pattern-detection"
 import { constantTruthiness } from "../../../solid/util/static-value"
@@ -65,7 +66,7 @@ export const jsxLayoutClasslistGeometryToggle = defineAnalysisRule({
 
 function classEstablishesOutOfFlow(
   className: string,
-  symbolTable: import("../../symbols/symbol-table").SymbolTable,
+  symbolTable: SymbolTable,
 ): boolean {
   for (const [, symbol] of symbolTable.selectors) {
     if (!selectorAnchorHasClass(symbol.entity, className)) continue

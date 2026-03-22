@@ -4,7 +4,7 @@ import type { ScopeEntity } from "../../solid/entities/scope";
 import type { VariableEntity } from "../../solid/entities/variable";
 import type { FunctionEntity } from "../../solid/entities/function";
 import type { CallEntity, ArgumentEntity } from "../../solid/entities/call";
-import type { JSXElementEntity, JSXAttributeEntity } from "../../solid/entities/jsx";
+import type { JSXElementEntity, JSXAttributeEntity, JSXContext } from "../../solid/entities/jsx";
 import type { ImportEntity } from "../../solid/entities/import";
 import type { ExportEntity } from "../../solid/entities/export";
 import type { ClassEntity } from "../../solid/entities/class";
@@ -118,7 +118,7 @@ export interface SolidSyntaxTree {
   readonly lineStartOffsets: readonly number[];
 
   // Mutable caches used by query functions for memoization
-  readonly jsxContextCache: WeakMap<ts.Node, import("../../solid/entities/jsx").JSXContext | null>;
+  readonly jsxContextCache: WeakMap<ts.Node, JSXContext | null>;
   readonly scopeForCache: WeakMap<ts.Node, ScopeEntity>;
   readonly onDepsCache: WeakMap<ts.Node, boolean>;
   readonly passthroughCache: WeakMap<ts.Node, boolean>;

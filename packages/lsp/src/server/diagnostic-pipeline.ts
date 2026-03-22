@@ -14,6 +14,7 @@
  */
 
 import type { Diagnostic } from "@drskillissue/ganko";
+import type { Diagnostic as LSPDiagnostic } from "vscode-languageserver";
 import { createSolidInput, buildSolidSyntaxTree, runSolidRules, createOverrideEmit } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import { runSingleFileDiagnostics } from "../core/analyze";
@@ -50,7 +51,6 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
   const { context, project, path, content, includeCrossFile, token } = opts;
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  const phase = context.phase;
   const log = context.log;
 
   // ── Phase 1: Single-file ganko diagnostics ──
@@ -73,6 +73,7 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
   if (token.isCancelled) return;
 
   // ── Phase 2: Cross-file ganko diagnostics via IncrementalAnalyzer ──
+  const phase = context.phase;
   let crossFile: readonly Diagnostic[] = [];
   if (includeCrossFile && phase.tag === "enriched") {
     const analyzer = createIncrementalAnalyzer();
@@ -149,10 +150,9 @@ export function runDiagnosticPipelineImmediate(
   project: Project,
   path: string,
   content: string | undefined,
-): import("vscode-languageserver").Diagnostic[] {
+): LSPDiagnostic[] {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  const phase = context.phase;
 
   if (kind === "unknown") return [];
 
@@ -166,7 +166,8 @@ export function runDiagnosticPipelineImmediate(
     context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors), singleFile);
 
     // Phase 2: cross-file
-    let crossFile: readonly import("@drskillissue/ganko").Diagnostic[] = [];
+    const phase = context.phase;
+    let crossFile: readonly Diagnostic[] = [];
     if (phase.tag === "enriched") {
       const analyzer = createIncrementalAnalyzer();
       const crossByFile = analyzer.analyzeAffected([key], context.graphCache.currentCompilation, context.serverState.config.ruleOverrides);
@@ -282,7 +283,7 @@ export function publishTier1Diagnostics(
     context.diagManager.update(path, DiagnosticKind.Ganko, converted, diagnostics);
 
     if (context.serverState.config.enableTsDiagnostics) {
-      const tsDiags: import("vscode-languageserver").Diagnostic[] = [];
+      const tsDiags: LSPDiagnostic[] = [];
       const syntactic = program.getSyntacticDiagnostics(sourceFile);
       for (let i = 0, len = syntactic.length; i < len; i++) {
         const d = syntactic[i];

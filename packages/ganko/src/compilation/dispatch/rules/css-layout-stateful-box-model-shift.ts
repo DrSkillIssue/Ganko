@@ -3,7 +3,7 @@ import { LAYOUT_POSITIONED_OFFSET_PROPERTIES } from "../../../css/layout-taxonom
 import { parseBlockShorthand, parseQuadShorthand } from "../../../css/parser/value-tokenizer"
 import type { StatefulSelectorEntry, NormalizedRuleDeclaration } from "../../analysis/statefulness"
 import type { FileSemanticModel } from "../../binding/semantic-model"
-import { defineAnalysisRule, ComputationTier } from "../rule"
+import { defineAnalysisRule, ComputationTier, type Emit } from "../rule"
 
 const messages = {
   statefulBoxModelShift:
@@ -32,7 +32,7 @@ export const cssLayoutStatefulBoxModelShift = defineAnalysisRule({
   },
 })
 
-function runStatefulBoxModelCheck(semanticModel: FileSemanticModel, emit: import("../rule").Emit): void {
+function runStatefulBoxModelCheck(semanticModel: FileSemanticModel, emit: Emit): void {
   const baseValueIndex = semanticModel.getStatefulBaseValueIndex()
   const reported = new Set<number>()
 

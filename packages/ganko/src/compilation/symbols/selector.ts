@@ -85,7 +85,7 @@ export function createSelectorSymbol(entity: SelectorEntity, filePath: string): 
       if (attr !== undefined) keySet.add(`attr:${attr}`)
     }
 
-    dispatchKeys = [...keySet].sort()
+    dispatchKeys = Array.from(keySet).toSorted()
   } else {
     dispatchKeys = []
   }

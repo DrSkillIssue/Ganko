@@ -26,7 +26,7 @@ import { createCompilationDiagnosticProducer, type CompilationDiagnosticProducer
 import type { ServerSession } from "../server/session";
 import type { ServerInfrastructure } from "../server/server-infrastructure";
 import { evaluateWorkspace } from "../core/workspace-eval";
-import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult, type WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createFileRegistry, type FileRegistry } from "../core/file-registry";
 import { acceptProjectRoot, buildWorkspaceLayout } from "@drskillissue/ganko-shared";
@@ -69,7 +69,7 @@ interface DaemonState extends ServerInfrastructure {
   fileIndex: FileRegistry | null
   tailwind: TailwindValidator | null
   externalCustomProperties: ReadonlySet<string> | null
-  layout: import("@drskillissue/ganko-shared").WorkspaceLayout | null
+  layout: WorkspaceLayout | null
   config: ServerConfig
   contentVersions: Map<string, string>
 }
@@ -85,22 +85,22 @@ function resetIdleTimer(state: DaemonState): void {
 function shutdown(state: DaemonState): void {
   if (state.shutdownStarted) return;
   state.shutdownStarted = true;
-  if (state.idleTimer !== null) { clearTimeout(state.idleTimer); state.idleTimer = null }
+  if (state.idleTimer !== null) { clearTimeout(state.idleTimer); state.idleTimer = null; }
   state.server.close();
   const hardExit = setTimeout(() => {
     const sockPath = daemonSocketPath(state.projectRoot);
-    try { unlinkSync(sockPath) } catch { /* already gone */ }
+    try { unlinkSync(sockPath); } catch { /* already gone */ }
     state.log.error("hard exit: pending work did not settle within 10s");
-    void state.closeLogFile().finally(() => { process.exit(1) });
+    void state.closeLogFile().finally(() => { process.exit(1); });
   }, 10_000);
   hardExit.unref();
   void state.pending.finally(() => {
     clearTimeout(hardExit);
-    if (state.project !== null) { try { state.project.dispose() } catch { /* best-effort */ }; state.project = null }
+    if (state.project !== null) { try { state.project.dispose(); } catch { /* best-effort */ }; state.project = null; }
     const sockPath = daemonSocketPath(state.projectRoot);
-    try { unlinkSync(sockPath) } catch { /* already gone */ }
+    try { unlinkSync(sockPath); } catch { /* already gone */ }
     state.log.info("daemon shut down");
-    void state.closeLogFile().finally(() => { process.exit(0) });
+    void state.closeLogFile().finally(() => { process.exit(0); });
   });
 }
 
@@ -118,7 +118,7 @@ function invalidateAll(state: DaemonState): void {
 function setsEqual(a: ReadonlySet<string> | null, b: ReadonlySet<string>): boolean {
   if (a === null) return b.size === 0;
   if (a.size !== b.size) return false;
-  for (const item of a) { if (!b.has(item)) return false }
+  for (const item of a) { if (!b.has(item)) return false; }
   return true;
 }
 
@@ -131,7 +131,7 @@ async function handleLintRequest(
   const log = state.log;
 
   let usedPrewarmConfig = false;
-  if (state.prewarm !== null) { await state.prewarm; state.prewarm = null; usedPrewarmConfig = true }
+  if (state.prewarm !== null) { await state.prewarm; state.prewarm = null; usedPrewarmConfig = true; }
 
   let eslintResult: ESLintConfigResult;
   if (params.noEslintConfig) {
@@ -375,20 +375,20 @@ function handleRequest(state: DaemonState, request: DaemonRequest, socket: Socke
     }
     case "lint-request": {
       state.pending = state.pending.then(() => {
-        if (state.idleTimer !== null) { clearTimeout(state.idleTimer); state.idleTimer = null }
+        if (state.idleTimer !== null) { clearTimeout(state.idleTimer); state.idleTimer = null; }
         let timedOut = false;
         const timer = setTimeout(() => {
           timedOut = true;
           sendResponse(state, socket, { kind: "error-response", id: request.id, code: -32603, message: "lint request timed out after 120s" });
         }, 120_000);
         return handleLintRequest(state, request).then(
-          (response) => { if (!timedOut) sendResponse(state, socket, response) },
+          (response) => { if (!timedOut) sendResponse(state, socket, response); },
           (err) => {
             const message = err instanceof Error ? err.message : String(err);
             state.log.error(`lint request failed: ${message}`);
             if (!timedOut) sendResponse(state, socket, { kind: "error-response", id: request.id, code: -32603, message });
           },
-        ).finally(() => { clearTimeout(timer); resetIdleTimer(state) });
+        ).finally(() => { clearTimeout(timer); resetIdleTimer(state); });
       });
       return;
     }
@@ -400,9 +400,9 @@ function handleRequest(state: DaemonState, request: DaemonRequest, socket: Socke
 function isSocketAlive(sockPath: string): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = connect(sockPath);
-    probe.once("connect", () => { probe.destroy(); resolve(true) });
-    probe.once("error", () => { probe.destroy(); resolve(false) });
-    probe.setTimeout(1000, () => { probe.destroy(); resolve(false) });
+    probe.once("connect", () => { probe.destroy(); resolve(true); });
+    probe.once("error", () => { probe.destroy(); resolve(false); });
+    probe.setTimeout(1000, () => { probe.destroy(); resolve(false); });
   });
 }
 
@@ -443,7 +443,7 @@ export async function startDaemon(projectRoot: string): Promise<void> {
       process.stderr.write(`ganko: daemon already running for ${projectRoot}\n`);
       process.exit(1);
     }
-    try { unlinkSync(sockPath) } catch { /* race — acceptable */ }
+    try { unlinkSync(sockPath); } catch { /* race — acceptable */ }
   }
 
   writeFileSync(logPath, "", { mode: 0o600 });
@@ -490,7 +490,7 @@ export async function startDaemon(projectRoot: string): Promise<void> {
 
   server.on("connection", (socket: Socket) => {
     const feed = createRequestReader(
-      (request) => { handleRequest(state, request, socket) },
+      (request) => { handleRequest(state, request, socket); },
       (id, message) => {
         sendResponse(state, socket, { kind: "error-response", id: id ?? 0, code: -32600, message });
       },
@@ -507,7 +507,7 @@ export async function startDaemon(projectRoot: string): Promise<void> {
 
   server.listen(sockPath, () => {
     if (process.platform !== "win32") {
-      try { chmodSync(sockPath, 0o600) } catch { /* best-effort */ }
+      try { chmodSync(sockPath, 0o600); } catch { /* best-effort */ }
     }
     resetIdleTimer(state);
     void writePidFile(pidPath).then(() => {
@@ -518,7 +518,7 @@ export async function startDaemon(projectRoot: string): Promise<void> {
     state.prewarm = prewarmDaemon(state);
   });
 
-  process.on("SIGTERM", () => { shutdown(state) });
-  process.on("SIGINT", () => { shutdown(state) });
-  process.on("exit", () => { try { unlinkSync(pidPath) } catch { /* best-effort */ } });
+  process.on("SIGTERM", () => { shutdown(state); });
+  process.on("SIGINT", () => { shutdown(state); });
+  process.on("exit", () => { try { unlinkSync(pidPath); } catch { /* best-effort */ } });
 }

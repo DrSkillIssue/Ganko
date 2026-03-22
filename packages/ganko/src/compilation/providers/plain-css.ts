@@ -24,6 +24,8 @@ import { parseContainerQueryName } from "../../css/parser/value-util"
 import { LAYOUT_ANIMATION_MUTATION_PROPERTIES } from "../../css/layout-taxonomy"
 import type { KeyframeLayoutMutation } from "../symbols/keyframes"
 
+const STRIP_QUOTES_RE = /["']/g
+
 export interface PlainCSSProvider extends CSSSourceProvider {
   readonly kind: "plain-css"
 }
@@ -42,15 +44,15 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
 
   const treeSelectors = tree.selectors
   for (let i = 0; i < treeSelectors.length; i++) {
-    const entity = treeSelectors[i]!
+    const entity = treeSelectors[i]
     selectors.push(createSelectorSymbol(entity, filePath))
 
     const compounds = entity.compounds
     for (let ci = 0; ci < compounds.length; ci++) {
-      const compound = compounds[ci]!
+      const compound = compounds[ci]
       const classes = compound.classes
       for (let j = 0; j < classes.length; j++) {
-        const cls = classes[j]!
+        const cls = classes[j]
         const existing = classNamesBuilding.get(cls)
         if (existing) {
           existing.selectors.push(entity)
@@ -67,7 +69,7 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
 
   const treeDeclarations = tree.declarations
   for (let i = 0; i < treeDeclarations.length; i++) {
-    const entity = treeDeclarations[i]!
+    const entity = treeDeclarations[i]
     const sourceOrder = tree.sourceOrderBase + entity.sourceOrder
     const layerOrder = entity.cascadePosition.layerOrder
     declarations.push(createDeclarationSymbol(entity, filePath, sourceOrder, layerOrder))
@@ -76,7 +78,7 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
   const treeVariables = tree.variables
   const seenVars = new Set<string>()
   for (let i = 0; i < treeVariables.length; i++) {
-    const entity = treeVariables[i]!
+    const entity = treeVariables[i]
     if (!seenVars.has(entity.name)) {
       seenVars.add(entity.name)
       customProperties.push(createCustomPropertySymbol(entity, filePath))
@@ -86,7 +88,7 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
   const treeAtRules = tree.atRules
   let layerOrderCounter = 0
   for (let i = 0; i < treeAtRules.length; i++) {
-    const entity = treeAtRules[i]!
+    const entity = treeAtRules[i]
     switch (entity.kind) {
       case "keyframes": {
         const name = entity.parsedParams.animationName
@@ -95,10 +97,10 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
         const byProperty = new Map<string, { values: Set<string>; declarations: DeclarationEntity[] }>()
         const kfRules = entity.rules
         for (let r = 0; r < kfRules.length; r++) {
-          const kfRule = kfRules[r]!
+          const kfRule = kfRules[r]
           const kfDecls = kfRule.declarations
           for (let d = 0; d < kfDecls.length; d++) {
-            const decl = kfDecls[d]!
+            const decl = kfDecls[d]
             const property = decl.property.toLowerCase()
             if (!LAYOUT_ANIMATION_MUTATION_PROPERTIES.has(property)) continue
 
@@ -133,9 +135,9 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
         let hasMetricOverrides = false
         if (childDecls) {
           for (let d = 0; d < childDecls.length; d++) {
-            const decl = childDecls[d]!
+            const decl = childDecls[d]
             const prop = decl.property.toLowerCase()
-            if (prop === "font-family") family = decl.value.replace(/["']/g, "").trim()
+            if (prop === "font-family") family = decl.value.replace(STRIP_QUOTES_RE, "").trim()
             else if (prop === "font-display") display = decl.value.trim().toLowerCase()
             else if (prop === "src" && decl.value.toLowerCase().includes("url(")) hasWebFontSource = true
             else if (prop === "size-adjust" || prop === "ascent-override" || prop === "descent-override" || prop === "line-gap-override") {
@@ -168,7 +170,7 @@ function extractSymbolsFromTree(tree: CSSSyntaxTree): CSSSymbolContribution {
 
   const treeTokens = tree.tokens
   for (let i = 0; i < treeTokens.length; i++) {
-    const entity = treeTokens[i]!
+    const entity = treeTokens[i]
     themeTokens.push(createThemeTokenSymbol(entity, filePath))
   }
 

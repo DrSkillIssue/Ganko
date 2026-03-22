@@ -47,7 +47,7 @@ export function createIncrementalAnalyzer(): IncrementalAnalyzer {
   ): ReadonlyMap<string, readonly Diagnostic[]> {
     const dispatcher = createAnalysisDispatcher();
     for (let i = 0; i < allRules.length; i++) {
-      dispatcher.register(allRules[i]!);
+      dispatcher.register(allRules[i]);
     }
 
     const result = affectedFiles !== null

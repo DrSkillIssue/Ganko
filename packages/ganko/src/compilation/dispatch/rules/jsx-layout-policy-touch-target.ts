@@ -8,7 +8,7 @@ import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-buil
 import { SignalValueKind } from "../../binding/signal-builder"
 import { SignalGuardKind } from "../../binding/cascade-binder"
 import type { FileSemanticModel } from "../../binding/semantic-model"
-import { defineAnalysisRule, ComputationTier } from "../rule"
+import { defineAnalysisRule, ComputationTier, type Emit } from "../rule"
 
 const messages = {
   heightTooSmall: "`{{signal}}` of `{{value}}px` is below the minimum `{{min}}px` for interactive element `<{{tag}}>` in policy `{{policy}}`.",
@@ -152,7 +152,7 @@ function checkDimension(
   min: number,
   element: ElementNode,
   semanticModel: FileSemanticModel,
-  emit: import("../rule").Emit,
+  emit: Emit,
   messageId: string,
   template: string,
   tag: string,

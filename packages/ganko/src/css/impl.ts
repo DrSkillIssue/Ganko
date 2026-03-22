@@ -119,7 +119,7 @@ function freezeToSyntaxTrees(ctx: CSSBuildContext): readonly CSSSyntaxTree[] {
   const files = ctx.files
   const trees: CSSSyntaxTree[] = []
   for (let i = 0; i < files.length; i++) {
-    trees.push(buildTree(files[i]!, i, ctx))
+    trees.push(buildTree(files[i], i, ctx))
   }
   return trees
 }

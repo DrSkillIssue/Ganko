@@ -24,7 +24,8 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { createCompilationTracker, createStyleCompilation } from "@drskillissue/ganko";
-import type { CompilationTracker } from "@drskillissue/ganko";
+import type { CompilationTracker, TailwindValidator, BatchableTailwindValidator } from "@drskillissue/ganko";
+import type ts from "typescript";
 import {
   classifyFile,
   isToolingConfig,
@@ -32,8 +33,11 @@ import {
   prefixLogger,
   createLogger,
 } from "@drskillissue/ganko-shared";
+import type { WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
+import type { FileRegistry } from "../core/file-registry";
+import type { WorkspaceEvaluator } from "../core/workspace-eval";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
 import type { LifecyclePhase } from "./session";
 import { readFileSync } from "node:fs";
@@ -44,7 +48,7 @@ import { MemoryWatcher } from "./memory-watcher";
 import type { CancellationSource } from "./cancellation";
 import type { ServerSession } from "./session";
 
-import { type ServerState, createServerState, createServerConfig } from "./handlers/lifecycle";
+import { type ServerState, type ServerConfig, createServerState, createServerConfig } from "./handlers/lifecycle";
 
 import { createResourceIdentity, type ResourceIdentity } from "./resource-identity";
 import { DocumentTracker } from "./document-tracker";
@@ -134,15 +138,15 @@ export interface ServerContext {
 
   // --- ServerInfrastructure (for SessionMutator) ---
   getProject(): Project | null
-  getTsCompilerOptions(): import("typescript").CompilerOptions | null
+  getTsCompilerOptions(): ts.CompilerOptions | null
   getRootPath(): string | null
-  getConfig(): import("./handlers/lifecycle").ServerConfig
-  getFileRegistry(): import("../core/file-registry").FileRegistry | null
-  getWorkspaceLayout(): import("@drskillissue/ganko-shared").WorkspaceLayout | null
-  getTailwindValidator(): import("@drskillissue/ganko").TailwindValidator | null
-  getBatchableValidator(): import("@drskillissue/ganko").BatchableTailwindValidator | null
+  getConfig(): ServerConfig
+  getFileRegistry(): FileRegistry | null
+  getWorkspaceLayout(): WorkspaceLayout | null
+  getTailwindValidator(): TailwindValidator | null
+  getBatchableValidator(): BatchableTailwindValidator | null
   getExternalCustomProperties(): ReadonlySet<string> | undefined
-  getEvaluator(): import("../core/workspace-eval").WorkspaceEvaluator | null
+  getEvaluator(): WorkspaceEvaluator | null
 
   /** Alias for graphCache — satisfies ServerInfrastructure.tracker */
   readonly tracker: CompilationTracker

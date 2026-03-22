@@ -18,6 +18,7 @@ import type { StyleCompilation, TailwindValidator, BatchableTailwindValidator } 
 import type { WorkspaceLayout, RuleOverrides, AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import type { Project } from "../core/project";
 import type { WorkspaceEvaluator } from "../core/workspace-eval";
+import type ts from "typescript";
 
 // ── Session ─────────────────────────────────────────────────────────
 
@@ -51,8 +52,8 @@ export interface FrozenServerConfig {
 // ── TypeScript program state ────────────────────────────────────────
 
 export type TsProgramState =
-  | { readonly tier: "quick"; readonly compilerOptions: import("typescript").CompilerOptions | null }
-  | { readonly tier: "incremental"; readonly project: Project }
+  | { readonly tier: "quick"; readonly compilerOptions: ts.CompilerOptions | null }
+  | { readonly tier: "incremental"; readonly project: Project };
 
 // ── Workspace state ─────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ export type WorkspaceState =
       readonly batchableValidator: BatchableTailwindValidator | null
       readonly externalCustomProperties: ReadonlySet<string> | undefined
       readonly evaluator: WorkspaceEvaluator | null
-    }
+    };
 
 // ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export type ServerLifecycle =
   | { readonly state: "initializing"; readonly rootPath: string }
   | { readonly state: "running" }
   | { readonly state: "shutting-down" }
-  | { readonly state: "errored"; readonly error: Error }
+  | { readonly state: "errored"; readonly error: Error };
 
 // ── Legacy lifecycle phases (adapter bridge — used by ServerContext.phase) ──
 
@@ -115,4 +116,4 @@ export type LifecyclePhase =
   | PhaseInitializing
   | PhaseRunning
   | PhaseEnriched
-  | PhaseShuttingDown
+  | PhaseShuttingDown;

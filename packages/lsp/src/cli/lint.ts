@@ -130,12 +130,12 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
     if (!pattern) continue;
     if (GLOB_CHARS.test(pattern)) {
       const matches = globSync(pattern, { cwd, exclude });
-      for (let j = 0; j < matches.length; j++) { const m = matches[j]; if (m) addFileIfLintable(resolve(cwd, m), seen, result) }
+      for (let j = 0; j < matches.length; j++) { const m = matches[j]; if (m) addFileIfLintable(resolve(cwd, m), seen, result); }
       continue;
     }
     const absolute = resolve(cwd, pattern);
     let isDir = false;
-    try { isDir = statSync(absolute).isDirectory() } catch { /* doesn't exist */ }
+    try { isDir = statSync(absolute).isDirectory(); } catch { /* doesn't exist */ }
     if (isDir) {
       const registry = createFileRegistry(buildWorkspaceLayout(acceptProjectRoot(absolute)), exclude);
       for (const f of registry.solidFiles) addFileIfLintable(f, seen, result);
@@ -179,7 +179,7 @@ async function tryDaemonLint(
     const response = await requestLint(socket, params);
     if (response.kind === "lint-response") return response.diagnostics;
     return null;
-  } catch { return null } finally { socket.destroy() }
+  } catch { return null; } finally { socket.destroy(); }
 }
 
 export async function runLint(args: readonly string[]): Promise<void> {
@@ -256,7 +256,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
       const { results, emit } = createEmit(eslintResult.overrides);
       runSolidRules(tree, input.sourceFile, emit);
-      for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d) }
+      for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d); }
     }
 
     const t1 = performance.now();
@@ -280,7 +280,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
       });
 
       const dispatcher = createAnalysisDispatcher();
-      for (let i = 0; i < allRules.length; i++) dispatcher.register(allRules[i]!);
+      for (let i = 0; i < allRules.length; i++) { const rule = allRules[i]; if (rule) dispatcher.register(rule); }
 
       const crossResult = dispatcher.run(compilation);
       const hasOverrides = Object.keys(eslintResult.overrides).length > 0;

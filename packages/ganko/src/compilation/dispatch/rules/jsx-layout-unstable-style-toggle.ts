@@ -7,6 +7,7 @@ import { constantTruthiness, getStaticValue } from "../../../solid/util/static-v
 import { toKebabCase } from "@drskillissue/ganko-shared"
 import type { ElementNode } from "../../binding/element-builder"
 import type { FileSemanticModel } from "../../binding/semantic-model"
+import type { FlowParticipationFact } from "../../analysis/layout-fact"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -72,7 +73,7 @@ function normalizeStylePropertyKey(key: string): string {
 
 function isExemptFromCLS(
   element: ElementNode,
-  flowFact: import("../../analysis/layout-fact").FlowParticipationFact,
+  flowFact: FlowParticipationFact,
   property: string,
   _semanticModel: FileSemanticModel,
 ): boolean {

@@ -1,4 +1,5 @@
 import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import type { AtRuleEntity } from "../../../css/entities/at-rule"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -80,7 +81,7 @@ export const cssLayoutFontSwapInstability = defineAnalysisRule({
   },
 })
 
-function findFontDisplayDeclaration(entity: import("../../../css/entities/at-rule").AtRuleEntity): { file: { path: string }; startLine: number; startColumn: number; property: string } | null {
+function findFontDisplayDeclaration(entity: AtRuleEntity): { file: { path: string }; startLine: number; startColumn: number; property: string } | null {
   for (let i = 0; i < entity.declarations.length; i++) {
     const decl = entity.declarations[i]
     if (!decl) continue

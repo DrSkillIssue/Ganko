@@ -37,6 +37,9 @@ import {
 } from "./entities"
 import type { UnresolvedAnimationRef, KeyframeLayoutMutation, FontFaceDescriptor } from "./impl"
 
+const WHITESPACE_RUN_RE = /\s+/g
+const WHITESPACE_SPLIT_RE = /\s+/
+
 // ── CSSBuildContext ───────────────────────────────────────────────────────
 
 export interface CSSBuildContext {
@@ -653,7 +656,7 @@ const FONT_GENERIC_FAMILY_SET = new Set(["serif", "sans-serif", "monospace", "cu
 function normalizeFontFamily(raw: string): string | null {
   const trimmed = raw.trim(); if (trimmed.length === 0) return null
   const unquoted = stripQuotes(trimmed); if (unquoted.length === 0) return null
-  const normalized = unquoted.toLowerCase().replace(/\s+/g, " ").trim(); if (normalized.length === 0) return null
+  const normalized = unquoted.toLowerCase().replace(WHITESPACE_RUN_RE, " ").trim(); if (normalized.length === 0) return null
   if (FONT_GENERIC_FAMILY_SET.has(normalized)) return null
   return normalized
 }
@@ -669,7 +672,7 @@ function stripQuotes(value: string): string {
 function firstToken(value: string): string {
   const normalized = value.trim().toLowerCase()
   if (normalized.length === 0) return ""
-  return normalized.split(/\s+/)[0] ?? ""
+  return normalized.split(WHITESPACE_SPLIT_RE)[0] ?? ""
 }
 
 function hasEffectiveMetricOverrides(declarations: readonly { readonly property: string; readonly value: string }[]): boolean {

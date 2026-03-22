@@ -1,6 +1,6 @@
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { ElementNode } from "../../binding/element-builder"
-import type { AlignmentContext, CohortStats, CohortSubjectStats, AlignmentCase, AlignmentFactorCoverage } from "../../analysis/alignment"
+import type { AlignmentContext, CohortStats, CohortSubjectStats, AlignmentCase, AlignmentFactorCoverage, ContentCompositionFingerprint } from "../../analysis/alignment"
 import {
   scoreAlignmentCase,
   formatAlignmentCauses,
@@ -89,7 +89,7 @@ function collectAndEvaluate(
   semanticModel: FileSemanticModel,
 ): readonly LayoutDetection<AlignmentDetectionCase>[] {
   const out: LayoutDetection<AlignmentDetectionCase>[] = []
-  const cohortCompositions: import("../../analysis/alignment").ContentCompositionFingerprint[] = []
+  const cohortCompositions: ContentCompositionFingerprint[] = []
 
   for (const [, subjectStats] of cohort.subjectsByElementKey) {
     cohortCompositions.push(subjectStats.contentComposition)
@@ -157,7 +157,7 @@ function buildFactorCoverage(
   subjectStats: CohortSubjectStats,
   cohort: CohortStats,
   context: AlignmentContext,
-  cohortCompositions: readonly import("../../analysis/alignment").ContentCompositionFingerprint[],
+  cohortCompositions: readonly ContentCompositionFingerprint[],
 ): AlignmentFactorCoverage {
   const factSummary = cohort.factSummary
   const baseCoverage = factSummary.total > 0 ? factSummary.exactShare + factSummary.intervalShare * 0.7 : 0

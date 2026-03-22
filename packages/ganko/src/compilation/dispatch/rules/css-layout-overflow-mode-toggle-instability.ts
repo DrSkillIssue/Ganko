@@ -1,4 +1,5 @@
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
+import type { ElementNode } from "../../binding/element-builder"
 import { SignalValueKind } from "../../binding/signal-builder"
 import type { ConditionalSignalDelta } from "../../analysis/cascade-analyzer"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -59,7 +60,7 @@ export const cssLayoutOverflowModeToggleInstability = defineAnalysisRule({
   },
 })
 
-function isLikelyViewportAffectingContainer(element: import("../../binding/element-builder").ElementNode): boolean {
+function isLikelyViewportAffectingContainer(element: ElementNode): boolean {
   if (element.siblingCount >= 2) return true
   if (element.parentElementNode === null) return true
   if (element.tagName !== null && VIEWPORT_CONTAINER_TAGS.has(element.tagName)) return true

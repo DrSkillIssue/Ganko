@@ -1037,11 +1037,13 @@ export function computeLayoutFact<K extends LayoutFactKind>(
   allElements: readonly ElementNode[],
   getCascadeForElement: (id: number) => ReadonlyMap<string, CascadedDeclaration>,
 ): LayoutFactMap[K] {
-  if (factKind === "reservedSpace") return computeReservedSpaceFact(declarations) as LayoutFactMap[K]
-  if (factKind === "scrollContainer") return computeScrollContainerFact(declarations) as LayoutFactMap[K]
-  if (factKind === "flowParticipation") return computeFlowParticipationFact(declarations) as LayoutFactMap[K]
-  if (factKind === "containingBlock") return computeContainingBlockFact(elementId, allElements, getCascadeForElement) as LayoutFactMap[K]
-  throw new Error(`Unknown layout fact kind: ${factKind}`)
+  switch (factKind) {
+    case "reservedSpace": return computeReservedSpaceFact(declarations) as LayoutFactMap[K]
+    case "scrollContainer": return computeScrollContainerFact(declarations) as LayoutFactMap[K]
+    case "flowParticipation": return computeFlowParticipationFact(declarations) as LayoutFactMap[K]
+    case "containingBlock": return computeContainingBlockFact(elementId, allElements, getCascadeForElement) as LayoutFactMap[K]
+    default: throw new Error(`Unknown layout fact kind: ${factKind}`)
+  }
 }
 
 function getCascadeValue(declarations: ReadonlyMap<string, CascadedDeclaration>, property: string): string | null {

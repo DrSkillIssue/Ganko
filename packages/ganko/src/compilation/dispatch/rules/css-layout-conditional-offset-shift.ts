@@ -3,6 +3,7 @@ import { LAYOUT_POSITIONED_OFFSET_SIGNALS } from "../../../css/layout-taxonomy"
 import { SignalValueKind } from "../../binding/signal-builder"
 import { SignalGuardKind } from "../../binding/cascade-binder"
 import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-builder"
+import type { ConditionalSignalDelta } from "../../analysis/cascade-analyzer"
 import { layoutOffsetSignals, type LayoutOffsetSignal } from "../../analysis/alignment"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -51,7 +52,7 @@ export const cssLayoutConditionalOffsetShift = defineAnalysisRule({
 })
 
 function collectConditionalOffsets(
-  delta: ReadonlyMap<string, import("../../analysis/cascade-analyzer").ConditionalSignalDelta>,
+  delta: ReadonlyMap<string, ConditionalSignalDelta>,
   snapshot: SignalSnapshot,
 ): readonly { property: LayoutOffsetSignal; value: number; guardKey: string }[] {
   const out: { property: LayoutOffsetSignal; value: number; guardKey: string }[] = []

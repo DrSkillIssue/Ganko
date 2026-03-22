@@ -10,9 +10,10 @@ import type { VariableEntity } from "../../solid/entities/variable"
 import type { ComputationEntity, DependencyEdge } from "../../solid/entities/computation"
 import type { ImportEntity } from "../../solid/entities/import"
 import type { VariableReferenceEntity } from "../../css/entities/variable"
+import type { RuleEntity } from "../../css/entities/rule"
 import type { ElementNode } from "./element-builder"
 import { buildElementNodes } from "./element-builder"
-import type { ElementCascade, SelectorMatch } from "./cascade-binder"
+import type { ElementCascade, MonitoredDeclaration, SelectorMatch } from "./cascade-binder"
 import { bind, computeLayoutFact, getOrBuildBindState } from "./cascade-binder"
 import { buildScopedSelectorIndex } from "./scope-resolver"
 import type { SignalSnapshot, LayoutSignalName } from "./signal-builder"
@@ -157,7 +158,7 @@ export function createFileSemanticModel(
     return cachedConditionalDeltaIndex
   }
 
-  function getBindMonitoredDeclarations(): ReadonlyMap<number, readonly import("./cascade-binder").MonitoredDeclaration[]> {
+  function getBindMonitoredDeclarations(): ReadonlyMap<number, readonly MonitoredDeclaration[]> {
     return getOrBuildBindState(symbolTable).monitoredDeclarationsBySelectorId
   }
 
@@ -207,7 +208,7 @@ export function createFileSemanticModel(
     if (cachedStatefulIndexes !== null) return cachedStatefulIndexes
     // Collect all CSS rules from the symbol table's selectors
     const rulesSeen = new Set<number>()
-    const rules: import("../../css/entities").RuleEntity[] = []
+    const rules: RuleEntity[] = []
     for (const [, selector] of symbolTable.selectors) {
       const rule = selector.entity.rule
       if (rulesSeen.has(rule.id)) continue
@@ -233,18 +234,23 @@ export function createFileSemanticModel(
   }
 
   const reactiveVariables = solidTree.reactiveVariables
+  const VALID_REACTIVE_KINDS = new Map<string, ReactiveKind>([
+    ["signal", "signal"], ["props", "props"], ["store", "store"],
+    ["resource", "resource"], ["memo", "memo"], ["derived", "derived"],
+  ])
   const reactiveKindByVariableId = new Map<number, ReactiveKind>()
   for (let i = 0; i < reactiveVariables.length; i++) {
-    const v = reactiveVariables[i]!
+    const v = reactiveVariables[i]
     if (v.reactiveKind !== null) {
-      reactiveKindByVariableId.set(v.id, v.reactiveKind as ReactiveKind)
+      const validated = VALID_REACTIVE_KINDS.get(v.reactiveKind)
+      if (validated !== undefined) reactiveKindByVariableId.set(v.id, validated)
     }
   }
 
   const edges = solidTree.dependencyEdges
   const edgesByConsumerId = new Map<number, DependencyEdge[]>()
   for (let i = 0; i < edges.length; i++) {
-    const edge = edges[i]!
+    const edge = edges[i]
     const consumerId = edge.consumer.id
     let bucket = edgesByConsumerId.get(consumerId)
     if (bucket === undefined) {

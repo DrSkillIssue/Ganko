@@ -1,6 +1,7 @@
 import { HEADING_ELEMENTS } from "@drskillissue/ganko-shared"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { ElementNode } from "../../binding/element-builder"
+import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-builder"
 import { SignalValueKind } from "../../binding/signal-builder"
 import type { FileSemanticModel } from "../../binding/semantic-model"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -67,14 +68,14 @@ export const cssLayoutDynamicSlotNoReservedSpace = defineAnalysisRule({
   },
 })
 
-function hasBlockAxisPadding(snapshot: import("../../binding/signal-builder").SignalSnapshot): boolean {
+function hasBlockAxisPadding(snapshot: SignalSnapshot): boolean {
   const top = readKnownPx(snapshot, "padding-top")
   const bottom = readKnownPx(snapshot, "padding-bottom")
   if (top !== null && top > 0 && bottom !== null && bottom > 0) return true
   return false
 }
 
-function readKnownPx(snapshot: import("../../binding/signal-builder").SignalSnapshot, name: import("../../binding/signal-builder").LayoutSignalName): number | null {
+function readKnownPx(snapshot: SignalSnapshot, name: LayoutSignalName): number | null {
   const sig = snapshot.signals.get(name)
   if (!sig || sig.kind !== SignalValueKind.Known) return null
   return sig.px
