@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { isBlank } from "@drskillissue/ganko-shared"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -18,7 +18,11 @@ export const cssNoUnresolvedCustomProperties = defineAnalysisRule({
         const ref = tree.unresolvedRefs[i]
         if (!ref) continue
         if (ref.fallback && !isBlank(ref.fallback)) continue
-        emit(createDiagnosticFromLoc(ref.file.path, { start: { line: ref.declaration.startLine, column: ref.declaration.startColumn }, end: { line: ref.declaration.startLine, column: ref.declaration.startColumn + 1 } }, cssNoUnresolvedCustomProperties.id, "unresolvedCustomProperty", resolveMessage(messages.unresolvedCustomProperty, { name: ref.name, property: ref.declaration.property }), "error"))
+        emit(createCSSDiagnostic(
+          ref.file.path, ref.declaration.startLine, ref.declaration.startColumn,
+          cssNoUnresolvedCustomProperties.id, "unresolvedCustomProperty",
+          resolveMessage(messages.unresolvedCustomProperty, { name: ref.name, property: ref.declaration.property }), "error",
+        ))
       }
     })
   },

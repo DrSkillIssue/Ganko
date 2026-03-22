@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -46,19 +46,11 @@ export const cssNoUnreferencedComponentClass = defineAnalysisRule({
         if (!selectorSymbol) continue
         const rule = selectorSymbol.entity.rule
 
-        emit(
-          createDiagnosticFromLoc(
-            rule.file.path,
-            {
-              start: { line: rule.startLine, column: rule.startColumn },
-              end: { line: rule.startLine, column: rule.startColumn + 1 },
-            },
-            cssNoUnreferencedComponentClass.id,
-            "unreferencedClass",
-            resolveMessage(messages.unreferencedClass, { className: name }),
-            "warn",
-          ),
-        )
+        emit(createCSSDiagnostic(
+          rule.file.path, rule.startLine, rule.startColumn,
+          cssNoUnreferencedComponentClass.id, "unreferencedClass",
+          resolveMessage(messages.unreferencedClass, { className: name }), "warn",
+        ))
       }
     })
   },

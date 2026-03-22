@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { RuleEntity } from "../../../css/entities/rule"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -110,7 +110,11 @@ export const cssRequireReducedMotionOverride = defineAnalysisRule({
         let covered = false
         for (let j = 0; j < resolved.length; j++) { const sel = resolved[j]; if (sel && reduced.has(`${normalizeSelector(sel)}|${group}`)) { covered = true; break } }
         if (covered) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssRequireReducedMotionOverride.id, "missingReducedMotion", resolveMessage(messages.missingReducedMotion, { selector: r.selectorText }), "warn"))
+        emit(createCSSDiagnostic(
+          d.file.path, d.startLine, d.startColumn,
+          cssRequireReducedMotionOverride.id, "missingReducedMotion",
+          resolveMessage(messages.missingReducedMotion, { selector: r.selectorText }), "warn",
+        ))
       }
     })
   },

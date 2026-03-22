@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { AtRuleEntity, DeclarationEntity } from "../../../css/entities"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -88,8 +88,16 @@ export const cssMediaQueryOverlapConflict = defineAnalysisRule({
             let hasOverlap = false
             for (let ai = 0; ai < aRanges.length && !hasOverlap; ai++) { const ar = aRanges[ai]; if (!ar) continue; for (let bi = 0; bi < bRanges.length; bi++) { const br = bRanges[bi]; if (br && isPartialOverlap(ar, br)) { hasOverlap = true; break } } }
             if (!hasOverlap) continue
-            if (!seen.has(a.id)) { seen.add(a.id); emit(createDiagnosticFromLoc(a.file.path, { start: { line: a.startLine, column: a.startColumn }, end: { line: a.startLine, column: a.startColumn + 1 } }, cssMediaQueryOverlapConflict.id, "mediaOverlapConflict", resolveMessage(messages.mediaOverlapConflict, { property, selector: aRule.selectorText }), "warn")) }
-            if (!seen.has(b.id)) { seen.add(b.id); emit(createDiagnosticFromLoc(b.file.path, { start: { line: b.startLine, column: b.startColumn }, end: { line: b.startLine, column: b.startColumn + 1 } }, cssMediaQueryOverlapConflict.id, "mediaOverlapConflict", resolveMessage(messages.mediaOverlapConflict, { property, selector: bRule.selectorText }), "warn")) }
+            if (!seen.has(a.id)) { seen.add(a.id); emit(createCSSDiagnostic(
+  a.file.path, a.startLine, a.startColumn,
+  cssMediaQueryOverlapConflict.id, "mediaOverlapConflict",
+  resolveMessage(messages.mediaOverlapConflict, { property, selector: aRule.selectorText }), "warn",
+)) }
+            if (!seen.has(b.id)) { seen.add(b.id); emit(createCSSDiagnostic(
+  b.file.path, b.startLine, b.startColumn,
+  cssMediaQueryOverlapConflict.id, "mediaOverlapConflict",
+  resolveMessage(messages.mediaOverlapConflict, { property, selector: bRule.selectorText }), "warn",
+)) }
           }
         }
       }

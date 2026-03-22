@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { extractKeyframeNames } from "@drskillissue/ganko-shared"
 import { CSS_WIDE_KEYWORDS } from "../../../css/parser/css-keywords"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -25,6 +25,21 @@ export const cssNoUnusedKeyframes = defineAnalysisRule({
           const names = extractKeyframeNames(d.value, d.property.toLowerCase())
           for (let j = 0; j < names.length; j++) { const n = names[j]; if (n && !IGNORED.has(n)) usedNames.add(n) }
         }
+        for (let i = 0; i < tree.atRules.length; i++) {
+          const atRule = tree.atRules[i]
+          if (!atRule) continue
+          if (atRule.declarations.length > 0) continue
+          const nodes = atRule.node.nodes
+          if (!nodes) continue
+          for (let j = 0; j < nodes.length; j++) {
+            const child = nodes[j]
+            if (!child || child.type !== "decl") continue
+            const prop = child.prop.toLowerCase()
+            if (prop !== "animation" && prop !== "animation-name") continue
+            const names = extractKeyframeNames(child.value, prop)
+            for (let k = 0; k < names.length; k++) { const n = names[k]; if (n && !IGNORED.has(n)) usedNames.add(n) }
+          }
+        }
       }
       for (const [, tree] of compilation.cssTrees) {
         const keyframes = tree.atRulesByKind.get("keyframes")
@@ -34,7 +49,11 @@ export const cssNoUnusedKeyframes = defineAnalysisRule({
           if (!kf) continue
           const name = kf.parsedParams.animationName
           if (!name || usedNames.has(name)) continue
-          emit(createDiagnosticFromLoc(kf.file.path, { start: { line: kf.startLine, column: 1 }, end: { line: kf.startLine, column: 2 } }, cssNoUnusedKeyframes.id, "unusedKeyframes", resolveMessage(messages.unusedKeyframes, { name }), "warn"))
+          emit(createCSSDiagnostic(
+            kf.file.path, kf.startLine, 1,
+            cssNoUnusedKeyframes.id, "unusedKeyframes",
+            resolveMessage(messages.unusedKeyframes, { name }), "warn",
+          ))
         }
       }
     })

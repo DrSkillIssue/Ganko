@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const FOCUS_NOT_VISIBLE_G = /:focus(?!-visible)/g
@@ -41,7 +41,11 @@ export const cssNoOutlineNoneWithoutFocusVisible = defineAnalysisRule({
           const sel = rule.selectors[j]; if (!sel || !sel.raw.includes(":focus") || sel.raw.includes(":focus-visible")) continue
           const expected = sel.raw.replace(FOCUS_NOT_VISIBLE_G, ":focus-visible")
           if (focusVisibleWithIndicator.has(expected)) continue
-          emit(createDiagnosticFromLoc(rule.file.path, { start: { line: rule.startLine, column: rule.startColumn }, end: { line: rule.startLine, column: rule.startColumn + 1 } }, cssNoOutlineNoneWithoutFocusVisible.id, "missingFocusVisible", resolveMessage(messages.missingFocusVisible), "error"))
+          emit(createCSSDiagnostic(
+            rule.file.path, rule.startLine, rule.startColumn,
+            cssNoOutlineNoneWithoutFocusVisible.id, "missingFocusVisible",
+            resolveMessage(messages.missingFocusVisible), "error",
+          ))
         }
       }
     })

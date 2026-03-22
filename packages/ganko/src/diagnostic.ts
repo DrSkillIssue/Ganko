@@ -117,6 +117,28 @@ export function createDiagnosticFromLoc(
 }
 
 /**
+ * Create a diagnostic from a CSS entity's line/column position.
+ */
+export function createCSSDiagnostic(
+  file: string,
+  line: number,
+  column: number,
+  rule: string,
+  messageId: string,
+  message: string,
+  severity: DiagnosticSeverity,
+): Diagnostic {
+  return {
+    file,
+    rule,
+    messageId,
+    message,
+    severity,
+    loc: { start: { line, column }, end: { line, column: column + 1 } },
+  }
+}
+
+/**
  * Create a diagnostic from a comment entry.
  */
 export function createDiagnosticFromComment(

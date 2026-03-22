@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../../css/entities"
 import type { DeclarationEntity } from "../../../css/entities/declaration"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -34,7 +34,11 @@ export const cssNoImportant = defineAnalysisRule({
         if (!decl) continue
         if (!hasFlag(decl._flags, DECL_IS_IMPORTANT) && !decl.node.important) continue
         if (isSystemLevelOverride(decl)) continue
-        emit(createDiagnosticFromLoc(decl.file.path, { start: { line: decl.startLine, column: decl.startColumn }, end: { line: decl.startLine, column: decl.startColumn + 1 } }, cssNoImportant.id, "avoidImportant", resolveMessage(messages.avoidImportant, { property: decl.property }), "warn"))
+        emit(createCSSDiagnostic(
+          decl.file.path, decl.startLine, decl.startColumn,
+          cssNoImportant.id, "avoidImportant",
+          resolveMessage(messages.avoidImportant, { property: decl.property }), "warn",
+        ))
       }
     })
   },

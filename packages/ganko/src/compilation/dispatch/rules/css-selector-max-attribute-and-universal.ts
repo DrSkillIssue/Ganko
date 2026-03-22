@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { hasFlag, SEL_HAS_ATTRIBUTE, SEL_HAS_UNIVERSAL } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -20,10 +20,18 @@ export const cssSelectorMaxAttributeAndUniversal = defineAnalysisRule({
         if (!selector) continue
         const flags = selector.complexity._flags
         if (hasFlag(flags, SEL_HAS_ATTRIBUTE)) {
-          emit(createDiagnosticFromLoc(selector.rule.file.path, { start: { line: selector.rule.startLine, column: selector.rule.startColumn }, end: { line: selector.rule.startLine, column: selector.rule.startColumn + 1 } }, cssSelectorMaxAttributeAndUniversal.id, "tooManyAttributes", resolveMessage(messages.tooManyAttributes, { selector: selector.raw }), "warn"))
+          emit(createCSSDiagnostic(
+            selector.rule.file.path, selector.rule.startLine, selector.rule.startColumn,
+            cssSelectorMaxAttributeAndUniversal.id, "tooManyAttributes",
+            resolveMessage(messages.tooManyAttributes, { selector: selector.raw }), "warn",
+          ))
         }
         if (hasFlag(flags, SEL_HAS_UNIVERSAL)) {
-          emit(createDiagnosticFromLoc(selector.rule.file.path, { start: { line: selector.rule.startLine, column: selector.rule.startColumn }, end: { line: selector.rule.startLine, column: selector.rule.startColumn + 1 } }, cssSelectorMaxAttributeAndUniversal.id, "tooManyUniversals", resolveMessage(messages.tooManyUniversals, { selector: selector.raw }), "warn"))
+          emit(createCSSDiagnostic(
+            selector.rule.file.path, selector.rule.startLine, selector.rule.startColumn,
+            cssSelectorMaxAttributeAndUniversal.id, "tooManyUniversals",
+            resolveMessage(messages.tooManyUniversals, { selector: selector.raw }), "warn",
+          ))
         }
       }
     })

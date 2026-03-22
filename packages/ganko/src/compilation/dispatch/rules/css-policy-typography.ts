@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getActivePolicy, getActivePolicyName } from "../../../css/policy"
 import type { PolicyThresholds } from "../../../css/policy"
 import { parsePxValue, parseUnitlessValue } from "../../../css/parser/value-util"
@@ -49,7 +49,11 @@ export const cssPolicyTypography = defineAnalysisRule({
         for (let i = 0; i < fontDecls.length; i++) {
           const d = fontDecls[i]; if (!d) continue; const px = parsePxValue(d.value); if (px === null) continue
           const { context, min } = resolveContext(d, policy); if (px >= min) continue
-          emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssPolicyTypography.id, "fontTooSmall", resolveMessage(messages.fontTooSmall, { value: d.value.trim(), resolved: String(Math.round(px * 100) / 100), context, min: String(min), policy: name }), "warn"))
+          emit(createCSSDiagnostic(
+            d.file.path, d.startLine, d.startColumn,
+            cssPolicyTypography.id, "fontTooSmall",
+            resolveMessage(messages.fontTooSmall, { value: d.value.trim(), resolved: String(Math.round(px * 100) / 100), context, min: String(min), policy: name }), "warn",
+          ))
         }
       }
       const lhDecls = tree.declarationsByProperty.get("line-height")
@@ -59,7 +63,11 @@ export const cssPolicyTypography = defineAnalysisRule({
           const kinds = d.rule?.elementKinds; if (kinds) { let exempt = false; for (const k of kinds) { if (LINE_HEIGHT_EXEMPT_KINDS.has(k)) { exempt = true; break } }; if (exempt) continue }
           const lh = parseUnitlessValue(d.value); if (lh === null) continue
           const { context, min } = resolveLineHeightContext(d, policy); if (lh >= min) continue
-          emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssPolicyTypography.id, "lineHeightTooSmall", resolveMessage(messages.lineHeightTooSmall, { value: d.value.trim(), context, min: String(min), policy: name }), "warn"))
+          emit(createCSSDiagnostic(
+            d.file.path, d.startLine, d.startColumn,
+            cssPolicyTypography.id, "lineHeightTooSmall",
+            resolveMessage(messages.lineHeightTooSmall, { value: d.value.trim(), context, min: String(min), policy: name }), "warn",
+          ))
         }
       }
     })

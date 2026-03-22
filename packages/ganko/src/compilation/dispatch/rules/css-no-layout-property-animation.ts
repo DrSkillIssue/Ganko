@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { findTransitionProperty, findPropertyInList } from "../../../css/parser/value-util"
 import { isLayoutAnimationExempt } from "../../../css/rules/animation/layout-animation-exempt"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -27,19 +27,31 @@ export const cssNoLayoutPropertyAnimation = defineAnalysisRule({
       for (let i = 0; i < tDecls.length; i++) {
         const d = tDecls[i]; if (!d) continue
         const lp = findTransitionProperty(d.value, layoutProperties); if (!lp || isLayoutAnimationExempt(d, lp)) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation", resolveMessage(messages.avoidLayoutAnimation, { property: lp }), "warn"))
+        emit(createCSSDiagnostic(
+  d.file.path, d.startLine, d.startColumn,
+  cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation",
+  resolveMessage(messages.avoidLayoutAnimation, { property: lp }), "warn",
+))
       }
       for (let i = 0; i < tpDecls.length; i++) {
         const d = tpDecls[i]; if (!d) continue
         const lp = findPropertyInList(d.value, layoutProperties); if (!lp || isLayoutAnimationExempt(d, lp)) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation", resolveMessage(messages.avoidLayoutAnimation, { property: lp }), "warn"))
+        emit(createCSSDiagnostic(
+  d.file.path, d.startLine, d.startColumn,
+  cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation",
+  resolveMessage(messages.avoidLayoutAnimation, { property: lp }), "warn",
+))
       }
       // Keyframe declarations
       for (let i = 0; i < tree.declarations.length; i++) {
         const d = tree.declarations[i]; if (!d) continue; const rule = d.rule; if (!rule) continue
         const parent = rule.parent; if (!parent || parent.kind === "rule" || parent.kind !== "keyframes") continue
         const property = d.property.toLowerCase(); if (!layoutProperties.has(property)) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation", resolveMessage(messages.avoidLayoutAnimation, { property }), "warn"))
+        emit(createCSSDiagnostic(
+  d.file.path, d.startLine, d.startColumn,
+  cssNoLayoutPropertyAnimation.id, "avoidLayoutAnimation",
+  resolveMessage(messages.avoidLayoutAnimation, { property }), "warn",
+))
       }
     })
   },

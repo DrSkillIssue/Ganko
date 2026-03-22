@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -21,7 +21,11 @@ export const cssNoTransitionAll = defineAnalysisRule({
       for (let i = 0; i < allDecls.length; i++) {
         const d = allDecls[i]
         if (!d || !WORD_ALL.test(d.value)) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoTransitionAll.id, "avoidTransitionAll", resolveMessage(messages.avoidTransitionAll), "warn"))
+        emit(createCSSDiagnostic(
+          d.file.path, d.startLine, d.startColumn,
+          cssNoTransitionAll.id, "avoidTransitionAll",
+          resolveMessage(messages.avoidTransitionAll), "warn",
+        ))
       }
     })
   },

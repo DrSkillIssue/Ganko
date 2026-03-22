@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -19,7 +19,11 @@ export const cssNoComplexSelectors = defineAnalysisRule({
         const selector = tree.selectors[i]
         if (!selector) continue
         if (selector.complexity.depth <= MAX_DEPTH) continue
-        emit(createDiagnosticFromLoc(selector.rule.file.path, { start: { line: selector.rule.startLine, column: selector.rule.startColumn }, end: { line: selector.rule.startLine, column: selector.rule.startColumn + 1 } }, cssNoComplexSelectors.id, "selectorTooDeep", resolveMessage(messages.selectorTooDeep, { selector: selector.raw, depth: String(selector.complexity.depth) }), "warn"))
+        emit(createCSSDiagnostic(
+          selector.rule.file.path, selector.rule.startLine, selector.rule.startColumn,
+          cssNoComplexSelectors.id, "selectorTooDeep",
+          resolveMessage(messages.selectorTooDeep, { selector: selector.raw, depth: String(selector.complexity.depth) }), "warn",
+        ))
       }
     })
   },

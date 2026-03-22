@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -21,12 +21,20 @@ export const cssNoEmptyKeyframes = defineAnalysisRule({
         const name = kf.parsedParams.animationName
         if (!name) continue
         if (kf.rules.length === 0) {
-          emit(createDiagnosticFromLoc(kf.file.path, { start: { line: kf.startLine, column: 1 }, end: { line: kf.startLine, column: 2 } }, cssNoEmptyKeyframes.id, "emptyKeyframes", resolveMessage(messages.emptyKeyframes, { name }), "error"))
+          emit(createCSSDiagnostic(
+            kf.file.path, kf.startLine, 1,
+            cssNoEmptyKeyframes.id, "emptyKeyframes",
+            resolveMessage(messages.emptyKeyframes, { name }), "error",
+          ))
           continue
         }
         let hasDecl = false
         for (let j = 0; j < kf.rules.length; j++) { const r = kf.rules[j]; if (r && r.declarations.length > 0) { hasDecl = true; break } }
-        if (!hasDecl) emit(createDiagnosticFromLoc(kf.file.path, { start: { line: kf.startLine, column: 1 }, end: { line: kf.startLine, column: 2 } }, cssNoEmptyKeyframes.id, "emptyKeyframes", resolveMessage(messages.emptyKeyframes, { name }), "error"))
+        if (!hasDecl) emit(createCSSDiagnostic(
+            kf.file.path, kf.startLine, 1,
+            cssNoEmptyKeyframes.id, "emptyKeyframes",
+            resolveMessage(messages.emptyKeyframes, { name }), "error",
+          ))
       }
     })
   },

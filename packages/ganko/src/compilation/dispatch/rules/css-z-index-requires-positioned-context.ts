@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -24,7 +24,11 @@ export const cssZIndexRequiresPositionedContext = defineAnalysisRule({
         if (!posDecls) continue
         const lastPos = posDecls[posDecls.length - 1]
         if (!lastPos || lastPos.value.trim().toLowerCase() !== "static") continue
-        emit(createDiagnosticFromLoc(zd.file.path, { start: { line: zd.startLine, column: zd.startColumn }, end: { line: zd.startLine, column: zd.startColumn + 1 } }, cssZIndexRequiresPositionedContext.id, "zIndexNoContext", resolveMessage(messages.zIndexNoContext), "warn"))
+        emit(createCSSDiagnostic(
+          zd.file.path, zd.startLine, zd.startColumn,
+          cssZIndexRequiresPositionedContext.id, "zIndexNoContext",
+          resolveMessage(messages.zIndexNoContext), "warn",
+        ))
       }
     })
   },

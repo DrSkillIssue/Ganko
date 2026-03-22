@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { normalizeAnimationName } from "../../../css/parser/value-util"
 import { splitTopLevelComma, splitTopLevelWhitespace } from "../../../css/parser/value-tokenizer"
 import { isAnimationKeywordToken } from "../../../css/parser/animation-transition-keywords"
@@ -46,22 +46,14 @@ export const cssLayoutAnimationLayoutProperty = defineAnalysisRule({
         const match = firstRiskyAnimationName(names, riskyKeyframes)
         if (!match) continue
 
-        emit(
-          createDiagnosticFromLoc(
-            declaration.file.path,
-            {
-              start: { line: declaration.startLine, column: declaration.startColumn },
-              end: { line: declaration.startLine, column: declaration.startColumn + declaration.property.length },
-            },
-            cssLayoutAnimationLayoutProperty.id,
-            "animationLayoutProperty",
-            resolveMessage(messages.animationLayoutProperty, {
-              animation: match.name,
-              property: match.property,
-            }),
-            "warn",
-          ),
-        )
+        emit(createCSSDiagnostic(
+  declaration.file.path, declaration.startLine, declaration.startColumn,
+  cssLayoutAnimationLayoutProperty.id, "animationLayoutProperty",
+  resolveMessage(messages.animationLayoutProperty, {
+    animation: match.name,
+    property: match.property,
+  }), "warn",
+))
       }
     })
   },

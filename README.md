@@ -137,8 +137,8 @@ The tables below are synced with the current generated manifest and include Soli
 | Rule | Description | Recommended |
 |------|-------------|:-----------:|
 | `solid/css-no-outline-none-without-focus-visible` | Disallow removing outline without explicit focus-visible replacement. | error |
-| `solid/css-policy-contrast` | Enforce minimum contrast ratio between foreground and background colors per accessibility policy. | warn |
-| `solid/css-policy-spacing` | Enforce minimum letter-spacing, word-spacing, and paragraph spacing per accessibility policy. | warn |
+| `solid/css-policy-contrast` | Enforce minimum contrast ratio per accessibility policy. | warn |
+| `solid/css-policy-spacing` | Enforce minimum spacing per accessibility policy. | warn |
 | `solid/css-policy-typography` | Enforce minimum font sizes and line heights per accessibility policy. | warn |
 | `solid/css-require-reduced-motion-override` | Require reduced-motion override for animated selectors. | warn |
 | `solid/jsx-layout-policy-touch-target` | Enforce minimum interactive element sizes per accessibility policy via resolved layout signals. | warn |
@@ -151,7 +151,7 @@ The tables below are synced with the current generated manifest and include Soli
 | `solid/css-no-discrete-transition` | Disallow transitions on discrete CSS properties. | error |
 | `solid/css-no-empty-keyframes` | Disallow empty @keyframes rules. | error |
 | `solid/no-layout-property-animation` | Disallow animating layout-affecting properties. | warn |
-| `solid/no-transition-all` | Disallow transition: all and transition-property: all. | warn |
+| `solid/no-transition-all` | Disallow transition: all. | warn |
 | `solid/no-unknown-animation-name` | Disallow animation names that do not match declared keyframes. | error |
 | `solid/no-unused-keyframes` | Disallow unused @keyframes declarations. | warn |
 
@@ -230,7 +230,7 @@ The tables below are synced with the current generated manifest and include Soli
 | `solid/no-complex-selectors` | Disallow deep selectors that are expensive to match. | warn |
 | `solid/no-duplicate-selectors` | Disallow duplicate selector blocks. | warn |
 | `solid/no-id-selectors` | Disallow ID selectors. | warn |
-| `solid/selector-max-attribute-and-universal` | Disallow selectors with attribute or universal selectors beyond configured limits. | off |
+| `solid/selector-max-attribute-and-universal` | Disallow selectors with attribute or universal selectors. | off |
 | `solid/selector-max-specificity` | Disallow selectors that exceed a specificity threshold. | warn |
 
 

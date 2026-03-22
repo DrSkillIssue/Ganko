@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -78,7 +78,11 @@ export const cssNoLayerOrderInversion = defineAnalysisRule({
             if (seen.has(later.id)) continue
 
             seen.add(later.id)
-            emit(createDiagnosticFromLoc(later.file.path, { start: { line: later.startLine, column: later.startColumn }, end: { line: later.startLine, column: later.startColumn + 1 } }, cssNoLayerOrderInversion.id, "layerOrderInversion", resolveMessage(messages.layerOrderInversion, { property, selector: laterRule.selectorText }), "warn"))
+            emit(createCSSDiagnostic(
+  later.file.path, later.startLine, later.startColumn,
+  cssNoLayerOrderInversion.id, "layerOrderInversion",
+  resolveMessage(messages.layerOrderInversion, { property, selector: laterRule.selectorText }), "warn",
+))
           }
         }
       }

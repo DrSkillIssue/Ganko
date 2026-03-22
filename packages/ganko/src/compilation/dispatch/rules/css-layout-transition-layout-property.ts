@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { findPropertyInList, findTransitionProperty } from "../../../css/parser/value-util"
 import { LAYOUT_TRANSITION_PROPERTIES } from "../../../css/layout-taxonomy"
 import { isLayoutAnimationExempt } from "../../../css/rules/animation/layout-animation-exempt"
@@ -33,22 +33,14 @@ export const cssLayoutTransitionLayoutProperty = defineAnalysisRule({
         if (!target) continue
         if (isLayoutAnimationExempt(declaration, target)) continue
 
-        emit(
-          createDiagnosticFromLoc(
-            declaration.file.path,
-            {
-              start: { line: declaration.startLine, column: declaration.startColumn },
-              end: { line: declaration.startLine, column: declaration.startColumn + declaration.property.length },
-            },
-            cssLayoutTransitionLayoutProperty.id,
-            "transitionLayoutProperty",
-            resolveMessage(messages.transitionLayoutProperty, {
-              property: target,
-              declaration: declaration.property,
-            }),
-            "warn",
-          ),
-        )
+        emit(createCSSDiagnostic(
+  declaration.file.path, declaration.startLine, declaration.startColumn,
+  cssLayoutTransitionLayoutProperty.id, "transitionLayoutProperty",
+  resolveMessage(messages.transitionLayoutProperty, {
+    property: target,
+    declaration: declaration.property,
+  }), "warn",
+))
       }
     })
   },

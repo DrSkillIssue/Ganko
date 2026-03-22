@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { LAYOUT_POSITIONED_OFFSET_PROPERTIES } from "../../../css/layout-taxonomy"
 import { parseBlockShorthand, parseQuadShorthand } from "../../../css/parser/value-tokenizer"
 import type { StatefulSelectorEntry, NormalizedRuleDeclaration } from "../../analysis/statefulness"
@@ -72,22 +72,14 @@ function runStatefulBoxModelCheck(semanticModel: FileSemanticModel, emit: Emit):
 
       if (isVisualFeedbackTransform(declaration.property, match.isDirectInteraction)) continue
 
-      emit(
-        createDiagnosticFromLoc(
-          declaration.filePath,
-          {
-            start: { line: declaration.startLine, column: declaration.startColumn },
-            end: { line: declaration.startLine, column: declaration.startColumn + declaration.propertyLength },
-          },
-          cssLayoutStatefulBoxModelShift.id,
-          "statefulBoxModelShift",
-          resolveMessage(messages.statefulBoxModelShift, {
-            selector: match.raw,
-            property: declaration.property,
-          }),
-          "warn",
-        ),
-      )
+      emit(createCSSDiagnostic(
+        declaration.filePath, declaration.startLine, declaration.startColumn,
+        cssLayoutStatefulBoxModelShift.id, "statefulBoxModelShift",
+        resolveMessage(messages.statefulBoxModelShift, {
+          selector: match.raw,
+          property: declaration.property,
+        }), "warn",
+      ))
       reported.add(declaration.declarationId)
     }
     }

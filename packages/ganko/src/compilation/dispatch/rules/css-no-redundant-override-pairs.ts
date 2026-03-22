@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { RuleEntity } from "../../../css/entities/rule"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -42,7 +42,11 @@ export const cssNoRedundantOverridePairs = defineAnalysisRule({
 
         if (!redundant || seen.has(declaration.id)) continue
         seen.add(declaration.id)
-        emit(createDiagnosticFromLoc(declaration.file.path, { start: { line: declaration.startLine, column: declaration.startColumn }, end: { line: declaration.startLine, column: declaration.startColumn + 1 } }, cssNoRedundantOverridePairs.id, "redundantOverride", resolveMessage(messages.redundantOverride, { property: declaration.property }), "warn"))
+        emit(createCSSDiagnostic(
+  declaration.file.path, declaration.startLine, declaration.startColumn,
+  cssNoRedundantOverridePairs.id, "redundantOverride",
+  resolveMessage(messages.redundantOverride, { property: declaration.property }), "warn",
+))
       }
     })
   },

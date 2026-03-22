@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { extractKeyframeNames } from "@drskillissue/ganko-shared"
 import { CSS_WIDE_KEYWORDS } from "../../../css/parser/css-keywords"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -38,7 +38,11 @@ export const cssNoUnknownAnimationName = defineAnalysisRule({
           for (let j = 0; j < names.length; j++) {
             const name = names[j]
             if (!name || IGNORED.has(name) || name.includes("(") || knownNames.has(name)) continue
-            emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoUnknownAnimationName.id, "unknownAnimationName", resolveMessage(messages.unknownAnimationName, { name, property: d.property }), "error"))
+            emit(createCSSDiagnostic(
+              d.file.path, d.startLine, d.startColumn,
+              cssNoUnknownAnimationName.id, "unknownAnimationName",
+              resolveMessage(messages.unknownAnimationName, { name, property: d.property }), "error",
+            ))
           }
         }
       }

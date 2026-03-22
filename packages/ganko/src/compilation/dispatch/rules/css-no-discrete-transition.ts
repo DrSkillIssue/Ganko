@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { findTransitionProperty, findPropertyInList } from "../../../css/parser/value-util"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -23,14 +23,22 @@ export const cssNoDiscreteTransition = defineAnalysisRule({
         if (!d) continue
         const bad = findTransitionProperty(d.value, discrete)
         if (!bad) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoDiscreteTransition.id, "discreteTransition", resolveMessage(messages.discreteTransition, { property: bad }), "error"))
+        emit(createCSSDiagnostic(
+          d.file.path, d.startLine, d.startColumn,
+          cssNoDiscreteTransition.id, "discreteTransition",
+          resolveMessage(messages.discreteTransition, { property: bad }), "error",
+        ))
       }
       for (let i = 0; i < tpDecls.length; i++) {
         const d = tpDecls[i]
         if (!d) continue
         const bad = findPropertyInList(d.value, discrete)
         if (!bad) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoDiscreteTransition.id, "discreteTransition", resolveMessage(messages.discreteTransition, { property: bad }), "error"))
+        emit(createCSSDiagnostic(
+          d.file.path, d.startLine, d.startColumn,
+          cssNoDiscreteTransition.id, "discreteTransition",
+          resolveMessage(messages.discreteTransition, { property: bad }), "error",
+        ))
       }
     })
   },

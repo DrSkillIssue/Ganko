@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -22,7 +22,11 @@ export const cssNoHardcodedZIndex = defineAnalysisRule({
         if (!d) continue
         const t = d.value.trim()
         if (t.includes("var(") || !DIGITS_ONLY.test(t) || Number(t) <= 0) continue
-        emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoHardcodedZIndex.id, "hardcodedZ", resolveMessage(messages.hardcodedZ, { value: t }), "warn"))
+        emit(createCSSDiagnostic(
+          d.file.path, d.startLine, d.startColumn,
+          cssNoHardcodedZIndex.id, "hardcodedZ",
+          resolveMessage(messages.hardcodedZ, { value: t }), "warn",
+        ))
       }
     })
   },

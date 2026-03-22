@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -21,7 +21,11 @@ export const cssDeclarationNoOverriddenWithinRule = defineAnalysisRule({
           for (let j = 0; j < decls.length - 1; j++) {
             const overridden = decls[j]
             if (!overridden) continue
-            emit(createDiagnosticFromLoc(overridden.file.path, { start: { line: overridden.startLine, column: overridden.startColumn }, end: { line: overridden.startLine, column: overridden.startColumn + 1 } }, cssDeclarationNoOverriddenWithinRule.id, "overriddenWithinRule", resolveMessage(messages.overriddenWithinRule, { property }), "warn"))
+            emit(createCSSDiagnostic(
+              overridden.file.path, overridden.startLine, overridden.startColumn,
+              cssDeclarationNoOverriddenWithinRule.id, "overriddenWithinRule",
+              resolveMessage(messages.overriddenWithinRule, { property }), "warn",
+            ))
           }
         }
       }

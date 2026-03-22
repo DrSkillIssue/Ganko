@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -19,7 +19,11 @@ export const cssSelectorMaxSpecificity = defineAnalysisRule({
         const selector = tree.selectors[i]
         if (!selector) continue
         if (selector.specificityScore <= MAX_SPECIFICITY_SCORE) continue
-        emit(createDiagnosticFromLoc(selector.rule.file.path, { start: { line: selector.rule.startLine, column: selector.rule.startColumn }, end: { line: selector.rule.startLine, column: selector.rule.startColumn + 1 } }, cssSelectorMaxSpecificity.id, "maxSpecificity", resolveMessage(messages.maxSpecificity, { selector: selector.raw, specificity: `(${selector.specificity.join(",")})`, max: String(MAX_SPECIFICITY_SCORE) }), "warn"))
+        emit(createCSSDiagnostic(
+          selector.rule.file.path, selector.rule.startLine, selector.rule.startColumn,
+          cssSelectorMaxSpecificity.id, "maxSpecificity",
+          resolveMessage(messages.maxSpecificity, { selector: selector.raw, specificity: `(${selector.specificity.join(",")})`, max: String(MAX_SPECIFICITY_SCORE) }), "warn",
+        ))
       }
     })
   },

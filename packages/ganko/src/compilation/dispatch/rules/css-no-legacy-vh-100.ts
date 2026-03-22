@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -21,7 +21,11 @@ export const cssNoLegacyVh100 = defineAnalysisRule({
         for (let i = 0; i < decls.length; i++) {
           const d = decls[i]
           if (!d || !LEGACY_VH_100.test(d.value)) continue
-          emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoLegacyVh100.id, "avoidLegacyVh", resolveMessage(messages.avoidLegacyVh), "warn"))
+          emit(createCSSDiagnostic(
+            d.file.path, d.startLine, d.startColumn,
+            cssNoLegacyVh100.id, "avoidLegacyVh",
+            resolveMessage(messages.avoidLegacyVh), "warn",
+          ))
         }
       }
     })

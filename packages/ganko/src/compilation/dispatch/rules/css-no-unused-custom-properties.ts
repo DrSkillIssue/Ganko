@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { hasFlag, VAR_IS_SCSS, VAR_IS_USED } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -21,7 +21,11 @@ export const cssNoUnusedCustomProperties = defineAnalysisRule({
           if (hasFlag(variable._flags, VAR_IS_USED)) continue
           if (hasFlag(variable._flags, VAR_IS_SCSS)) continue
           if (variable.scope.type === "global") continue
-          emit(createDiagnosticFromLoc(variable.file.path, { start: { line: variable.declaration.startLine, column: variable.declaration.startColumn }, end: { line: variable.declaration.startLine, column: variable.declaration.startColumn + 1 } }, cssNoUnusedCustomProperties.id, "unusedCustomProperty", resolveMessage(messages.unusedCustomProperty, { name: variable.name }), "warn"))
+          emit(createCSSDiagnostic(
+            variable.file.path, variable.declaration.startLine, variable.declaration.startColumn,
+            cssNoUnusedCustomProperties.id, "unusedCustomProperty",
+            resolveMessage(messages.unusedCustomProperty, { name: variable.name }), "warn",
+          ))
         }
       }
     })

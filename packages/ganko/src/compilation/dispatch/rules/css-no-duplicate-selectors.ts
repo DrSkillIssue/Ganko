@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -45,7 +45,11 @@ export const cssNoDuplicateSelectors = defineAnalysisRule({
           for (let i = 0; i < rules.length; i++) {
             const rule = rules[i]
             if (!rule) continue
-            emit(createDiagnosticFromLoc(rule.file.path, { start: { line: rule.startLine, column: rule.startColumn }, end: { line: rule.startLine, column: rule.startColumn + 1 } }, cssNoDuplicateSelectors.id, "duplicateSelector", msg, "warn"))
+            emit(createCSSDiagnostic(
+              rule.file.path, rule.startLine, rule.startColumn,
+              cssNoDuplicateSelectors.id, "duplicateSelector",
+              msg, "warn",
+            ))
           }
         }
       }

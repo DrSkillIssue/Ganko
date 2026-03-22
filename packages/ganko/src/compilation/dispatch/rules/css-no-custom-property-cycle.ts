@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = { variableCycle: "Custom property cycle detected involving `{{name}}`." } as const
@@ -53,7 +53,11 @@ export const cssNoCustomPropertyCycle = defineAnalysisRule({
       if (cyclic.size === 0) return
       for (const v of allVars) {
         if (!cyclic.has(v.id)) continue
-        emit(createDiagnosticFromLoc(v.filePath, { start: { line: v.startLine, column: v.startColumn }, end: { line: v.startLine, column: v.startColumn + 1 } }, cssNoCustomPropertyCycle.id, "variableCycle", resolveMessage(messages.variableCycle, { name: v.name }), "error"))
+        emit(createCSSDiagnostic(
+  v.filePath, v.startLine, v.startColumn,
+  cssNoCustomPropertyCycle.id, "variableCycle",
+  resolveMessage(messages.variableCycle, { name: v.name }), "error",
+))
       }
     })
   },

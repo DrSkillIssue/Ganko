@@ -12,7 +12,6 @@
 
 import { allRules } from "../src/compilation/dispatch/rules"
 import { rules as solidRules } from "../src/solid/rules"
-import { rules as cssRules } from "../src/css/rules"
 import { fileURLToPath } from "node:url"
 
 interface ManifestEntry {
@@ -21,7 +20,7 @@ interface ManifestEntry {
   readonly description: string
   readonly fixable: boolean
   readonly category: string
-  readonly plugin: "solid" | "css" | "cross-file"
+  readonly plugin: "solid" | "compilation"
   readonly messages: Record<string, string>
 }
 
@@ -29,7 +28,6 @@ function collectEntries(): readonly ManifestEntry[] {
   const entries: ManifestEntry[] = []
 
   const solidIds = new Set(solidRules.map(r => r.id))
-  const cssIds = new Set(cssRules.map(r => r.id))
 
   for (const rule of solidRules) {
     entries.push({
@@ -43,27 +41,15 @@ function collectEntries(): readonly ManifestEntry[] {
     })
   }
 
-  for (const rule of cssRules) {
-    entries.push({
-      id: rule.id,
-      severity: rule.severity,
-      description: rule.meta.description,
-      fixable: rule.meta.fixable,
-      category: rule.meta.category,
-      plugin: "css",
-      messages: rule.messages,
-    })
-  }
-
   for (const rule of allRules) {
-    if (solidIds.has(rule.id) || cssIds.has(rule.id)) continue
+    if (solidIds.has(rule.id)) continue
     entries.push({
       id: rule.id,
       severity: rule.severity,
       description: rule.meta.description,
       fixable: rule.meta.fixable,
       category: rule.meta.category,
-      plugin: "cross-file",
+      plugin: "compilation",
       messages: rule.messages,
     })
   }

@@ -13,7 +13,7 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy } from "@drskillissue/ganko";
+import { SolidPlugin, setActivePolicy } from "@drskillissue/ganko";
 import { pathToUri, projectRootFromUri, acceptProjectRoot, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
@@ -193,7 +193,7 @@ export async function handleInitialized(
 
   const project = createProject({
     rootPath,
-    plugins: [SolidPlugin, CSSPlugin],
+    plugins: [SolidPlugin],
     rules: state.config.ruleOverrides,
     log,
   });

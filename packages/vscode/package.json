@@ -474,7 +474,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Enforce minimum contrast ratio between foreground and background colors per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Enforce minimum contrast ratio per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -493,7 +493,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Enforce minimum letter-spacing, word-spacing, and paragraph spacing per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Enforce minimum spacing per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -626,7 +626,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Disallow transition: all and transition-property: all.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Disallow transition: all.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -1557,7 +1557,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Disallow selectors with attribute or universal selectors beyond configured limits.\n\nDefault severity: `off`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Disallow selectors with attribute or universal selectors.\n\nDefault severity: `off`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",

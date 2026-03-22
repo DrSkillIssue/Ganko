@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -17,7 +17,11 @@ export const cssNoEmptyRule = defineAnalysisRule({
         const rule = tree.rules[i]
         if (!rule) continue
         if (rule.declarations.length > 0 || rule.nestedRules.length > 0 || rule.nestedAtRules.length > 0) continue
-        emit(createDiagnosticFromLoc(rule.file.path, { start: { line: rule.startLine, column: rule.startColumn }, end: { line: rule.startLine, column: rule.startColumn + 1 } }, cssNoEmptyRule.id, "emptyRule", resolveMessage(messages.emptyRule, { selector: rule.selectorText }), "warn"))
+        emit(createCSSDiagnostic(
+          rule.file.path, rule.startLine, rule.startColumn,
+          cssNoEmptyRule.id, "emptyRule",
+          resolveMessage(messages.emptyRule, { selector: rule.selectorText }), "warn",
+        ))
       }
     })
   },

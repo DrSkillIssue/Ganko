@@ -300,7 +300,7 @@ bun run --cwd packages/ganko generate
 Totals:
 
 - 165 rules total
-- 101 Solid rules, 32 CSS rules, 32 cross-file rules
+- 101 Solid rules, 0 CSS rules, 64 cross-file rules
 - 24 fixable rules
 
 Category breakdown:

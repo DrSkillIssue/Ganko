@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { AtRuleEntity } from "../../../css/entities/at-rule"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -59,22 +59,14 @@ export const cssLayoutFontSwapInstability = defineAnalysisRule({
         for (let i = 0; i < pendingReports.length; i++) {
           const report = pendingReports[i]
           if (!report) continue
-          emit(
-            createDiagnosticFromLoc(
-              report.declaration.file.path,
-              {
-                start: { line: report.declaration.startLine, column: report.declaration.startColumn },
-                end: { line: report.declaration.startLine, column: report.declaration.startColumn + report.declaration.property.length },
-              },
-              cssLayoutFontSwapInstability.id,
-              "unstableFontSwap",
-              resolveMessage(messages.unstableFontSwap, {
-                family,
-                display: report.display,
-              }),
-              "warn",
-            ),
-          )
+          emit(createCSSDiagnostic(
+  report.declaration.file.path, report.declaration.startLine, report.declaration.startColumn,
+  cssLayoutFontSwapInstability.id, "unstableFontSwap",
+  resolveMessage(messages.unstableFontSwap, {
+    family,
+    display: report.display,
+  }), "warn",
+))
         }
       }
     })

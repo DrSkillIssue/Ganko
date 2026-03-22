@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const PHYSICAL_TO_LOGICAL = new Map([
@@ -28,7 +28,11 @@ export const cssPreferLogicalProperties = defineAnalysisRule({
         for (let i = 0; i < decls.length; i++) {
           const d = decls[i]
           if (!d) continue
-          emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssPreferLogicalProperties.id, "preferLogical", resolveMessage(messages.preferLogical, { logical, physical }), "warn"))
+          emit(createCSSDiagnostic(
+            d.file.path, d.startLine, d.startColumn,
+            cssPreferLogicalProperties.id, "preferLogical",
+            resolveMessage(messages.preferLogical, { logical, physical }), "warn",
+          ))
         }
       }
     })

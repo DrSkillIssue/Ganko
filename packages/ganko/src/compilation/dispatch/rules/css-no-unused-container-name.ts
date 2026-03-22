@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { parseContainerQueryName, parseContainerNames, parseContainerNamesFromShorthand } from "../../../css/parser/value-util"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -34,10 +34,16 @@ export const cssNoUnusedContainerName = defineAnalysisRule({
           if (p === "container-name") names = parseContainerNames(d.value)
           else if (p === "container") names = parseContainerNamesFromShorthand(d.value)
           if (!names) continue
+          const seen = new Set<string>()
           for (let j = 0; j < names.length; j++) {
             const name = names[j]
-            if (!name || queriedNames.has(name)) continue
-            emit(createDiagnosticFromLoc(d.file.path, { start: { line: d.startLine, column: d.startColumn }, end: { line: d.startLine, column: d.startColumn + 1 } }, cssNoUnusedContainerName.id, "unusedContainer", resolveMessage(messages.unusedContainer, { name }), "warn"))
+            if (!name || queriedNames.has(name) || seen.has(name)) continue
+            seen.add(name)
+            emit(createCSSDiagnostic(
+              d.file.path, d.startLine, d.startColumn,
+              cssNoUnusedContainerName.id, "unusedContainer",
+              resolveMessage(messages.unusedContainer, { name }), "warn",
+            ))
           }
         }
       }

@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { parseContainerQueryName, parseContainerNames, parseContainerNamesFromShorthand } from "../../../css/parser/value-util"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
@@ -35,7 +35,11 @@ export const cssNoUnknownContainerName = defineAnalysisRule({
           if (!at) continue
           const name = at.parsedParams.containerName ?? parseContainerQueryName(at.params)
           if (!name || declaredNames.has(name)) continue
-          emit(createDiagnosticFromLoc(at.file.path, { start: { line: at.startLine, column: 1 }, end: { line: at.startLine, column: 2 } }, cssNoUnknownContainerName.id, "unknownContainer", resolveMessage(messages.unknownContainer, { name }), "error"))
+          emit(createCSSDiagnostic(
+            at.file.path, at.startLine, 1,
+            cssNoUnknownContainerName.id, "unknownContainer",
+            resolveMessage(messages.unknownContainer, { name }), "error",
+          ))
         }
       }
     })

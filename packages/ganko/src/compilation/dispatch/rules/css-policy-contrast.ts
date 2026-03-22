@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getActivePolicy, getActivePolicyName } from "../../../css/policy"
 import { parseColor, contrastRatio, compositeOver, type SRGB } from "../../../css/parser/color"
 import { parsePxValue } from "../../../css/parser/value-util"
@@ -41,7 +41,11 @@ export const cssPolicyContrast = defineAnalysisRule({
         const needsDual = fgColor.a < 1 || bgColor.a < 1
         const ratio = needsDual ? Math.max(computeComposited(fgColor, bgColor, WHITE), computeComposited(fgColor, bgColor, BLACK)) : contrastRatio(fgColor, bgColor)
         const rounded = Math.round(ratio * 100) / 100; if (rounded >= min) continue
-        emit(createDiagnosticFromLoc(fgDecl.file.path, { start: { line: fgDecl.startLine, column: fgDecl.startColumn }, end: { line: fgDecl.startLine, column: fgDecl.startColumn + 1 } }, cssPolicyContrast.id, "insufficientContrast", resolveMessage(messages.insufficientContrast, { ratio: String(rounded), fg: fgDecl.value.trim(), bg: bgDecl.value.trim(), min: String(min), textSize: large ? "large" : "normal", policy: name }), "warn"))
+        emit(createCSSDiagnostic(
+          fgDecl.file.path, fgDecl.startLine, fgDecl.startColumn,
+          cssPolicyContrast.id, "insufficientContrast",
+          resolveMessage(messages.insufficientContrast, { ratio: String(rounded), fg: fgDecl.value.trim(), bg: bgDecl.value.trim(), min: String(min), textSize: large ? "large" : "normal", policy: name }), "warn",
+        ))
       }
     })
   },

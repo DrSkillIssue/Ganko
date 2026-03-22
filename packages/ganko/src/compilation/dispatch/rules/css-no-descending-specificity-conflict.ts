@@ -1,4 +1,4 @@
-import { createDiagnosticFromLoc, resolveMessage } from "../../../diagnostic"
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import type { SelectorEntity, DeclarationEntity } from "../../../css/entities"
 import { hasFlag, DECL_IS_IMPORTANT } from "../../../css/entities"
 import { defineAnalysisRule, ComputationTier } from "../rule"
@@ -76,7 +76,11 @@ export const cssNoDescendingSpecificityConflict = defineAnalysisRule({
             const es = earlierRule.selectors[0]; const ls = laterRule.selectors[0]; if (!es || !ls) continue
             if (!isProvableDescendingPair(es, ls) || seen.has(later.id)) continue
             seen.add(later.id)
-            emit(createDiagnosticFromLoc(later.file.path, { start: { line: later.startLine, column: later.startColumn }, end: { line: later.startLine, column: later.startColumn + 1 } }, cssNoDescendingSpecificityConflict.id, "descendingSpecificity", resolveMessage(messages.descendingSpecificity, { laterSelector: ls.raw, earlierSelector: es.raw, property }), "warn"))
+            emit(createCSSDiagnostic(
+  later.file.path, later.startLine, later.startColumn,
+  cssNoDescendingSpecificityConflict.id, "descendingSpecificity",
+  resolveMessage(messages.descendingSpecificity, { laterSelector: ls.raw, earlierSelector: es.raw, property }), "warn",
+))
           }
         }
       }

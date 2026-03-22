@@ -13,8 +13,8 @@
  *
  * // Or use programmatically
  * import { createProject } from "@drskillissue/ganko"
- * import { SolidPlugin, CSSPlugin } from "@drskillissue/ganko"
- * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin, CSSPlugin] })
+ * import { SolidPlugin } from "@drskillissue/ganko"
+ * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin] })
  * const diagnostics = project.run(["App.tsx"])
  * ```
  */
