@@ -22,11 +22,17 @@ export const cssNoDuplicateSelectors = defineAnalysisRule({
           if (!rule) continue
           // Skip keyframe selectors
           let isKeyframe = false
-          for (let p = rule.parent; p !== null; p = p.kind === "rule" ? p.parent : null) {
+          const parentParts: string[] = []
+          for (let p = rule.parent; p !== null; p = p.parent as typeof rule.parent) {
             if (p.kind === "keyframes") { isKeyframe = true; break }
+            // Include at-rule context in dedup key — selectors inside
+            // @media, @supports, @layer, @container are NOT duplicates
+            // of the same selector at root level or in a different at-rule.
+            if (p.kind !== "rule") parentParts.push(`${p.kind}:${p.params ?? ""}`)
           }
           if (isKeyframe) continue
-          const key = `${rule.file.path}\0${rule.selectorText}`
+          const contextKey = parentParts.length > 0 ? parentParts.reverse().join("/") : ""
+          const key = `${rule.file.path}\0${contextKey}\0${rule.selectorText}`
           const existing = dedupIndex.get(key)
           if (existing) existing.push(rule)
           else dedupIndex.set(key, [rule])
