@@ -36,7 +36,7 @@ export function createClassNameSymbol(
   return {
     symbolKind: "className",
     name,
-    filePath: filePaths.length > 0 ? filePaths[0] : null,
+    filePath: filePaths.length > 0 ? filePaths[0]! : null,
     source: {
       kind: "css",
       selectors,

@@ -226,7 +226,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "lint.log");
 
-      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file", "--no-daemon"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,
@@ -244,7 +244,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "dual.log");
 
-      const dualResult = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      const dualResult = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file", "--no-daemon"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,

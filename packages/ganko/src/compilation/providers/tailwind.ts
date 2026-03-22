@@ -85,8 +85,9 @@ function parseCssDeclarations(css: string): TailwindResolvedDeclaration[] {
   const lines = css.split("\n")
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    if (!line) continue
     const match = DECL_RE.exec(line)
-    if (match) {
+    if (match && match[1] && match[2]) {
       out.push({ property: match[1], value: match[2] })
     }
   }
@@ -107,12 +108,13 @@ function parseBasicCandidate(raw: string): TailwindParsedCandidate {
   }
 
   const segments = splitByColon(working)
-  const base = segments[segments.length - 1]
+  const base = segments[segments.length - 1]!
   const variantSegments = segments.length > 1 ? segments.slice(0, segments.length - 1) : []
 
   const variants: TailwindParsedVariant[] = []
   for (let i = 0; i < variantSegments.length; i++) {
     const seg = variantSegments[i]
+    if (!seg) continue
     let kind: TailwindParsedVariant["kind"] = "static"
     let value: string | null = null
     const modifier: string | null = null

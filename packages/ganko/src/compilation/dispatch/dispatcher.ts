@@ -196,7 +196,8 @@ function dispatchFactActions(actions: CollectedActions, elements: readonly Eleme
     if (!element) continue
 
     for (let j = 0; j < actions.factThunks.length; j++) {
-      actions.factThunks[j].dispatch(element, model, model, emit)
+      const thunk = actions.factThunks[j]
+      if (thunk) thunk.dispatch(element, model, model, emit)
     }
   }
 }

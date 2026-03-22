@@ -274,12 +274,14 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
 
   for (let t = 0; t < trees.length; t++) {
     const tree = trees[t]
+    if (!tree) continue
     const filePath = tree.filePath
 
     // Selectors
     const treeSelectors = tree.selectors
     for (let i = 0; i < treeSelectors.length; i++) {
       const entity = treeSelectors[i]
+      if (!entity) continue
       allSelectors.push(entity)
 
       const symbol = createSelectorSymbol(entity, filePath)
@@ -288,6 +290,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
       const dispatchKeys = symbol.dispatchKeys
       for (let j = 0; j < dispatchKeys.length; j++) {
         const key = dispatchKeys[j]
+        if (!key) continue
         pushToMapArray(selectorsByDispatchKeyMap, key, symbol)
       }
 
@@ -310,9 +313,11 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
       const compounds = entity.compounds
       for (let ci = 0; ci < compounds.length; ci++) {
         const compound = compounds[ci]
+        if (!compound) continue
         const classes = compound.classes
         for (let j = 0; j < classes.length; j++) {
           const cls = classes[j]
+          if (!cls) continue
           let entry = classNamesMap.get(cls)
           if (!entry) {
             entry = { selectors: [], filePaths: new Set() }
@@ -328,6 +333,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeRules = tree.rules
     for (let i = 0; i < treeRules.length; i++) {
       const rule = treeRules[i]
+      if (!rule) continue
       allRules.push(rule)
 
       const selectorText = rule.selectorText
@@ -348,8 +354,8 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
         if (dups) {
           dups.rules.push(rule)
         } else {
-          const first = dedupExisting[0]
-          if (first) duplicateSelectorsMap.set(selectorText, { selector: selectorText, rules: [first, rule] })
+          const first = dedupExisting[0]!
+          duplicateSelectorsMap.set(selectorText, { selector: selectorText, rules: [first, rule] })
         }
       } else {
         selectorDedupIndex.set(dedupKey, [rule])
@@ -360,6 +366,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeDeclarations = tree.declarations
     for (let i = 0; i < treeDeclarations.length; i++) {
       const entity = treeDeclarations[i]
+      if (!entity) continue
       allDeclarations.push(entity)
 
       const sourceOrder = tree.sourceOrderBase + entity.id
@@ -377,6 +384,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeVariables = tree.variables
     for (let i = 0; i < treeVariables.length; i++) {
       const entity = treeVariables[i]
+      if (!entity) continue
       allVariables.push(entity)
       if (!customPropertiesMap.has(entity.name)) {
         customPropertiesMap.set(entity.name, createCustomPropertySymbol(entity, filePath))
@@ -387,6 +395,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeAtRules = tree.atRules
     for (let i = 0; i < treeAtRules.length; i++) {
       const entity = treeAtRules[i]
+      if (!entity) continue
       allAtRules.push(entity)
 
       switch (entity.kind) {
@@ -411,6 +420,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeTokens = tree.tokens
     for (let i = 0; i < treeTokens.length; i++) {
       const entity = treeTokens[i]
+      if (!entity) continue
       if (!themeTokensMap.has(entity.name)) {
         themeTokensMap.set(entity.name, createThemeTokenSymbol(entity, filePath))
       }
@@ -421,6 +431,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeMixins = tree.mixins
     for (let i = 0; i < treeMixins.length; i++) {
       const mixin = treeMixins[i]
+      if (!mixin) continue
       allMixins.push(mixin)
       if (!mixinsByNameMap.has(mixin.name)) mixinsByNameMap.set(mixin.name, mixin)
     }
@@ -429,6 +440,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treeFunctions = tree.functions
     for (let i = 0; i < treeFunctions.length; i++) {
       const fn = treeFunctions[i]
+      if (!fn) continue
       allFunctions.push(fn)
       if (!functionsByNameMap.has(fn.name)) functionsByNameMap.set(fn.name, fn)
     }
@@ -437,6 +449,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const treePlaceholders = tree.placeholders
     for (let i = 0; i < treePlaceholders.length; i++) {
       const ph = treePlaceholders[i]
+      if (!ph) continue
       allPlaceholders.push(ph)
       if (!placeholdersByNameMap.has(ph.name)) placeholdersByNameMap.set(ph.name, ph)
     }
@@ -460,6 +473,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const knownKeyframeNames = new Set<string>()
   for (let i = 0; i < allKeyframeAtRules.length; i++) {
     const kf = allKeyframeAtRules[i]
+    if (!kf) continue
     const name = kf.parsedParams.animationName
     if (name) knownKeyframeNames.add(name)
   }
@@ -470,6 +484,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const animDecls = declarationsForPropertiesImpl(mergedDeclarationsByProperty, "animation", "animation-name")
   for (let i = 0; i < animDecls.length; i++) {
     const d = animDecls[i]
+    if (!d) continue
     const names = extractKeyframeNames(d.value, d.property.toLowerCase())
     for (let j = 0; j < names.length; j++) {
       const name = names[j]
@@ -486,6 +501,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
 
   for (let i = 0; i < allDeclarations.length; i++) {
     const d = allDeclarations[i]
+    if (!d) continue
     const rule = d.rule
     if (!rule) continue
     const parent = rule.parent
@@ -531,6 +547,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const keyframesMap = new Map<string, KeyframesSymbol>()
   for (let i = 0; i < allKeyframeAtRules.length; i++) {
     const kf = allKeyframeAtRules[i]
+    if (!kf) continue
     const name = kf.parsedParams.animationName ?? kf.params.trim()
     if (!name) continue
     if (keyframesMap.has(name)) continue
@@ -542,6 +559,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const usedAnimationNames = new Set<string>()
   for (let i = 0; i < animDecls.length; i++) {
     const d = animDecls[i]
+    if (!d) continue
     const names = extractKeyframeNames(d.value, d.property.toLowerCase())
     for (let j = 0; j < names.length; j++) {
       const name = names[j]
@@ -551,6 +569,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const unusedKeyframesArr: AtRuleEntity[] = []
   for (let i = 0; i < allKeyframeAtRules.length; i++) {
     const kf = allKeyframeAtRules[i]
+    if (!kf) continue
     const name = kf.parsedParams.animationName ?? kf.params.trim()
     if (!usedAnimationNames.has(name)) unusedKeyframesArr.push(kf)
   }
@@ -559,6 +578,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const declaredContainerNames = new Map<string, DeclarationEntity[]>()
   for (let i = 0; i < allDeclarations.length; i++) {
     const d = allDeclarations[i]
+    if (!d) continue
     const p = d.property.toLowerCase()
     let names: readonly string[] | null = null
     if (p === "container-name") names = parseContainerNames(d.value)
@@ -576,6 +596,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const containerQueryNames = new Map<string, AtRuleEntity[]>()
   for (let i = 0; i < allAtRules.length; i++) {
     const at = allAtRules[i]
+    if (!at) continue
     if (at.kind !== "container") continue
     const name = at.parsedParams.containerName ?? parseContainerQueryName(at.params)
     if (!name) continue
@@ -624,6 +645,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const layoutByClass = new Map<string, Set<string>>()
   for (let i = 0; i < allSelectors.length; i++) {
     const selector = allSelectors[i]
+    if (!selector) continue
     if (selector.anchor.classes.length === 0) continue
 
     const properties = new Set<string>()
@@ -631,6 +653,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const ruleDecls = rule.declarations
     for (let j = 0; j < ruleDecls.length; j++) {
       const decl = ruleDecls[j]
+      if (!decl) continue
       const property = decl.property.toLowerCase()
       if (!LAYOUT_CLASS_GEOMETRY_PROPERTIES.has(property)) continue
       properties.add(property)
@@ -640,6 +663,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const anchorClasses = selector.anchor.classes
     for (let j = 0; j < anchorClasses.length; j++) {
       const className = anchorClasses[j]
+      if (!className) continue
       let existing = layoutByClass.get(className)
       if (!existing) {
         existing = new Set()
@@ -659,12 +683,14 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const fontDecls = declarationsForPropertiesImpl(mergedDeclarationsByProperty, ...FONT_LAYOUT_PROPERTIES)
   for (let i = 0; i < fontDecls.length; i++) {
     const declaration = fontDecls[i]
+    if (!declaration) continue
     const rule = declaration.rule
     if (!rule) continue
     const families = parseFontFamilyList(declaration.value)
     if (families.length === 0) continue
     for (let j = 0; j < families.length; j++) {
       const family = families[j]
+      if (!family) continue
       usedFontFamiliesSet.add(family)
     }
     const existing = usedFontFamiliesByRuleMap.get(rule.id)
@@ -674,6 +700,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
       const merged = new Set(existing)
       for (let j = 0; j < families.length; j++) {
         const family = families[j]
+        if (!family) continue
         merged.add(family)
       }
       usedFontFamiliesByRuleMap.set(rule.id, [...merged])
@@ -684,6 +711,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const fontFacesMap = new Map<string, FontFaceSymbol[]>()
   for (let i = 0; i < allFontFaceAtRules.length; i++) {
     const fontFace = allFontFaceAtRules[i]
+    if (!fontFace) continue
     const familyDeclaration = firstDeclaration(fontFace.declarations, "font-family")
     if (!familyDeclaration) continue
     const family = normalizeFontFamily(familyDeclaration.value)
@@ -703,6 +731,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const emptyRulesArr: RuleEntity[] = []
   for (let i = 0; i < allRules.length; i++) {
     const r = allRules[i]
+    if (!r) continue
     if (r.declarations.length === 0 && r.nestedRules.length === 0 && r.nestedAtRules.length === 0) {
       emptyRulesArr.push(r)
     }
@@ -712,6 +741,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const emptyKeyframesArr: AtRuleEntity[] = []
   for (let i = 0; i < allKeyframeAtRules.length; i++) {
     const kf = allKeyframeAtRules[i]
+    if (!kf) continue
     if (!kf.parsedParams.animationName) continue
     if (kf.rules.length === 0) {
       emptyKeyframesArr.push(kf)
@@ -730,6 +760,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const deepNestedRulesArr: RuleEntity[] = []
   for (let i = 0; i < allRules.length; i++) {
     const r = allRules[i]
+    if (!r) continue
     if (r.depth > 3) deepNestedRulesArr.push(r)
   }
 
@@ -737,9 +768,11 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const overqualifiedSelectorsArr: SelectorEntity[] = []
   for (let i = 0; i < idSelectorsArr.length; i++) {
     const sel = idSelectorsArr[i]
+    if (!sel) continue
     const compounds = sel.compounds
     if (compounds.length === 0) continue
     const subject = compounds[compounds.length - 1]
+    if (!subject) continue
     if (subject.idValue !== null && (subject.tagName !== null || subject.classes.length > 0 || subject.attributes.length > 0)) {
       overqualifiedSelectorsArr.push(sel)
     }
@@ -749,21 +782,25 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
   const unusedVariablesArr: VariableEntity[] = []
   for (let i = 0; i < allVariables.length; i++) {
     const v = allVariables[i]
+    if (!v) continue
     if (!hasFlag(v._flags, VAR_IS_USED)) unusedVariablesArr.push(v)
   }
   const unusedMixinsArr: MixinEntity[] = []
   for (let i = 0; i < allMixins.length; i++) {
     const m = allMixins[i]
+    if (!m) continue
     if (!hasFlag(m._flags, MIXIN_IS_USED)) unusedMixinsArr.push(m)
   }
   const unusedFunctionsArr: SCSSFunctionEntity[] = []
   for (let i = 0; i < allFunctions.length; i++) {
     const f = allFunctions[i]
+    if (!f) continue
     if (!hasFlag(f._flags, SCSSFN_IS_USED)) unusedFunctionsArr.push(f)
   }
   const unusedPlaceholdersArr: PlaceholderEntity[] = []
   for (let i = 0; i < allPlaceholders.length; i++) {
     const p = allPlaceholders[i]
+    if (!p) continue
     if (!hasFlag(p._flags, PLACEHOLDER_IS_USED)) unusedPlaceholdersArr.push(p)
   }
 
@@ -773,9 +810,11 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindContri
     const compounds = symbol.entity.compounds
     for (let ci = 0; ci < compounds.length; ci++) {
       const compound = compounds[ci]
+      if (!compound) continue
       const classes = compound.classes
       for (let j = 0; j < classes.length; j++) {
         const cls = classes[j]
+        if (!cls) continue
         pushToMapArray(selectorSymbolsByClassName, cls, symbol)
       }
     }

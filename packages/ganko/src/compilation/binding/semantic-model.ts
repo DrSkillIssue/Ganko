@@ -241,6 +241,7 @@ export function createFileSemanticModel(
   const reactiveKindByVariableId = new Map<number, ReactiveKind>()
   for (let i = 0; i < reactiveVariables.length; i++) {
     const v = reactiveVariables[i]
+    if (!v) continue
     if (v.reactiveKind !== null) {
       const validated = VALID_REACTIVE_KINDS.get(v.reactiveKind)
       if (validated !== undefined) reactiveKindByVariableId.set(v.id, validated)
@@ -251,6 +252,7 @@ export function createFileSemanticModel(
   const edgesByConsumerId = new Map<number, DependencyEdge[]>()
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i]
+    if (!edge) continue
     const consumerId = edge.consumer.id
     let bucket = edgesByConsumerId.get(consumerId)
     if (bucket === undefined) {

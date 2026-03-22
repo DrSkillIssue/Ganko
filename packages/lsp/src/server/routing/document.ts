@@ -50,14 +50,14 @@ export function setupDocumentHandlers(context: ServerContext): void {
     const t0 = performance.now();
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
 
-    // Sync TS + evict caches
+    // Sync TS + update tracker compilation + evict caches
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
       context.diagManager.evict(change.path);
+      context.graphCache = context.graphCache.applyChange(change.path, change.content, String(change.version));
     }
-    context.graphCache.setCachedCrossFileResults([]);
 
     // Run pipeline for each changed file
     const diagnosed = new Set<string>();
@@ -160,15 +160,15 @@ export function setupDocumentHandlers(context: ServerContext): void {
     const savedPath = uriToCanonicalPath(event.document.uri);
     if (savedPath === null) return;
 
-    // Sync TS + evict caches
+    // Sync TS + update tracker + evict caches
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
       context.diagManager.evict(change.path);
+      context.graphCache = context.graphCache.applyChange(change.path, change.content, String(change.version));
     }
     context.diagManager.evict(savedPath);
-    context.graphCache.setCachedCrossFileResults([]);
 
     // Re-diagnose via pipeline
     const saveToken = createCancellationSource().token;

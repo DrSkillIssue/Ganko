@@ -76,7 +76,11 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
     if (includeCrossFile && phase.tag === "enriched") {
       const analyzer = createIncrementalAnalyzer();
       const compilation = context.graphCache.currentCompilation;
-      const crossByFile = analyzer.analyzeAffected([key], compilation, context.serverState.config.ruleOverrides);
+      // Run full analysis — cross-file rules need all files (CSS rules need
+      // solid trees for element dispatch, solid rules need CSS scope).
+      // analyzeAffected with just [key] misses rules that fire on other files
+      // but produce diagnostics attributed to key.
+      const crossByFile = analyzer.analyzeAll(compilation, context.serverState.config.ruleOverrides);
       const crossFile = crossByFile.get(key) ?? [];
 
       if (!token.isCancelled && crossFile.length > 0) {

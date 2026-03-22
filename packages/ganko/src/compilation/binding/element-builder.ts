@@ -949,7 +949,7 @@ function resolveExternalExportTarget(node: ExternalPackageExportNode | null, sub
   if (node === null) return null
   if (node.kind === "path") return node.value
   if (node.kind === "array") {
-    for (let i = 0; i < node.values.length; i++) { const r = resolveExternalExportTarget(node.values[i], subpath, conditions); if (r !== null) return r }
+    for (let i = 0; i < node.values.length; i++) { const v = node.values[i]; if (!v) continue; const r = resolveExternalExportTarget(v, subpath, conditions); if (r !== null) return r }
     return null
   }
   const exact = node.fields.get(subpath)
