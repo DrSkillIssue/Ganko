@@ -1,29 +1,30 @@
 /**
  * Ganko Daemon Server
  *
- * Long-running background process that keeps a TypeScript program,
- * compilation, file index, and Tailwind validator warm between `ganko lint`
- * invocations.
+ * Long-running background process that keeps a CompilationTracker warm
+ * between `ganko lint` invocations. Uses the same compilation infrastructure
+ * as the LSP — no parallel caches.
  */
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { unlinkSync, existsSync, chmodSync, writeFileSync } from "node:fs";
 import { writeFile, rename, readFile } from "node:fs/promises";
 import {
   SolidPlugin,
-  buildSolidSyntaxTree,
-  buildCSSResult,
   runSolidRules,
-  createSolidInput,
-  createOverrideEmit,
+  createCompilationTracker,
   createStyleCompilation,
-  createAnalysisDispatcher,
-  allRules,
   prepareTailwindEval,
   buildTailwindValidatorFromEval,
   scanDependencyCustomProperties,
   setActivePolicy,
 } from "@drskillissue/ganko";
-import type { Diagnostic, TailwindValidator, CSSInput, SolidSyntaxTree } from "@drskillissue/ganko";
+import type { Diagnostic, TailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+import { buildFullCompilation } from "../core/compilation-builder";
+import { SessionMutator } from "../server/session-mutator";
+import { createServerConfig, type ServerConfig } from "../server/handlers/lifecycle";
+import { createCompilationDiagnosticProducer, type CompilationDiagnosticProducer } from "../core/compilation-diagnostic-producer";
+import type { ServerSession } from "../server/session";
+import type { ServerInfrastructure } from "../server/server-infrastructure";
 import { evaluateWorkspace } from "../core/workspace-eval";
 import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
@@ -45,26 +46,32 @@ import {
   type LintRequest,
 } from "./daemon-protocol";
 
-interface DaemonState {
-  startTime: number
-  project: Project | null
+interface DaemonState extends ServerInfrastructure {
+  readonly startTime: number
   projectRoot: string
-  server: Server
+  readonly server: Server
+  readonly log: Logger
+  readonly closeLogFile: () => Promise<void>
+
+  project: Project | null
+  session: ServerSession | null
+  tracker: CompilationTracker
+  readonly mutator: SessionMutator
+  readonly diagnosticProducer: CompilationDiagnosticProducer
+
   idleTimer: ReturnType<typeof setTimeout> | null
-  log: Logger
-  closeLogFile: () => Promise<void>
-  fileIndex: FileRegistry | null
-  tailwind: TailwindValidator | null
-  externalCustomProperties: ReadonlySet<string> | null
-  cssContentMap: Map<string, string> | null
   pending: Promise<void>
   shutdownStarted: boolean
   eslintConfig: ESLintConfigResult | null
   prewarm: Promise<void> | null
-  /** Per-file solid tree cache — keyed by canonical path, stores version + tree */
-  solidTrees: Map<string, { version: string; tree: SolidSyntaxTree }>
-  /** Cached cross-file diagnostics — invalidated when any file changes */
-  crossFileDiagnostics: readonly Diagnostic[] | null
+
+  // ServerInfrastructure mutable state
+  fileIndex: FileRegistry | null
+  tailwind: TailwindValidator | null
+  externalCustomProperties: ReadonlySet<string> | null
+  layout: import("@drskillissue/ganko-shared").WorkspaceLayout | null
+  config: ServerConfig
+  contentVersions: Map<string, string>
 }
 
 function resetIdleTimer(state: DaemonState): void {
@@ -97,21 +104,22 @@ function shutdown(state: DaemonState): void {
   });
 }
 
+function invalidateAll(state: DaemonState): void {
+  state.fileIndex = null;
+  state.tailwind = null;
+  state.externalCustomProperties = null;
+  state.layout = null;
+  state.eslintConfig = null;
+  state.tracker = createCompilationTracker(createStyleCompilation());
+  state.session = null;
+  state.contentVersions.clear();
+}
+
 function setsEqual(a: ReadonlySet<string> | null, b: ReadonlySet<string>): boolean {
   if (a === null) return b.size === 0;
   if (a.size !== b.size) return false;
   for (const item of a) { if (!b.has(item)) return false }
   return true;
-}
-
-function invalidateCaches(state: DaemonState): void {
-  state.fileIndex = null;
-  state.tailwind = null;
-  state.externalCustomProperties = null;
-  state.cssContentMap = null;
-  state.eslintConfig = null;
-  state.solidTrees.clear();
-  state.crossFileDiagnostics = null;
 }
 
 async function handleLintRequest(
@@ -144,7 +152,7 @@ async function handleLintRequest(
       state.project.dispose();
     }
     state.projectRoot = projectRoot;
-    invalidateCaches(state);
+    invalidateAll(state);
     state.project = createProject({ rootPath: projectRoot, plugins: [SolidPlugin], rules: eslintResult.overrides, log });
   }
 
@@ -155,181 +163,186 @@ async function handleLintRequest(
   const effectiveExclude = eslintResult.globalIgnores.length > 0
     ? [...params.exclude, ...eslintResult.globalIgnores] : params.exclude;
 
+  state.config.ruleOverrides = eslintResult.overrides;
   const daemonRoot = acceptProjectRoot(projectRoot);
   const daemonLayout = buildWorkspaceLayout(daemonRoot, log);
+  state.layout = daemonLayout;
   state.fileIndex = createFileRegistry(daemonLayout, effectiveExclude, log);
   const fileIndex = state.fileIndex;
-
-  // Evict deleted solid files from cache
-  for (const cachedPath of state.solidTrees.keys()) {
-    if (!fileIndex.solidFiles.has(cachedPath)) {
-      state.solidTrees.delete(cachedPath);
-      state.crossFileDiagnostics = null;
-    }
-  }
 
   let filesToLint: readonly string[];
   if (params.files.length > 0) filesToLint = params.files;
   else filesToLint = fileIndex.allFiles();
 
-  const allDiagnostics: Diagnostic[] = [];
-
-  // Read solid file contents
-  const solidPathsToSync = params.crossFile
-    ? [...fileIndex.solidFiles]
-    : filesToLint.filter(path => classifyFile(path) === "solid");
-  const solidContentByPath = new Map<string, string>();
-
-  for (let i = 0; i < solidPathsToSync.length; i++) {
-    const path = solidPathsToSync[i]; if (!path) continue
-    let content: string; try { content = await readFile(path, "utf-8") } catch { continue }
-    const key = canonicalPath(path);
-    solidContentByPath.set(key, content);
-    const sf = project.getSourceFile(key);
-    if (sf === undefined || sf.text !== content) project.updateFile(key, content);
-  }
-
   if (filesToLint.length === 0) {
     return { kind: "lint-response", id: request.id, diagnostics: [] };
   }
 
-  // CSS content diffing
-  {
-    const allCSSFiles = fileIndex.loadAllCSSContent();
-    const previousContentMap = state.cssContentMap;
-    const nextContentMap = new Map<string, string>();
-    let cssChanged = previousContentMap === null;
+  const allDiagnostics: Diagnostic[] = [];
 
-    for (let i = 0; i < allCSSFiles.length; i++) {
-      const cssFile = allCSSFiles[i]; if (!cssFile) continue
-      nextContentMap.set(cssFile.path, cssFile.content);
-      if (!cssChanged && previousContentMap !== null) {
-        const prev = previousContentMap.get(cssFile.path);
-        if (prev === undefined || prev !== cssFile.content) cssChanged = true;
-      }
-    }
-    if (!cssChanged && previousContentMap !== null) {
-      for (const prevPath of previousContentMap.keys()) { if (!nextContentMap.has(prevPath)) { cssChanged = true; break } }
-    }
-    state.cssContentMap = nextContentMap;
+  // ── Sync solid files into TS project + detect changes ──
 
-    if (cssChanged) {
-      state.crossFileDiagnostics = null;
-      const wsPackagePaths = Array.from(daemonLayout.packagePaths);
-      const twParams = prepareTailwindEval(allCSSFiles, projectRoot, wsPackagePaths, log);
-      if (twParams !== null) {
-        const twResponse = await evaluateWorkspace(projectRoot, {
-          type: "tailwind-init",
-          tailwindModulePath: twParams.modulePath,
-          tailwindEntryCss: twParams.entryCss,
-          tailwindEntryBase: twParams.entryBase,
-        }, log).catch(() => null);
-        state.tailwind = twResponse !== null && twResponse.tailwind !== undefined
-          ? buildTailwindValidatorFromEval(twResponse.tailwind.utilities, twResponse.tailwind.variants, log)
-          : null;
-      } else {
-        state.tailwind = null;
-      }
+  const solidPathsToSync = params.crossFile
+    ? [...fileIndex.solidFiles]
+    : filesToLint.filter(path => classifyFile(path) === "solid");
+
+  let anyFileChanged = false;
+  const solidContentByPath = new Map<string, string>();
+
+  for (let i = 0; i < solidPathsToSync.length; i++) {
+    const path = solidPathsToSync[i]; if (!path) continue;
+    let content: string; try { content = await readFile(path, "utf-8"); } catch { continue; }
+    const key = canonicalPath(path);
+    solidContentByPath.set(key, content);
+    const version = contentHash(content);
+    const prevVersion = state.contentVersions.get(key);
+    if (prevVersion !== version) {
+      state.contentVersions.set(key, version);
+      project.updateFile(key, content);
+      anyFileChanged = true;
     }
   }
 
-  // External custom properties
+  // CSS — read all, detect changes
+  const allCSSContent = fileIndex.loadAllCSSContent();
+  for (let i = 0; i < allCSSContent.length; i++) {
+    const cssFile = allCSSContent[i]; if (!cssFile) continue;
+    const key = canonicalPath(cssFile.path);
+    const version = contentHash(cssFile.content);
+    const prevVersion = state.contentVersions.get(key);
+    if (prevVersion !== version) {
+      state.contentVersions.set(key, version);
+      anyFileChanged = true;
+    }
+  }
+
+  // Evict deleted files from content versions
+  for (const cachedPath of state.contentVersions.keys()) {
+    if (!fileIndex.solidFiles.has(cachedPath) && !fileIndex.cssFiles.has(cachedPath)) {
+      state.contentVersions.delete(cachedPath);
+      anyFileChanged = true;
+    }
+  }
+
+  // ── Resolve inputs BEFORE compilation build ──
+
+  // External custom properties (may change independently of file content)
   {
     const nextExternal = scanDependencyCustomProperties(daemonLayout);
     if (!setsEqual(state.externalCustomProperties, nextExternal)) {
-      state.crossFileDiagnostics = null;
+      anyFileChanged = true;
     }
     state.externalCustomProperties = nextExternal;
   }
 
-  // Single-file solid analysis — build trees, run rules, cache
-  const program = project.getProgram();
-  for (let i = 0; i < filesToLint.length; i++) {
-    const path = filesToLint[i]; if (!path) continue
-    if (classifyFile(path) === "css") continue
-    const key = canonicalPath(path);
-    const content = solidContentByPath.get(key); if (content === undefined) continue
-    const version = contentHash(content);
-
-    const cached = state.solidTrees.get(key);
-    let tree: SolidSyntaxTree;
-
-    if (cached !== null && cached !== undefined && cached.version === version) {
-      tree = cached.tree;
+  // Tailwind re-resolution (must happen before compilation build so CSS
+  // trees are parsed with the correct validator)
+  if (anyFileChanged) {
+    const wsPackagePaths = Array.from(daemonLayout.packagePaths);
+    const twParams = prepareTailwindEval(allCSSContent, projectRoot, wsPackagePaths, log);
+    if (twParams !== null) {
+      const twResponse = await evaluateWorkspace(projectRoot, {
+        type: "tailwind-init",
+        tailwindModulePath: twParams.modulePath,
+        tailwindEntryCss: twParams.entryCss,
+        tailwindEntryBase: twParams.entryBase,
+      }, log).catch(() => null);
+      state.tailwind = twResponse !== null && twResponse.tailwind !== undefined
+        ? buildTailwindValidatorFromEval(twResponse.tailwind.utilities, twResponse.tailwind.variants, log)
+        : null;
     } else {
-      const input = createSolidInput(key, program, log);
-      tree = buildSolidSyntaxTree(input, version);
-      state.solidTrees.set(key, { version, tree });
-      state.crossFileDiagnostics = null;
+      state.tailwind = null;
     }
+  }
 
-    const sourceFile = program.getSourceFile(key);
+  // ── Build compilation when anything changed ──
+  // Full rebuild via buildFullCompilation. The CompilationTracker wraps the
+  // compilation and caches cross-file diagnostics across invocations.
+  // Solid tree parsing requires ts.Program (tracker can't do this internally).
+  // CSS tree parsing goes through buildCSSResult in the builder.
+  // Full rebuild is correct — compilation construction is O(files), analysis
+  // is O(rules × files). The compilation build is <5% of total lint time.
+  if (anyFileChanged) {
+    const resolveContent = (path: string): string | null => {
+      const solidContent = solidContentByPath.get(path);
+      if (solidContent !== undefined) return solidContent;
+      for (let i = 0; i < allCSSContent.length; i++) {
+        const f = allCSSContent[i];
+        if (f && f.path === path) return f.content;
+      }
+      return null;
+    };
+
+    const { compilation } = buildFullCompilation({
+      solidFiles: fileIndex.solidFiles,
+      cssFiles: fileIndex.cssFiles,
+      getProgram: () => project.getProgram(),
+      tailwindValidator: state.tailwind,
+      externalCustomProperties: state.externalCustomProperties !== null && state.externalCustomProperties.size > 0
+        ? state.externalCustomProperties : undefined,
+      resolveContent,
+      logger: log,
+    });
+    state.tracker = createCompilationTracker(compilation);
+    state.session = state.mutator.buildSession(state);
+  }
+
+  // ── Single-file solid analysis ──
+
+  const compilation = state.tracker.currentCompilation;
+  for (let i = 0; i < filesToLint.length; i++) {
+    const path = filesToLint[i]; if (!path) continue;
+    if (classifyFile(path) === "css") continue;
+    const key = canonicalPath(path);
+    const tree = compilation.getSolidTree(key);
+    if (!tree) continue;
+    const sourceFile = project.getProgram().getSourceFile(key);
     if (!sourceFile) continue;
 
     const { results, emit } = createEmit(eslintResult.overrides);
     runSolidRules(tree, sourceFile, emit);
-    for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d) }
+    for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d); }
   }
 
-  // Cross-file analysis via AnalysisDispatcher
+  // ── Cross-file analysis via AnalysisDispatcher ──
+
   if (params.crossFile) {
-    if (state.crossFileDiagnostics !== null) {
-      // Use cached cross-file results
+    const cachedResults = state.tracker.getCachedCrossFileResults();
+
+    if (cachedResults !== null) {
+      // Use cached cross-file results from tracker
       if (params.files.length > 0) {
         const lintSet = new Set(filesToLint);
-        for (let i = 0; i < state.crossFileDiagnostics.length; i++) {
-          const d = state.crossFileDiagnostics[i]; if (d && lintSet.has(d.file)) allDiagnostics.push(d)
+        for (const [file, diags] of cachedResults) {
+          if (!lintSet.has(file)) continue;
+          for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) allDiagnostics.push(d); }
         }
       } else {
-        for (let i = 0; i < state.crossFileDiagnostics.length; i++) {
-          const d = state.crossFileDiagnostics[i]; if (d) allDiagnostics.push(d)
+        for (const [, diags] of cachedResults) {
+          for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) allDiagnostics.push(d); }
         }
       }
     } else {
-      // Build compilation from cached trees + CSS
-      let compilation = createStyleCompilation();
-      for (const [, { tree }] of state.solidTrees) {
-        compilation = compilation.withSolidTree(tree);
+      // Run cross-file analysis via shared CompilationDiagnosticProducer
+      const crossByFile = state.diagnosticProducer.runAll(compilation, eslintResult.overrides);
+
+      // Flatten for tracker cache
+      const crossFlat: Diagnostic[] = [];
+      for (const [, diags] of crossByFile) {
+        for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) crossFlat.push(d); }
       }
+      state.tracker.setCachedCrossFileResults(crossFlat);
 
-      const cssContentMap = state.cssContentMap;
-      if (cssContentMap !== null && cssContentMap.size > 0) {
-        const cssFiles: { path: string; content: string }[] = [];
-        for (const [path, content] of cssContentMap) cssFiles.push({ path, content });
-        const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
-        if (state.tailwind !== null) cssInput.tailwind = state.tailwind;
-        if (state.externalCustomProperties !== null && state.externalCustomProperties.size > 0) {
-          cssInput.externalCustomProperties = state.externalCustomProperties;
-        }
-        const { trees } = buildCSSResult(cssInput);
-        compilation = compilation.withCSSTrees(trees);
-      }
-
-      const dispatcher = createAnalysisDispatcher();
-      for (let i = 0; i < allRules.length; i++) dispatcher.register(allRules[i]!);
-
-      const crossResult = dispatcher.run(compilation);
-      const hasOverrides = Object.keys(eslintResult.overrides).length > 0;
-
-      const crossDiagnostics: Diagnostic[] = [];
-      const crossEmit = hasOverrides
-        ? createOverrideEmit((d: Diagnostic) => crossDiagnostics.push(d), eslintResult.overrides)
-        : (d: Diagnostic) => crossDiagnostics.push(d);
-
-      for (let i = 0; i < crossResult.diagnostics.length; i++) {
-        const d = crossResult.diagnostics[i]; if (d) crossEmit(d);
-      }
-
-      state.crossFileDiagnostics = crossDiagnostics;
-
+      // Collect for response
       if (params.files.length > 0) {
         const lintSet = new Set(filesToLint);
-        for (let i = 0; i < crossDiagnostics.length; i++) {
-          const d = crossDiagnostics[i]; if (d && lintSet.has(d.file)) allDiagnostics.push(d)
+        for (const [file, diags] of crossByFile) {
+          if (!lintSet.has(file)) continue;
+          for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) allDiagnostics.push(d); }
         }
       } else {
-        for (let i = 0; i < crossDiagnostics.length; i++) {
-          const d = crossDiagnostics[i]; if (d) allDiagnostics.push(d)
+        for (const [, diags] of crossByFile) {
+          for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) allDiagnostics.push(d); }
         }
       }
     }
@@ -450,13 +463,29 @@ export async function startDaemon(projectRoot: string): Promise<void> {
     fileIndex: null,
     tailwind: null,
     externalCustomProperties: null,
-    cssContentMap: null,
+    layout: null,
+    config: createServerConfig(),
     pending: Promise.resolve(),
     shutdownStarted: false,
     eslintConfig: null,
     prewarm: null,
-    solidTrees: new Map(),
-    crossFileDiagnostics: null,
+    tracker: createCompilationTracker(createStyleCompilation()),
+    session: null,
+    mutator: new SessionMutator(),
+    diagnosticProducer: createCompilationDiagnosticProducer(),
+    contentVersions: new Map(),
+
+    // ServerInfrastructure
+    getProject() { return state.project; },
+    getTsCompilerOptions() { return null; },
+    getRootPath() { return state.projectRoot; },
+    getConfig() { return state.config; },
+    getFileRegistry() { return state.fileIndex; },
+    getWorkspaceLayout() { return state.layout; },
+    getTailwindValidator() { return state.tailwind; },
+    getBatchableValidator() { return null; },
+    getExternalCustomProperties() { return state.externalCustomProperties !== null && state.externalCustomProperties.size > 0 ? state.externalCustomProperties : undefined; },
+    getEvaluator() { return null; },
   };
 
   server.on("connection", (socket: Socket) => {

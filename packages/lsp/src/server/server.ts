@@ -25,7 +25,6 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { createCompilationTracker, createStyleCompilation } from "@drskillissue/ganko";
 import type { CompilationTracker } from "@drskillissue/ganko";
-import type { Diagnostic } from "@drskillissue/ganko";
 import {
   classifyFile,
   isToolingConfig,
@@ -36,21 +35,20 @@ import {
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
-import type { LifecyclePhase } from "./server-state";
+import type { LifecyclePhase } from "./session";
 import { readFileSync } from "node:fs";
-import { buildSolidTreeForPath } from "../core/analyze";
+import { buildSolidTreeForFile } from "../core/compilation-builder";
 import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
-import { ResourceMap } from "./resource-map";
+import type { CancellationSource } from "./cancellation";
+import type { ServerSession } from "./session";
 
 import { type ServerState, createServerState, createServerConfig } from "./handlers/lifecycle";
-import { publishFileDiagnostics, propagateTsDiagnostics } from "./diagnostics-push";
 
 import { createResourceIdentity, type ResourceIdentity } from "./resource-identity";
-import { DocumentManager } from "./document-manager";
+import { DocumentTracker } from "./document-tracker";
 import { DiagnosticsManager } from "./diagnostics-manager";
-import { ChangeProcessor } from "./change-processor";
 import { createTsService, type TsService } from "../core/ts-service";
 
 import { setupLifecycleHandlers } from "./routing/lifecycle";
@@ -61,7 +59,7 @@ function createFeatureHandlerContext(
   tsService: TsService,
   project: Project,
   _tracker: CompilationTracker,
-  diagCache: ResourceMap<readonly Diagnostic[]>,
+  diagManager: DiagnosticsManager,
   handlerLog: Logger,
 ): FeatureHandlerContext {
   return {
@@ -88,7 +86,7 @@ function createFeatureHandlerContext(
     },
 
     getDiagnostics(path) {
-      return diagCache.get(path) ?? [];
+      return diagManager.getRawDiagnostics(path);
     },
 
     getContent(path) {
@@ -99,7 +97,7 @@ function createFeatureHandlerContext(
       if (classifyFile(path) !== "solid") return null;
       const sourceFile = tsService.getSourceFile(path);
       if (!sourceFile) return null;
-      return buildSolidTreeForPath(project, path);
+      return buildSolidTreeForFile(path, () => project.getProgram());
     },
   };
 }
@@ -111,24 +109,43 @@ export interface ServerContext {
   readonly documents: FilteredTextDocuments
   readonly log: LeveledLogger
   readonly serverState: ServerState
-  readonly diagCache: ResourceMap<readonly Diagnostic[]>
   readonly graphCache: CompilationTracker
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
   readonly identity: ResourceIdentity
-  readonly docManager: DocumentManager
+  readonly docManager: DocumentTracker
   readonly diagManager: DiagnosticsManager
-  readonly changeProcessor: ChangeProcessor
   readonly tsService: TsService
   readonly ready: Promise<void>
   resolveReady(): void
   resolveContent(path: string): string | null
   tsPropagationCancel: (() => void) | null
 
+  /** Current diagnostic pipeline cancellation — cancelled on each coalesced change batch. */
+  diagnosticCancellation: CancellationSource | null
+
+  /** Current session snapshot — immutable, rebuilt on state changes. */
+  session: ServerSession | null
+
   // --- Lifecycle phase (discriminated union) ---
   phase: LifecyclePhase
   /** Create FeatureHandlerContext for the project (phase stays unchanged). */
   setProject(project: Project): FeatureHandlerContext
+
+  // --- ServerInfrastructure (for SessionMutator) ---
+  getProject(): Project | null
+  getTsCompilerOptions(): import("typescript").CompilerOptions | null
+  getRootPath(): string | null
+  getConfig(): import("./handlers/lifecycle").ServerConfig
+  getFileRegistry(): import("../core/file-registry").FileRegistry | null
+  getWorkspaceLayout(): import("@drskillissue/ganko-shared").WorkspaceLayout | null
+  getTailwindValidator(): import("@drskillissue/ganko").TailwindValidator | null
+  getBatchableValidator(): import("@drskillissue/ganko").BatchableTailwindValidator | null
+  getExternalCustomProperties(): ReadonlySet<string> | undefined
+  getEvaluator(): import("../core/workspace-eval").WorkspaceEvaluator | null
+
+  /** Alias for graphCache — satisfies ServerInfrastructure.tracker */
+  readonly tracker: CompilationTracker
 }
 
 /** Options for server creation. */
@@ -161,13 +178,12 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     return supportedExtensions.has(uri.slice(dotIdx));
   });
 
-  const diagCache = new ResourceMap<readonly Diagnostic[]>();
   const graphCache = createCompilationTracker(createStyleCompilation(), { logger: prefixLogger(log, "cache") });
   const gcTimer = new GcTimer(prefixLogger(log, "gc"));
   const memoryWatcher = new MemoryWatcher(prefixLogger(log, "memory"));
 
   const identity = createResourceIdentity();
-  const docManager = new DocumentManager(identity);
+  const docManager = new DocumentTracker(identity);
   const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
     const tracked = docManager.getByUri(uri);
     connection.sendDiagnostics(
@@ -176,8 +192,6 @@ export function createServer(options?: CreateServerOptions): ServerContext {
         : { uri, diagnostics: [...diags] },
     );
   });
-  // eslint-disable-next-line prefer-const -- assigned after context construction due to circular reference
-  let changeProcessor: ChangeProcessor;
   let tsService: TsService | null = null;
 
   let resolveReady: () => void;
@@ -193,15 +207,15 @@ export function createServer(options?: CreateServerOptions): ServerContext {
     documents,
     log,
     serverState,
-    diagCache,
     graphCache,
     tsPropagationCancel: null,
+    diagnosticCancellation: null,
+    session: null,
     gcTimer,
     memoryWatcher,
     identity,
     docManager,
     diagManager,
-    get changeProcessor() { return changeProcessor; },
     get tsService(): TsService {
       if (tsService === null) {
         const rootPath = context.serverState.rootPath;
@@ -218,7 +232,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
 
     setProject(project) {
       context.tsService.setProject(project);
-      return createFeatureHandlerContext(context.tsService, project, graphCache, diagCache, prefixLogger(log, "handler"));
+      return createFeatureHandlerContext(context.tsService, project, graphCache, diagManager, prefixLogger(log, "handler"));
     },
 
     resolveContent(path) {
@@ -233,16 +247,20 @@ export function createServer(options?: CreateServerOptions): ServerContext {
         return null;
       }
     },
-  };
 
-  changeProcessor = new ChangeProcessor(
-    diagManager,
-    graphCache,
-    docManager,
-    prefixLogger(log, "changes"),
-    (path) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") publishFileDiagnostics(context, p.project, path); },
-    (exclude) => { const p = context.phase; if (p.tag === "running" || p.tag === "enriched") propagateTsDiagnostics(context, p.project, exclude); },
-  );
+    // ServerInfrastructure implementation
+    get tracker() { return graphCache; },
+    getProject() { return context.serverState.project; },
+    getTsCompilerOptions() { return context.tsService.getCompilerOptions(); },
+    getRootPath() { return context.serverState.rootPath; },
+    getConfig() { return context.serverState.config; },
+    getFileRegistry() { const p = context.phase; return p.tag === "enriched" ? p.registry : null; },
+    getWorkspaceLayout() { const p = context.phase; return p.tag === "enriched" ? p.layout : null; },
+    getTailwindValidator() { const p = context.phase; return p.tag === "enriched" ? p.tailwindValidator : null; },
+    getBatchableValidator() { const p = context.phase; return p.tag === "enriched" ? p.batchableValidator : null; },
+    getExternalCustomProperties() { const p = context.phase; return p.tag === "enriched" ? p.externalCustomProperties : undefined; },
+    getEvaluator() { const p = context.phase; return p.tag === "enriched" ? p.evaluator : null; },
+  };
 
   setupLifecycleHandlers(context);
   setupDocumentHandlers(context);

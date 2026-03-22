@@ -19,9 +19,11 @@ import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
 import { runEnrichment } from "../../core/enrichment";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
-import type { ServerContext } from "../connection";
-import type { PhaseEnriched } from "../server-state";
-import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
+import type { ServerContext } from "../server";
+import type { PhaseEnriched } from "../session";
+import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
+import { createCancellationSource } from "../cancellation";
+import { SessionMutator } from "../session-mutator";
 import type { Logger } from "../../core/logger";
 
 
@@ -198,6 +200,8 @@ export async function handleInitialized(
   const handlerCtx = context.setProject(project);
   state.initialized = true;
   context.resolveReady();
+  // Build initial session (Quick tier, no enrichment)
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
 
@@ -209,23 +213,24 @@ export async function handleInitialized(
 
   await project.watchProgramReady();
   context.phase = { tag: "running", project, handlerCtx };
+  // Rebuild session with Incremental tier
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
   /* Re-diagnose open files with full program (no cross-file yet — workspace
      enrichment hasn't run). */
-  const openPaths = context.docManager.openPaths() as string[];
-  for (let i = 0, len = openPaths.length; i < len; i++) {
-    const p = openPaths[i];
-    if (!p) continue;
-    publishFileDiagnostics(context, project, p, undefined, false);
+  {
+    const phaseBToken = createCancellationSource().token;
+    const openPaths = context.docManager.openPaths() as string[];
+    runDiagnosticPipelineBatch(context, project, openPaths, false, phaseBToken);
   }
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
   const enrichment = await runEnrichment(rootPath, effectiveExclude(state), {
     graphCache: context.graphCache,
-    diagCache: context.diagCache,
+    diagnosticEviction: context.diagManager,
     log,
   });
   const enrichedPhase: PhaseEnriched = {
@@ -236,12 +241,13 @@ export async function handleInitialized(
     layout: enrichment.layout,
     tailwindValidator: enrichment.tailwindValidator,
     externalCustomProperties: enrichment.externalCustomProperties,
-    changePipeline: enrichment.changePipeline,
     tailwindState: enrichment.tailwindState,
     evaluator: enrichment.evaluator,
     batchableValidator: enrichment.batchableValidator,
   };
   context.phase = enrichedPhase;
+  // Rebuild session with enrichment data (file sets, tailwind, etc.)
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   /* Invalidate any cross-file results that may have been cached during the
      enrichment window. Even though fileIndex is set atomically after tailwind
@@ -252,19 +258,13 @@ export async function handleInitialized(
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 
-  /* Re-diagnose ALL currently open files with cross-file results.
-     Recapture open paths — files may have been opened during Phase B→C
-     (5-10s of async work). Using the stale Phase B snapshot would miss
-     any file opened after line 218, leaving it with single-file-only
-     diagnostics permanently. */
-  const currentOpenPaths = context.docManager.openPaths() as string[];
-  for (let i = 0, len = currentOpenPaths.length; i < len; i++) {
-    const p = currentOpenPaths[i];
-    if (!p) continue;
-    publishFileDiagnostics(context, project, p);
+  /* Re-diagnose ALL currently open files with cross-file results. */
+  {
+    const phaseCToken = createCancellationSource().token;
+    const currentOpenPaths = context.docManager.openPaths() as string[];
+    runDiagnosticPipelineBatch(context, project, currentOpenPaths, true, phaseCToken);
+    propagateTsDiagnosticsAsync(context, project, new Set(), phaseCToken);
   }
-
-  propagateTsDiagnostics(context, project, new Set());
 }
 
 /**

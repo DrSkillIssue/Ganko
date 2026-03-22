@@ -115,7 +115,7 @@ async function run(): Promise<void> {
   } else if (args[0] === "daemon") {
     await runDaemonCommand(args.slice(1));
   } else {
-    const { main } = await import("../server/connection");
+    const { main } = await import("../server/server");
     main();
   }
 }

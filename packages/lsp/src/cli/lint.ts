@@ -9,20 +9,19 @@ import { readFileSync, statSync, globSync } from "node:fs";
 import {
   SolidPlugin,
   buildSolidSyntaxTree,
-  buildCSSResult,
   runSolidRules,
   createSolidInput,
   createOverrideEmit,
-  createStyleCompilation,
   createAnalysisDispatcher,
   allRules,
   scanDependencyCustomProperties,
   resolveTailwindValidatorSync,
 } from "@drskillissue/ganko";
-import type { Diagnostic, CSSInput } from "@drskillissue/ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, contentHash, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
 import { createProject } from "../core/project";
 import { createFileRegistry } from "../core/file-registry";
+import { buildFullCompilation, findProjectRoot as findProjectRootShared } from "../core/compilation-builder";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit } from "../core/analyze";
 import { formatText, formatJSON, countDiagnostics } from "./format";
@@ -148,21 +147,7 @@ function resolveFiles(patterns: readonly string[], cwd: string, exclude: readonl
   return result;
 }
 
-const PROJECT_MARKERS = ["tsconfig.json", "package.json"];
-
-function findProjectRoot(from: string): string {
-  let dir = from;
-  for (;;) {
-    for (let i = 0; i < PROJECT_MARKERS.length; i++) {
-      const marker = PROJECT_MARKERS[i];
-      if (!marker) continue;
-      try { statSync(resolve(dir, marker)); return dir } catch { /* not found */ }
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return from;
-    dir = parent;
-  }
-}
+const findProjectRoot = findProjectRootShared;
 
 function commonAncestor(files: readonly string[]): string {
   if (files.length === 0) return process.cwd();
@@ -279,34 +264,20 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
     // Cross-file analysis via AnalysisDispatcher
     if (options.crossFile) {
-      let compilation = createStyleCompilation();
+      let tailwind = null;
+      try { tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot); } catch { /* no tailwind */ }
+      const layout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
+      const externalCustomProperties = scanDependencyCustomProperties(layout);
 
-      // Add solid trees
-      for (const solidPath of fileRegistry.solidFiles) {
-        const sourceFile = program.getSourceFile(solidPath);
-        if (!sourceFile) continue;
-        const input = createSolidInput(solidPath, program, log);
-        const tree = buildSolidSyntaxTree(input, contentHash(sourceFile.text));
-        compilation = compilation.withSolidTree(tree);
-      }
-
-      // Add CSS trees
-      const cssFiles: { path: string; content: string }[] = [];
-      for (const cssPath of fileRegistry.cssFiles) {
-        try { cssFiles.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") }) } catch { /* skip */ }
-      }
-
-      if (cssFiles.length > 0) {
-        let tailwind = null;
-        try { tailwind = resolveTailwindValidatorSync(cssFiles, projectRoot) } catch { /* no tailwind */ }
-        const layout = buildWorkspaceLayout(acceptProjectRoot(projectRoot), log);
-        const externalCustomProperties = scanDependencyCustomProperties(layout);
-        const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger: log };
-        if (tailwind !== null) cssInput.tailwind = tailwind;
-        if (externalCustomProperties.size > 0) cssInput.externalCustomProperties = externalCustomProperties;
-        const { trees } = buildCSSResult(cssInput);
-        compilation = compilation.withCSSTrees(trees);
-      }
+      const { compilation } = buildFullCompilation({
+        solidFiles: fileRegistry.solidFiles,
+        cssFiles: fileRegistry.cssFiles,
+        getProgram: () => program,
+        tailwindValidator: tailwind,
+        externalCustomProperties: externalCustomProperties.size > 0 ? externalCustomProperties : undefined,
+        resolveContent: (path) => { try { return readFileSync(path, "utf-8"); } catch { return null; } },
+        logger: log,
+      });
 
       const dispatcher = createAnalysisDispatcher();
       for (let i = 0; i < allRules.length; i++) dispatcher.register(allRules[i]!);

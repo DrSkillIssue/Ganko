@@ -2,10 +2,7 @@ import type ts from "typescript";
 import type { Diagnostic, SolidSyntaxTree } from "@drskillissue/ganko";
 import type { Logger, LeveledLogger } from "@drskillissue/ganko-shared";
 import type { Connection } from "vscode-languageserver/node";
-import type { ResourceIdentity } from "../resource-identity";
-import type { DocumentManager } from "../document-manager";
-import type { DiagnosticsManager } from "../diagnostics-manager";
-import type { LifecyclePhase } from "../server-state";
+import type { LifecyclePhase } from "../session";
 
 export interface TSFileInfo {
   readonly ls: ts.LanguageService
@@ -21,14 +18,6 @@ export interface FeatureHandlerContext {
   getDiagnostics(path: string): readonly Diagnostic[]
   getContent(path: string): string | null
   getSolidSyntaxTree(path: string): SolidSyntaxTree | null
-}
-
-export interface DocumentHandlerContext {
-  readonly identity: ResourceIdentity
-  readonly documents: DocumentManager
-  readonly diagnostics: DiagnosticsManager
-  readonly log: Logger
-  runDiagnostics(path: string): void
 }
 
 export interface LifecycleHandlerContext {

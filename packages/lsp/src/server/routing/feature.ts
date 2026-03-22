@@ -14,17 +14,12 @@ import {
   type DocumentDiagnosticParams,
 } from "vscode-languageserver/node";
 import { classifyFile, uriToCanonicalPath, formatSnapshot, Level } from "@drskillissue/ganko-shared";
-import type { Diagnostic } from "@drskillissue/ganko";
-import { runCrossFileDiagnostics } from "../../core/analyze";
-import { runDiagnostics } from "../diagnostics-push";
-import { convertDiagnostics } from "../handlers/diagnostics";
-import { collectTsDiagnosticsForFile } from "../handlers/ts-diagnostics";
 import { isServerReady } from "../handlers/lifecycle";
-import { DiagnosticKind } from "../diagnostics-manager";
+import { runDiagnosticPipelineImmediate } from "../diagnostic-pipeline";
 import type { FeatureHandlerContext } from "../handlers/handler-context";
 import type { GcTimer } from "../gc-timer";
 import type { Logger } from "../../core/logger";
-import type { ServerContext } from "../connection";
+import type { ServerContext } from "../server";
 
 import { handleDefinition } from "../handlers/definition";
 import { handleReferences } from "../handlers/references";
@@ -178,11 +173,6 @@ export function setupFeatureHandlers(context: ServerContext): void {
   connection.languages.diagnostics.on(async (params: DocumentDiagnosticParams) => {
     await context.ready;
     const phase = context.phase;
-    /* Gate on running/enriched: before this, runSingleFileDiagnostics would
-       call project.getProgram() which triggers a synchronous full-program build
-       (3–8s), blocking the entire event loop and stalling all pending LSP
-       messages. Return empty; the client will retry once we push results via
-       the normal Tier 2 startup path. */
     if (phase.tag !== "running" && phase.tag !== "enriched" || !isServerReady(context.serverState)) {
       if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] EARLY EXIT: phase=${context.phase.tag} serverReady=${isServerReady(context.serverState)}`);
       return { kind: DocumentDiagnosticReportKind.Full, items: [] };
@@ -191,61 +181,23 @@ export function setupFeatureHandlers(context: ServerContext): void {
     const project = phase.project;
     const key = uriToCanonicalPath(params.textDocument.uri);
     if (key === null) return { kind: DocumentDiagnosticReportKind.Full, items: [] };
-    const kind = classifyFile(key);
-    if (kind === "unknown") {
-      if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`[PULL-DIAG] UNKNOWN FILE: ${key}`);
-      return { kind: DocumentDiagnosticReportKind.Full, items: [] };
-    }
+    if (classifyFile(key) === "unknown") return { kind: DocumentDiagnosticReportKind.Full, items: [] };
 
     const doc = context.documents.get(params.textDocument.uri);
     const content = doc !== undefined ? doc.getText() : context.resolveContent(key) ?? undefined;
 
-    /* Only update the TS project and evict caches when content actually changed.
-       Calling updateFile with identical content triggers a redundant incremental
-       TS re-parse. Calling evictFileCache invalidates the graphCache, forcing a
-       ~240ms cross-file rebuild — even for consecutive pulls where the file
-       content is unchanged (fixing audit issues #8 and #13). */
+    // Flush TS service + evict caches when content changed (routing layer responsibility)
     const existing = project.getSourceFile(key)?.text;
     if (content !== undefined && content !== existing) {
       project.updateFile(key, content);
-      context.diagCache.delete(key);
       context.diagManager.evict(key);
-      context.graphCache.invalidate(key);
+      context.graphCache.setCachedCrossFileResults([]);
     }
 
-    const contentUnchanged = content === undefined || content === existing;
-    const cachedSingle = contentUnchanged ? context.diagCache.get(key) : undefined;
-    const singleFile = cachedSingle
-      ?? runDiagnostics(project, context.diagCache, key, content, context.serverState.config.ruleOverrides, context.log);
+    // Run full analysis inline via pipeline
+    const items = runDiagnosticPipelineImmediate(context, project, key, content);
 
-    const crossFile: readonly Diagnostic[] = phase.tag === "enriched"
-      ? (contentUnchanged
-        ? context.graphCache.getCachedCrossFileDiagnostics(key)
-        : runCrossFileDiagnostics(key, phase.registry, project, context.graphCache, phase.tailwindValidator, context.resolveContent, context.serverState.config.ruleOverrides, phase.externalCustomProperties))
-      : [];
-
-    const rawDiagnostics = crossFile.length > 0 ? [...singleFile, ...crossFile] : singleFile;
-    const items = convertDiagnostics(rawDiagnostics, context.serverState.config.warningsAsErrors);
-
-    // Update diagManager so push path stays in sync
-    context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors));
-    if (crossFile.length > 0) {
-      context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors));
-    }
-
-    if (context.log.isLevelEnabled(Level.Info)) context.log.info(`[PULL-DIAG] ${key} | warningsAsErrors=${context.serverState.config.warningsAsErrors} | singleFile=${singleFile.length} crossFile=${crossFile.length} | phase=${phase.tag} contentUnchanged=${contentUnchanged} | → ${items.length} LSP items (${items.filter(i => i.severity === 1).length} error, ${items.filter(i => i.severity === 2).length} warn)`);
-
-    if (context.serverState.config.enableTsDiagnostics && kind === "solid") {
-      const ls = project.getLanguageService();
-      const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
-      context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
-      for (let i = 0, len = tsDiags.length; i < len; i++) {
-        const td = tsDiags[i];
-        if (td) items.push(td);
-      }
-    }
-
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics (contentUnchanged=${contentUnchanged})`);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`textDocument/diagnostic: ${key} → ${items.length} diagnostics`);
     gc.scheduleCollect();
     return { kind: DocumentDiagnosticReportKind.Full, items };
   });

@@ -31,7 +31,7 @@ export { createBatchProgram, type BatchTypeScriptService } from "./core/batch-pr
 export { createIncrementalProgram, type IncrementalTypeScriptService } from "./core/incremental-program";
 
 // Server exports
-export { createServer, startServer, main } from "./server/connection";
+export { createServer, startServer, main } from "./server/server";
 export { buildServerCapabilities } from "./server/capabilities";
 
 // Handler exports

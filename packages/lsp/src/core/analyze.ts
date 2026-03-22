@@ -6,18 +6,16 @@
 import {
   createSolidInput,
   analyzeInput,
-  buildSolidSyntaxTree,
-  buildCSSResult,
   createOverrideEmit,
-  createStyleCompilation,
   createAnalysisDispatcher,
   allRules,
 } from "@drskillissue/ganko";
-import type { Diagnostic, TailwindValidator, CSSInput, CompilationTracker, SolidSyntaxTree } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile, contentHash, Level } from "@drskillissue/ganko-shared";
+import type { Diagnostic, TailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
 import type { FileRegistry } from "./file-registry";
+import { buildFullCompilation } from "./compilation-builder";
 
 export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; emit: (d: Diagnostic) => void } {
   const results: Diagnostic[] = [];
@@ -25,12 +23,6 @@ export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; 
   const hasOverrides = overrides !== undefined && Object.keys(overrides).length > 0;
   const emit = hasOverrides ? createOverrideEmit(raw, overrides) : raw;
   return { results, emit };
-}
-
-export function buildSolidTreeForPath(project: Project, path: string, logger?: Logger): SolidSyntaxTree {
-  const program = project.getProgram();
-  const input = createSolidInput(path, program, logger);
-  return buildSolidSyntaxTree(input, contentHash(program.getSourceFile(path)?.text ?? ""));
 }
 
 export function runSingleFileDiagnostics(
@@ -90,30 +82,15 @@ function rebuildAndRunDispatcher(
   externalCustomProperties?: ReadonlySet<string>,
   logger?: Logger,
 ): void {
-  let compilation = createStyleCompilation();
-
-  const program = project.getProgram();
-  for (const solidPath of fileIndex.solidFiles) {
-    const sourceFile = program.getSourceFile(solidPath);
-    if (!sourceFile) continue;
-    const input = createSolidInput(solidPath, program, logger);
-    const tree = buildSolidSyntaxTree(input, contentHash(sourceFile.text));
-    compilation = compilation.withSolidTree(tree);
-  }
-
-  const cssFiles: { path: string; content: string }[] = [];
-  for (const cssPath of fileIndex.cssFiles) {
-    const content = resolveContent(cssPath);
-    if (content !== null) cssFiles.push({ path: cssPath, content });
-  }
-
-  if (cssFiles.length > 0) {
-    const cssInput: { -readonly [K in keyof CSSInput]: CSSInput[K] } = { files: cssFiles, logger };
-    if (tailwind !== null) cssInput.tailwind = tailwind;
-    if (externalCustomProperties !== undefined) cssInput.externalCustomProperties = externalCustomProperties;
-    const { trees } = buildCSSResult(cssInput);
-    compilation = compilation.withCSSTrees(trees);
-  }
+  const { compilation } = buildFullCompilation({
+    solidFiles: fileIndex.solidFiles,
+    cssFiles: fileIndex.cssFiles,
+    getProgram: () => project.getProgram(),
+    tailwindValidator: tailwind,
+    externalCustomProperties,
+    resolveContent,
+    logger,
+  });
 
   const dispatcher = createAnalysisDispatcher();
   for (let i = 0; i < allRules.length; i++) {
@@ -130,7 +107,7 @@ function rebuildAndRunDispatcher(
 export function runAllCrossFileDiagnostics(
   fileIndex: FileRegistry,
   project: Project,
-  tracker: CompilationTracker,
+  _tracker: CompilationTracker,
   tailwind: TailwindValidator | null,
   resolveContent: (path: string) => string | null,
   overrides?: RuleOverrides,

@@ -34,6 +34,17 @@ export interface CompilationTracker {
   applyDeletion(filePath: string): CompilationTracker
   applyInputChange(input: AdditionalInput): CompilationTracker
 
+  /**
+   * Apply a batch of file changes in one dependency graph rebuild.
+   * solidTrees: pre-built SolidSyntaxTrees keyed by canonical path.
+   * CSS files are parsed internally via CSSSourceProvider.
+   * Rebuilds the dependency graph ONCE after all mutations.
+   */
+  applyBatch(
+    changes: readonly { path: string; content: string; version: string }[],
+    solidTrees: ReadonlyMap<string, import("../core/solid-syntax-tree").SolidSyntaxTree>,
+  ): CompilationTracker
+
   getStaleFiles(): ReadonlySet<string>
   getDirectlyChangedFiles(): ReadonlySet<string>
   isSemanticModelValid(filePath: string): boolean
@@ -171,8 +182,8 @@ function createTrackerFromState(state: TrackerState): CompilationTracker {
 
     applyDeletion(filePath: string): CompilationTracker {
       const key = canonicalPath(filePath)
-      let nextCompilation = state.compilation.withoutFile(key)
-      let nextDeclarationTable = state.declarationTable.withoutTree(key)
+      const nextCompilation = state.compilation.withoutFile(key)
+      const nextDeclarationTable = state.declarationTable.withoutTree(key)
 
       const nextDirectlyChanged = new Set(state.directlyChanged)
       nextDirectlyChanged.add(key)
@@ -209,6 +220,68 @@ function createTrackerFromState(state: TrackerState): CompilationTracker {
         new Map(),
         state.generation + 1,
         null,
+        state.generation + 1,
+        state.logger,
+        state.cssProvider,
+        state.scssProvider,
+      ))
+    },
+
+    applyBatch(
+      changes: readonly { path: string; content: string; version: string }[],
+      solidTrees: ReadonlyMap<string, import("../core/solid-syntax-tree").SolidSyntaxTree>,
+    ): CompilationTracker {
+      let nextCompilation = state.compilation
+      let nextDeclarationTable = state.declarationTable
+      const nextDirectlyChanged = new Set(state.directlyChanged)
+      const nextCrossFileDiagnostics = new Map(state.crossFileDiagnostics)
+
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i]
+        if (!change) continue
+        const key = canonicalPath(change.path)
+        const isCss = matchesExtension(key, CSS_EXTENSIONS)
+        const isSolid = matchesExtension(key, SOLID_EXTENSIONS)
+
+        // Remove old tree
+        if (isCss) {
+          nextCompilation = nextCompilation.withoutFile(key)
+          nextDeclarationTable = nextDeclarationTable.withoutTree(key)
+        }
+        if (isSolid) {
+          nextCompilation = nextCompilation.withoutFile(key)
+        }
+
+        // Add new tree
+        if (isCss) {
+          const provider = key.endsWith(".scss") ? state.scssProvider : state.cssProvider
+          if (provider !== null) {
+            const sourceOrderBase = nextCompilation.cssTrees.size * 10000
+            const newTree = provider.parse(key, change.content, sourceOrderBase)
+            nextCompilation = nextCompilation.withCSSTree(newTree)
+            nextDeclarationTable = nextDeclarationTable.withTree(newTree)
+          }
+        }
+        if (isSolid) {
+          const tree = solidTrees.get(key)
+          if (tree) {
+            nextCompilation = nextCompilation.withSolidTree(tree)
+          }
+        }
+
+        nextDirectlyChanged.add(key)
+        nextCrossFileDiagnostics.delete(key)
+      }
+
+      // One graph rebuild for the entire batch
+      return createTrackerFromState(buildState(
+        nextCompilation,
+        state.compilation,
+        nextDeclarationTable,
+        nextDirectlyChanged,
+        nextCrossFileDiagnostics,
+        state.crossFileResultsGeneration,
+        state.crossFileResults,
         state.generation + 1,
         state.logger,
         state.cssProvider,

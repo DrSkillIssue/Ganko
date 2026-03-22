@@ -23,10 +23,87 @@ export interface AnalysisResult {
 export interface AnalysisDispatcher {
   register(rule: AnalysisRule): void
   run(compilation: StyleCompilation): AnalysisResult
+  /**
+   * Run only on a subset of affected files. Tier 0 CSS syntax actions
+   * only fire for affected CSS files. Tier 1+ only fire for affected
+   * solid files. Compilation-wide actions always run.
+   * Used for incremental re-analysis after a file change.
+   */
+  runSubset(compilation: StyleCompilation, affectedFiles: ReadonlySet<string>): AnalysisResult
 }
 
 export function createAnalysisDispatcher(): AnalysisDispatcher {
   const rules: AnalysisRule[] = []
+
+  function setup() {
+    const { registry, actions } = createActionRegistry()
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i]
+      if (!rule) continue
+      if (rule.severity === "off") continue
+      rule.register(registry)
+    }
+    return { actions, maxTier: resolveMaxTier(rules) }
+  }
+
+  function dispatch(
+    compilation: StyleCompilation,
+    actions: CollectedActions,
+    maxTier: ComputationTier,
+    emit: Emit,
+    affectedFiles: ReadonlySet<string> | null,
+  ): void {
+    const symbolTable = compilation.symbolTable
+
+    // Tier 0: CSS syntax actions
+    if (maxTier >= ComputationTier.CSSSyntax) {
+      if (affectedFiles !== null) {
+        dispatchCSSSyntaxActionsSubset(actions, compilation, symbolTable, emit, affectedFiles)
+      } else {
+        dispatchCSSSyntaxActions(actions, compilation, symbolTable, emit)
+      }
+    }
+
+    // Tier 1: Cross-syntax actions
+    if (maxTier >= ComputationTier.CrossSyntax) {
+      if (affectedFiles !== null) {
+        dispatchCrossSyntaxActionsSubset(actions, compilation, symbolTable, emit, affectedFiles)
+      } else {
+        dispatchCrossSyntaxActions(actions, compilation, symbolTable, emit)
+      }
+    }
+
+    // Tier 2+: Element-level actions require semantic model per file
+    if (maxTier >= ComputationTier.ElementResolution) {
+      const solidFiles = affectedFiles !== null
+        ? [...compilation.solidTrees.keys()].filter(p => affectedFiles.has(p))
+        : [...compilation.solidTrees.keys()]
+
+      for (let fi = 0; fi < solidFiles.length; fi++) {
+        const solidFilePath = solidFiles[fi]
+        if (!solidFilePath) continue
+        const model = compilation.getSemanticModel(solidFilePath)
+        const elements = model.getElementNodes()
+
+        if (maxTier >= ComputationTier.ElementResolution) {
+          dispatchElementActions(actions, elements, model, emit)
+        }
+        if (maxTier >= ComputationTier.SelectiveLayoutFacts) {
+          dispatchFactActions(actions, elements, model, emit)
+        }
+        if (maxTier >= ComputationTier.FullCascade) {
+          dispatchCascadeActions(actions, elements, model, emit)
+          dispatchConditionalDeltaActions(actions, elements, model, emit)
+        }
+        if (maxTier >= ComputationTier.AlignmentModel) {
+          dispatchAlignmentActions(actions, elements, model, emit)
+        }
+      }
+    }
+
+    // Compilation-wide actions always run
+    dispatchCompilationActions(actions, compilation, symbolTable, emit)
+  }
 
   return {
     register(rule: AnalysisRule): void {
@@ -34,63 +111,18 @@ export function createAnalysisDispatcher(): AnalysisDispatcher {
     },
 
     run(compilation): AnalysisResult {
-      const symbolTable = compilation.symbolTable
-      const createSemanticModel = (solidFilePath: string) => compilation.getSemanticModel(solidFilePath)
-      const { registry, actions } = createActionRegistry()
-
-      for (let i = 0; i < rules.length; i++) {
-        const rule = rules[i]
-        if (!rule) continue
-        if (rule.severity === "off") continue
-        rule.register(registry)
-      }
-
-      const maxTier = resolveMaxTier(rules)
+      const { actions, maxTier } = setup()
       const diagnostics: Diagnostic[] = []
       const emit: Emit = (d) => { diagnostics.push(d) }
+      dispatch(compilation, actions, maxTier, emit, null)
+      return { diagnostics, maxTierComputed: maxTier }
+    },
 
-      // Tier 0: CSS syntax actions
-      if (maxTier >= ComputationTier.CSSSyntax) {
-        dispatchCSSSyntaxActions(actions, compilation, symbolTable, emit)
-      }
-
-      // Tier 1: Cross-syntax actions
-      if (maxTier >= ComputationTier.CrossSyntax) {
-        dispatchCrossSyntaxActions(actions, compilation, symbolTable, emit)
-      }
-
-      // Tier 2+: Element-level actions require semantic model per file
-      if (maxTier >= ComputationTier.ElementResolution) {
-        for (const solidFilePath of compilation.solidTrees.keys()) {
-          const model = createSemanticModel(solidFilePath)
-          const elements = model.getElementNodes()
-
-          // Tier 2: Element actions
-          if (maxTier >= ComputationTier.ElementResolution) {
-            dispatchElementActions(actions, elements, model, emit)
-          }
-
-          // Tier 3: Fact actions
-          if (maxTier >= ComputationTier.SelectiveLayoutFacts) {
-            dispatchFactActions(actions, elements, model, emit)
-          }
-
-          // Tier 4: Cascade + conditional delta actions
-          if (maxTier >= ComputationTier.FullCascade) {
-            dispatchCascadeActions(actions, elements, model, emit)
-            dispatchConditionalDeltaActions(actions, elements, model, emit)
-          }
-
-          // Tier 5: Alignment actions
-          if (maxTier >= ComputationTier.AlignmentModel) {
-            dispatchAlignmentActions(actions, elements, model, emit)
-          }
-        }
-      }
-
-      // Compilation-wide actions (run after all per-file dispatch)
-      dispatchCompilationActions(actions, compilation, symbolTable, emit)
-
+    runSubset(compilation, affectedFiles): AnalysisResult {
+      const { actions, maxTier } = setup()
+      const diagnostics: Diagnostic[] = []
+      const emit: Emit = (d) => { diagnostics.push(d) }
+      dispatch(compilation, actions, maxTier, emit, affectedFiles)
       return { diagnostics, maxTierComputed: maxTier }
     },
   }
@@ -107,10 +139,34 @@ function dispatchCSSSyntaxActions(actions: CollectedActions, compilation: StyleC
   }
 }
 
+function dispatchCSSSyntaxActionsSubset(actions: CollectedActions, compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit, affectedFiles: ReadonlySet<string>): void {
+  if (actions.cssSyntax.length === 0) return
+
+  for (const [path, tree] of compilation.cssTrees) {
+    if (!affectedFiles.has(path)) continue
+    for (let i = 0; i < actions.cssSyntax.length; i++) {
+      const action = actions.cssSyntax[i]
+      if (action) action(tree, symbolTable, emit)
+    }
+  }
+}
+
 function dispatchCrossSyntaxActions(actions: CollectedActions, compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit): void {
   if (actions.crossSyntax.length === 0) return
 
   for (const [, solidTree] of compilation.solidTrees) {
+    for (let i = 0; i < actions.crossSyntax.length; i++) {
+      const action = actions.crossSyntax[i]
+      if (action) action(solidTree, symbolTable, emit)
+    }
+  }
+}
+
+function dispatchCrossSyntaxActionsSubset(actions: CollectedActions, compilation: StyleCompilation, symbolTable: SymbolTable, emit: Emit, affectedFiles: ReadonlySet<string>): void {
+  if (actions.crossSyntax.length === 0) return
+
+  for (const [path, solidTree] of compilation.solidTrees) {
+    if (!affectedFiles.has(path)) continue
     for (let i = 0; i < actions.crossSyntax.length; i++) {
       const action = actions.crossSyntax[i]
       if (action) action(solidTree, symbolTable, emit)

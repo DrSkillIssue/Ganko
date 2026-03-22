@@ -6,14 +6,17 @@
  * can batch-validate arbitrary value classes before rule execution.
  */
 import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, Diagnostic } from "@drskillissue/ganko";
+import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+/** Minimal diagnostic eviction interface. */
+export interface DiagnosticEviction {
+  evict(path: string): void
+  clear(): void
+}
 import { acceptProjectRoot, buildWorkspaceLayout, Level } from "@drskillissue/ganko-shared";
 import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createFileRegistry, type FileRegistry } from "./file-registry";
-import { createChangePipeline, type ChangePipeline } from "./change-pipeline";
 import { createTailwindState, type TailwindState } from "./tailwind-state";
 import { spawnWorkspaceEvaluator, type WorkspaceEvaluator } from "./workspace-eval";
-import type { ResourceMap } from "../server/resource-map";
 
 export interface EnrichmentResult {
   readonly registry: FileRegistry
@@ -21,14 +24,13 @@ export interface EnrichmentResult {
   readonly tailwindValidator: TailwindValidator | null
   readonly batchableValidator: BatchableTailwindValidator | null
   readonly externalCustomProperties: ReadonlySet<string> | undefined
-  readonly changePipeline: ChangePipeline
   readonly tailwindState: TailwindState
   readonly evaluator: WorkspaceEvaluator | null
 }
 
 export interface EnrichmentDeps {
   readonly graphCache: CompilationTracker
-  readonly diagCache: ResourceMap<readonly Diagnostic[]>
+  readonly diagnosticEviction: DiagnosticEviction
   readonly log: Logger
 }
 
@@ -100,16 +102,7 @@ export async function runEnrichment(
 
   const twState = createTailwindState(tailwindValidator);
 
-  const pipeline = createChangePipeline({
-    registry,
-    layout,
-    graphCache: deps.graphCache,
-    diagCache: deps.diagCache,
-    tailwindState: twState,
-    log,
-  });
-
-  return { registry, layout, tailwindValidator, batchableValidator, externalCustomProperties, changePipeline: pipeline, tailwindState: twState, evaluator };
+  return { registry, layout, tailwindValidator, batchableValidator, externalCustomProperties, tailwindState: twState, evaluator };
 }
 
 /**

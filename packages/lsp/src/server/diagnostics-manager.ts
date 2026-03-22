@@ -16,6 +16,7 @@
  */
 
 import type { Diagnostic as LSPDiagnostic } from "vscode-languageserver";
+import type { Diagnostic as GankoDiagnostic } from "@drskillissue/ganko";
 import type { ResourceIdentity } from "./resource-identity";
 import { ResourceMap } from "./resource-map";
 
@@ -34,6 +35,8 @@ export const enum DiagnosticKind {
  */
 class FileDiagnostics {
   private readonly byKind = new Map<DiagnosticKind, readonly LSPDiagnostic[]>();
+  /** Raw ganko diagnostics (Ganko + CrossFile kinds). Used by code-action handler. */
+  private readonly rawByKind = new Map<DiagnosticKind, readonly GankoDiagnostic[]>();
   private closed = false;
   suppressPublish = false;
   dirty = false;
@@ -43,11 +46,14 @@ class FileDiagnostics {
     private readonly publishFn: (path: string, diagnostics: readonly LSPDiagnostic[]) => void,
   ) {}
 
-  update(kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[]): void {
+  update(kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[], rawDiags?: readonly GankoDiagnostic[]): void {
     if (this.closed) return;
     const existing = this.byKind.get(kind);
     if (existing !== undefined && existing.length === 0 && diagnostics.length === 0) return;
     this.byKind.set(kind, diagnostics);
+    if (rawDiags !== undefined) {
+      this.rawByKind.set(kind, rawDiags);
+    }
     if (this.suppressPublish) {
       this.dirty = true;
     } else if (!this.closed) {
@@ -58,6 +64,7 @@ class FileDiagnostics {
   clear(kind: DiagnosticKind): void {
     if (!this.byKind.has(kind)) return;
     this.byKind.delete(kind);
+    this.rawByKind.delete(kind);
     if (this.suppressPublish) {
       this.dirty = true;
     } else if (!this.closed) {
@@ -67,6 +74,7 @@ class FileDiagnostics {
 
   clearAll(): void {
     this.byKind.clear();
+    this.rawByKind.clear();
     this.publishFn(this.path, []);
   }
 
@@ -92,9 +100,24 @@ class FileDiagnostics {
     return this.byKind.get(kind) ?? [];
   }
 
+  /** Get merged raw ganko diagnostics (Ganko + CrossFile kinds). */
+  getRawDiagnostics(): readonly GankoDiagnostic[] {
+    const ganko = this.rawByKind.get(DiagnosticKind.Ganko);
+    const crossFile = this.rawByKind.get(DiagnosticKind.CrossFile);
+    if (ganko === undefined && crossFile === undefined) return [];
+    if (ganko === undefined) return crossFile!;
+    if (crossFile === undefined) return ganko;
+    const merged: GankoDiagnostic[] = new Array(ganko.length + crossFile.length);
+    let idx = 0;
+    for (let i = 0; i < ganko.length; i++) { const d = ganko[i]; if (d) merged[idx++] = d; }
+    for (let i = 0; i < crossFile.length; i++) { const d = crossFile[i]; if (d) merged[idx++] = d; }
+    return merged.length === idx ? merged : merged.slice(0, idx);
+  }
+
   close(): void {
     this.closed = true;
     this.byKind.clear();
+    this.rawByKind.clear();
     this.publishFn(this.path, []);
   }
 }
@@ -135,7 +158,7 @@ export class DiagnosticsManager {
     }
   }
 
-  update(path: string, kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[]): void {
+  update(path: string, kind: DiagnosticKind, diagnostics: readonly LSPDiagnostic[], rawDiags?: readonly GankoDiagnostic[]): void {
     let file = this.files.get(path);
     if (!file) {
       file = new FileDiagnostics(path, this.publish);
@@ -145,7 +168,7 @@ export class DiagnosticsManager {
       file.suppressPublish = true;
       this.batchDirty.push(file);
     }
-    file.update(kind, diagnostics);
+    file.update(kind, diagnostics, rawDiags);
   }
 
   getDiagnostics(path: string): readonly LSPDiagnostic[] {
@@ -154,6 +177,12 @@ export class DiagnosticsManager {
 
   getDiagnosticsByKind(path: string, kind: DiagnosticKind): readonly LSPDiagnostic[] {
     return this.files.get(path)?.getDiagnosticsByKind(kind) ?? [];
+  }
+
+  /** Get raw ganko diagnostics for a file (Ganko + CrossFile kinds merged).
+   *  Used by code-action handler for fix extraction. Replaces diagCache. */
+  getRawDiagnostics(path: string): readonly GankoDiagnostic[] {
+    return this.files.get(path)?.getRawDiagnostics() ?? [];
   }
 
   evict(path: string): void {
