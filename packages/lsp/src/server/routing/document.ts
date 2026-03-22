@@ -13,6 +13,8 @@ import { isServerReady } from "../handlers/lifecycle";
 import { clearDiagnostics } from "../handlers/diagnostics";
 import { runDiagnosticPipeline, propagateTsDiagnosticsAsync, publishTier1Diagnostics } from "../diagnostic-pipeline";
 import { createCancellationSource } from "../cancellation";
+import { buildSolidTreeForFile } from "../../core/compilation-builder";
+import type { SolidSyntaxTree } from "@drskillissue/ganko";
 import type { ServerContext } from "../server";
 
 export function setupDocumentHandlers(context: ServerContext): void {
@@ -50,14 +52,25 @@ export function setupDocumentHandlers(context: ServerContext): void {
     const t0 = performance.now();
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
 
-    // Sync TS + update tracker compilation + evict caches
+    // Sync TS service, build solid trees, evict diagnostic caches.
+    // Then apply all changes as a single batch to the tracker.
+    // applyBatch: CSS parsed internally via CSSSourceProvider,
+    // solid trees provided externally (need ts.Program to parse).
+    // One dependency graph rebuild for the entire batch.
+    const solidTrees = new Map<string, SolidSyntaxTree>();
+    const batchChanges: { path: string; content: string; version: string }[] = [];
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
       context.diagManager.evict(change.path);
-      context.graphCache = context.graphCache.applyChange(change.path, change.content, String(change.version));
+      batchChanges.push({ path: change.path, content: change.content, version: String(change.version) });
+      if (classifyFile(change.path) === "solid") {
+        const tree = buildSolidTreeForFile(change.path, () => project.getProgram());
+        if (tree) solidTrees.set(change.path, tree);
+      }
     }
+    context.graphCache = context.graphCache.applyBatch(batchChanges, solidTrees);
 
     // Run pipeline for each changed file
     const diagnosed = new Set<string>();
@@ -160,13 +173,22 @@ export function setupDocumentHandlers(context: ServerContext): void {
     const savedPath = uriToCanonicalPath(event.document.uri);
     if (savedPath === null) return;
 
-    // Sync TS + update tracker + evict caches
+    // Sync TS + build solid trees + evict diagnostic caches, then batch apply.
+    const saveSolidTrees = new Map<string, SolidSyntaxTree>();
+    const saveBatch: { path: string; content: string; version: string }[] = [];
     for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
       context.diagManager.evict(change.path);
-      context.graphCache = context.graphCache.applyChange(change.path, change.content, String(change.version));
+      saveBatch.push({ path: change.path, content: change.content, version: String(change.version) });
+      if (classifyFile(change.path) === "solid") {
+        const tree = buildSolidTreeForFile(change.path, () => project.getProgram());
+        if (tree) saveSolidTrees.set(change.path, tree);
+      }
+    }
+    if (saveBatch.length > 0) {
+      context.graphCache = context.graphCache.applyBatch(saveBatch, saveSolidTrees);
     }
     context.diagManager.evict(savedPath);
 

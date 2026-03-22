@@ -11,6 +11,7 @@ import type { SymbolTable } from "../symbols/symbol-table"
 import type { DeclarationTable } from "../symbols/declaration-table"
 import { createDeclarationTable } from "../symbols/declaration-table"
 import type { CSSSourceProvider } from "../providers/provider"
+import { createPlainCSSProvider } from "../providers/plain-css"
 import type { TailwindProvider } from "../providers/tailwind"
 import type { DependencyGraph } from "./dependency-graph"
 import { buildDependencyGraph } from "./dependency-graph"
@@ -356,7 +357,7 @@ export function createCompilationTracker(
     null,
     0,
     logger,
-    options?.cssProvider ?? null,
+    options?.cssProvider ?? createPlainCSSProvider(),
     options?.scssProvider ?? null,
   )
 
