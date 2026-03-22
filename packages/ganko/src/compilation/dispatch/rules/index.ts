@@ -31,6 +31,27 @@ import { cssLayoutConditionalWhiteSpaceWrapShift } from "./css-layout-conditiona
 import { cssLayoutOverflowModeToggleInstability } from "./css-layout-overflow-mode-toggle-instability"
 import { cssLayoutBoxSizingToggleWithChrome } from "./css-layout-box-sizing-toggle-with-chrome"
 import { cssLayoutSiblingAlignmentOutlier } from "./css-layout-sibling-alignment-outlier"
+import { cssNoEmptyRule } from "./css-no-empty-rule"
+import { cssNoIdSelectors } from "./css-no-id-selectors"
+import { cssNoComplexSelectors } from "./css-no-complex-selectors"
+import { cssSelectorMaxSpecificity } from "./css-selector-max-specificity"
+import { cssSelectorMaxAttributeAndUniversal } from "./css-selector-max-attribute-and-universal"
+import { cssDeclarationNoOverriddenWithinRule } from "./css-declaration-no-overridden-within-rule"
+import { cssNoHardcodedZIndex } from "./css-no-hardcoded-z-index"
+import { cssZIndexRequiresPositionedContext } from "./css-z-index-requires-positioned-context"
+import { cssNoDiscreteTransition } from "./css-no-discrete-transition"
+import { cssNoTransitionAll } from "./css-no-transition-all"
+import { cssNoLegacyVh100 } from "./css-no-legacy-vh-100"
+import { cssPreferLogicalProperties } from "./css-prefer-logical-properties"
+import { cssNoImportant } from "./css-no-important"
+import { cssNoUnresolvedCustomProperties } from "./css-no-unresolved-custom-properties"
+import { cssNoUnusedCustomProperties } from "./css-no-unused-custom-properties"
+import { cssNoDuplicateSelectors } from "./css-no-duplicate-selectors"
+import { cssNoEmptyKeyframes } from "./css-no-empty-keyframes"
+import { cssNoUnknownAnimationName } from "./css-no-unknown-animation-name"
+import { cssNoUnusedKeyframes } from "./css-no-unused-keyframes"
+import { cssNoUnknownContainerName } from "./css-no-unknown-container-name"
+import { cssNoUnusedContainerName } from "./css-no-unused-container-name"
 
 export const allRules: readonly AnalysisRule[] = [
   cssLayoutTransitionLayoutProperty,
@@ -64,4 +85,25 @@ export const allRules: readonly AnalysisRule[] = [
   cssLayoutOverflowModeToggleInstability,
   cssLayoutBoxSizingToggleWithChrome,
   cssLayoutSiblingAlignmentOutlier,
+  cssNoEmptyRule,
+  cssNoIdSelectors,
+  cssNoComplexSelectors,
+  cssSelectorMaxSpecificity,
+  cssSelectorMaxAttributeAndUniversal,
+  cssDeclarationNoOverriddenWithinRule,
+  cssNoHardcodedZIndex,
+  cssZIndexRequiresPositionedContext,
+  cssNoDiscreteTransition,
+  cssNoTransitionAll,
+  cssNoLegacyVh100,
+  cssPreferLogicalProperties,
+  cssNoImportant,
+  cssNoUnresolvedCustomProperties,
+  cssNoUnusedCustomProperties,
+  cssNoDuplicateSelectors,
+  cssNoEmptyKeyframes,
+  cssNoUnknownAnimationName,
+  cssNoUnusedKeyframes,
+  cssNoUnknownContainerName,
+  cssNoUnusedContainerName,
 ]
