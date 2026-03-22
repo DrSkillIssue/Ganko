@@ -2,7 +2,7 @@
  * Scope and context query functions
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { ScopeEntity, TrackingContext } from "../entities/scope";
 import type { VariableEntity } from "../entities/variable";
 import { UNKNOWN_CONTEXT } from "../entities/scope";

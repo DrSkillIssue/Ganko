@@ -2,7 +2,7 @@
  * Type system query functions (delegates to TypeResolver)
  */
 import type ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { TypeInfo, ObjectPropertyInfo } from "../typescript";
 
 export function hasTypeInfo(graph: SolidGraph): boolean {

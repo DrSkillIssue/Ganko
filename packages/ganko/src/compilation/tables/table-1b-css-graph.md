@@ -51,10 +51,10 @@ Every field on `CSSGraph` (css/impl.ts) mapped to its new home.
 | 45 | `fontFaces` | `AtRuleEntity[]` | Workspace | CSSSyntaxTree | `Derivable from atRulesByKind.get('font-face')` | Preserved |  |
 | 46 | `supportsRules` | `AtRuleEntity[]` | Workspace | CSSSyntaxTree | `Derivable from atRulesByKind.get('supports')` | Preserved |  |
 | 47 | `unusedKeyframes` | `AtRuleEntity[]` | Workspace | SymbolTable | `unusedKeyframes` | Preserved | Computed during SymbolTable materialization (animation name cross-reference). |
-| 48 | `unusedMixins` | `MixinEntity[]` | Workspace | Analysis | `Computed by CSSAnalysis` | Preserved |  |
+| 48 | `unusedMixins` | `MixinEntity[]` | Workspace | SymbolTable | `unusedMixins` | Preserved |  |
 | 49 | `unresolvedMixinIncludes` | `MixinIncludeEntity[]` | Workspace | CSSSyntaxTree | `unresolvedMixinIncludes` | Preserved | Per-file unresolved includes. |
-| 50 | `unusedFunctions` | `SCSSFunctionEntity[]` | Workspace | Analysis | `Computed by CSSAnalysis` | Preserved |  |
-| 51 | `unusedPlaceholders` | `PlaceholderEntity[]` | Workspace | Analysis | `Computed by CSSAnalysis` | Preserved |  |
+| 50 | `unusedFunctions` | `SCSSFunctionEntity[]` | Workspace | SymbolTable | `unusedFunctions` | Preserved |  |
+| 51 | `unusedPlaceholders` | `PlaceholderEntity[]` | Workspace | SymbolTable | `unusedPlaceholders` | Preserved |  |
 | 52 | `unresolvedExtends` | `ExtendEntity[]` | Workspace | CSSSyntaxTree | `unresolvedExtends` | Preserved | Per-file. |
 | 53 | `parseErrors` | `CSSParseError[]` | Per-file | CSSSyntaxTree | `parseErrors` | Preserved | Partitioned: each CSSSyntaxTree holds this file's entities only. |
 | 54 | `failedFilePaths` | `string[]` | N/A | N/A | `—` | Excluded | Parse errors. CSSSyntaxTree.parseErrors covers per-file. Compilation tracks which files failed to parse. |

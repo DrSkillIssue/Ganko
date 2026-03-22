@@ -6,7 +6,7 @@
  */
 
 import type ts from "typescript";
-import type { SolidGraph } from "../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree"
 
 /** ts.TypeFlags.Any | ts.TypeFlags.Unknown */
 export const TS_ANY_OR_UNKNOWN = 1 | 2;

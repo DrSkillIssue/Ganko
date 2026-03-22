@@ -2,7 +2,7 @@
  * Entity relationship and analysis functions
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { VariableEntity, ReadEntity, AssignmentEntity } from "../entities/variable";
 import type { FunctionEntity } from "../entities/function";
 import type { CallEntity, ArgumentSemantic } from "../entities/call";

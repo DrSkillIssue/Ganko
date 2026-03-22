@@ -3,7 +3,7 @@
  */
 import type ts from "typescript";
 import typescript from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { ScopeEntity } from "../entities/scope";
 import type { VariableEntity } from "../entities/variable";
 import type { FunctionEntity } from "../entities/function";

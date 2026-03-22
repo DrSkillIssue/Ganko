@@ -10,7 +10,7 @@
 **DURING Phase N:**
 4. Create ONLY the files listed in "Create these exact files" — no more, no fewer, no renamed
 5. Each file's exports must match what Phase N specifies — no extra exports, no missing exports
-6. Import types from SPEC.ts or previous phases — never reinvent a type that exists
+6. Import types from previous phases — never reinvent a type that exists. SPEC.ts is a reference document, NOT an importable module. Types live in the implementation files that own them.
 
 **AFTER writing Phase N code:**
 7. Run `npx tsc --noEmit` — zero errors in `compilation/` before proceeding
@@ -424,26 +424,56 @@ All tests pass.
 
 ## Phase 6: Cascade Binder (Tier 2-3)
 
+### Existing type-only files created by Phase 5
+Phase 5 created these files with type definitions only (no implementation logic). Phase 6 ADDS implementation functions to them.
+
+| File | Types already defined | Phase 6 adds |
+|------|----------------------|--------------|
+| `compilation/binding/element-builder.ts` | `ElementNode`, `TextualContentState` | `buildElementNodes()` function |
+| `compilation/binding/cascade-binder.ts` | `ElementCascade`, `CascadedDeclaration`, `SelectorMatch`, `RuleGuard`, `GuardConditionProvenance`, `SignalSource`, `SignalGuardKind` | `bind()`, `bindFile()` functions |
+| `compilation/binding/scope-resolver.ts` | `ScopedSelectorIndex` | `buildScopedSelectorIndex()` function |
+
 ### Step 6.1 — Read
-- `SPEC.ts` section 7 (CascadeBinder) + section 6 (ElementNode, ElementCascade)
+- `compilation/binding/element-builder.ts` — existing `ElementNode` type to implement
+- `compilation/binding/cascade-binder.ts` — existing `ElementCascade`, `CascadedDeclaration`, `SelectorMatch`, `RuleGuard` types
+- `compilation/binding/scope-resolver.ts` — existing `ScopedSelectorIndex` type
+- `compilation/binding/semantic-model.ts` — Phase 5 output (Tier 2-3 stubs to replace)
 - `tables/table-1c-layout-graph.md` — ALL LayoutGraph fields mapped to binding layer
 - `tables/README.md` — Constraints 7 (jsxEntity on ElementNode), 8 (childElementNodes)
-- `packages/ganko/src/cross-file/layout/cascade-builder.ts` — MOVE cascade algorithm
-- `packages/ganko/src/cross-file/layout/selector-match.ts` — MOVE selector matching
-- `packages/ganko/src/cross-file/layout/selector-dispatch.ts` — MOVE dispatch bucketing
-- `packages/ganko/src/cross-file/layout/element-record.ts` — MOVE element construction
-- `packages/ganko/src/cross-file/layout/component-host.ts` — MOVE host resolution
+- `packages/ganko/src/cross-file/layout/cascade-builder.ts` — MOVE cascade algorithm into cascade-binder.ts
+- `packages/ganko/src/cross-file/layout/selector-match.ts` — MOVE selector matching into cascade-binder.ts
+- `packages/ganko/src/cross-file/layout/selector-dispatch.ts` — MOVE dispatch bucketing into scope-resolver.ts
+- `packages/ganko/src/cross-file/layout/element-record.ts` — MOVE element construction into element-builder.ts
+- `packages/ganko/src/cross-file/layout/component-host.ts` — MOVE host resolution into element-builder.ts
 - `packages/ganko/src/cross-file/layout/build.ts` steps 0-6
 
-### Step 6.2 — Create files
-```
-compilation/binding/
-├── cascade-binder.ts    (NEW)
-├── element-builder.ts   (NEW)
-└── scope-resolver.ts    (NEW)
-```
+### Step 6.2 — Add implementation to existing files
 
-Plus: ADD Tier 2-3 methods to existing `compilation/binding/semantic-model.ts` (replace throw stubs).
+**`compilation/binding/element-builder.ts`** — ADD:
+- `buildElementNodes(solidTree: SolidSyntaxTree, compilation: StyleCompilation): ElementNode[]`
+- Same logic as element-record.ts: tag resolution, transparent primitive detection, parent-child wiring, sibling indexing, class token extraction, inline style extraction, dispatch key computation
+- Component host resolution via compilation's dependency graph
+- ElementNode.jsxEntity = direct JSXElementEntity reference (Constraint 7)
+- ElementNode.childElementNodes = direct children array (Constraint 8)
+
+**`compilation/binding/cascade-binder.ts`** — ADD:
+- `bind(element: ElementNode, scopedSelectors: ScopedSelectorIndex, symbolTable: SymbolTable): ElementCascade`
+- Same cascade algorithm as cascade-builder.ts: monitored declaration collection, per-element cascade construction, variable substitution, Tailwind augmentation, importance/layer/specificity/sourceOrder sort
+- `selectorMatchesElement(element: ElementNode, matcher: CompiledSelectorMatcher): boolean` — moved from selector-match.ts
+
+**`compilation/binding/scope-resolver.ts`** — ADD:
+- `buildScopedSelectorIndex(scopedCSSFiles: readonly string[], symbolTable: SymbolTable): ScopedSelectorIndex`
+- Same dispatch bucketing as selector-dispatch.ts, operating on SelectorSymbol from the symbol table
+- Compute `requirements.needsClassTokens` and `requirements.needsAttributes` from selectors in scope
+
+**`compilation/binding/semantic-model.ts`** — REPLACE Phase 6 throw stubs with real implementations:
+- `getElementNode`, `getElementNodes` — uses element-builder
+- `getElementCascade` — uses cascade-binder
+- `getMatchingSelectors` — from cascade binding
+- `getComponentHost` — uses element-builder component host logic
+- `getElementsByTagName` — filter from element nodes
+- `getLayoutFact` — computed from cascade (reservedSpace, scrollContainer, flowParticipation, containingBlock)
+- Also replace `getScopedSelectors` to use scope-resolver's `buildScopedSelectorIndex` (computing requirements)
 
 ### Step 6.3 — Type-check gate
 Zero errors.
@@ -468,25 +498,74 @@ All tests pass.
 
 ## Phase 7: Signal + Fact Analyzers (Tier 4-5)
 
+### Existing type-only files created by Phase 5
+Phase 5 created these files with type definitions only. Phase 7 ADDS implementation functions to them.
+
+| File | Types already defined | Phase 7 adds |
+|------|----------------------|--------------|
+| `compilation/binding/signal-builder.ts` | `SignalSnapshot`, `SignalValue`, `KnownSignalValue`, `UnknownSignalValue`, `LayoutSignalName`, `layoutSignalNames`, signal enums | `buildSignalSnapshot()` function |
+| `compilation/analysis/cascade-analyzer.ts` | `ConditionalSignalDelta` | `computeConditionalDelta()` function |
+| `compilation/analysis/layout-fact.ts` | `LayoutFactKind`, `LayoutFactMap`, `ReservedSpaceFact`, `ScrollContainerFact`, `FlowParticipationFact`, `ContainingBlockFact` | `computeReservedSpaceFact()`, `computeScrollContainerFact()`, `computeFlowParticipationFact()`, `computeContainingBlockFact()` |
+| `compilation/analysis/alignment.ts` | `AlignmentContext` (all 16+ fields), `CohortStats`, `CohortSubjectStats`, `CohortProfile`, all evidence/cohort/hot-signal types | `createAlignmentContext()`, `buildCohortStats()`, Bayesian scoring functions |
+| `compilation/analysis/statefulness.ts` | `StatefulSelectorEntry`, `NormalizedRuleDeclaration` | `buildStatefulRuleIndexes()` function |
+
 ### Step 7.1 — Read
-- `SPEC.ts` section 6 (SignalSnapshot, AlignmentContext ALL 16+ fields, CohortStats ALL fields)
+- `compilation/binding/signal-builder.ts` — existing signal types to implement
+- `compilation/analysis/cascade-analyzer.ts` — existing ConditionalSignalDelta type
+- `compilation/analysis/layout-fact.ts` — existing fact types
+- `compilation/analysis/alignment.ts` — existing alignment/cohort types
+- `compilation/analysis/statefulness.ts` — existing stateful types
 - `tables/table-1d-signal-model.md` — ALL signal types (zero field loss)
 - `tables/README.md` — Constraints 1-6, 12
-- ALL files in `cross-file/layout/` for signal/alignment logic
+- `packages/ganko/src/cross-file/layout/signal-normalization.ts` — MOVE into signal-builder.ts
+- `packages/ganko/src/cross-file/layout/signal-collection.ts` — MOVE into signal-builder.ts
+- `packages/ganko/src/cross-file/layout/build.ts` steps 7-8
+- `packages/ganko/src/cross-file/layout/rule-kit.ts` — MOVE into alignment.ts
+- `packages/ganko/src/cross-file/layout/context-classification.ts` — MOVE into alignment.ts
+- `packages/ganko/src/cross-file/layout/cohort-index.ts` — MOVE into alignment.ts
+- `packages/ganko/src/cross-file/layout/offset-baseline.ts` — MOVE into alignment.ts
+- `packages/ganko/src/cross-file/layout/stateful-rule-index.ts` — MOVE into statefulness.ts
+- `packages/ganko/src/cross-file/layout/measurement-node.ts` — MOVE into alignment.ts
 
-### Step 7.2 — Create files
-```
-compilation/binding/
-└── signal-builder.ts     (NEW)
+### Step 7.2 — Add implementation to existing files
 
-compilation/analysis/
-├── cascade-analyzer.ts   (NEW)
-├── layout-fact.ts        (NEW)
-├── alignment.ts          (NEW)
-└── statefulness.ts       (NEW)
-```
+**`compilation/binding/signal-builder.ts`** — ADD:
+- `buildSignalSnapshot(elementId: number, cascade: ElementCascade, parentSnapshot: SignalSnapshot | null): SignalSnapshot`
+- Same normalization + inheritance logic from signal-normalization.ts and signal-collection.ts
 
-Plus: ADD Tier 4-5 methods to existing `compilation/binding/semantic-model.ts`.
+**`compilation/analysis/layout-fact.ts`** — ADD:
+- `computeReservedSpaceFact(snapshot: SignalSnapshot): ReservedSpaceFact`
+- `computeScrollContainerFact(snapshot: SignalSnapshot): ScrollContainerFact`
+- `computeFlowParticipationFact(snapshot: SignalSnapshot): FlowParticipationFact`
+- `computeContainingBlockFact(node: ElementNode, positionedAncestorByKey: Map<...>): ContainingBlockFact`
+- Same algorithms from build.ts steps 6-7
+
+**`compilation/analysis/cascade-analyzer.ts`** — ADD:
+- `computeConditionalDelta(elements: readonly ElementNode[], cascades: ReadonlyMap<number, ElementCascade>, ...): Map<ElementNode, Map<LayoutSignalName, ConditionalSignalDelta>>`
+- Same logic from build.ts step 7
+
+**`compilation/analysis/alignment.ts`** — ADD:
+- `createAlignmentContextForParent(...)` — from context-classification.ts
+- `buildCohortIndex(...)` — from cohort-index.ts
+- `collectAlignmentCases(...)`, `evaluateAlignmentCase(...)` — from rule-kit.ts
+- Bayesian evidence scoring — from rule-kit.ts
+
+**`compilation/analysis/statefulness.ts`** — ADD:
+- `buildStatefulRuleIndexes(...)` — from stateful-rule-index.ts
+
+**`compilation/binding/semantic-model.ts`** — REPLACE Phase 7 throw stubs with real implementations:
+- `getSignalSnapshot` — uses signal-builder
+- `getConditionalDelta` — uses cascade-analyzer
+- `getBaselineOffsets` — uses cascade-analyzer
+- `getAlignmentContext` — uses alignment
+- `getCohortStats` — uses alignment
+- `getElementsWithConditionalDelta` — uses cascade-analyzer index
+- `getScrollContainerElements` — filter from layout facts
+- `getDynamicSlotCandidates` — filter from element nodes
+- `getElementsByKnownSignalValue` — cross-element index from signal-builder
+- `getStatefulSelectorEntries` — uses statefulness
+- `getStatefulNormalizedDeclarations` — uses statefulness
+- `getStatefulBaseValueIndex` — uses statefulness
 
 ### Step 7.3 — Type-check gate
 Zero errors.
@@ -514,8 +593,23 @@ All tests pass.
 
 ### Dependencies: Phase 5 AND Phase 7 (all tiers must be available)
 
+### Type imports for dispatch files
+Dispatch files import types from:
+- `compilation/binding/element-builder.ts` — `ElementNode`
+- `compilation/binding/cascade-binder.ts` — `ElementCascade`
+- `compilation/binding/signal-builder.ts` — `SignalSnapshot`, `LayoutSignalName`
+- `compilation/binding/semantic-model.ts` — `FileSemanticModel`
+- `compilation/analysis/layout-fact.ts` — `LayoutFactKind`, `LayoutFactMap`
+- `compilation/analysis/cascade-analyzer.ts` — `ConditionalSignalDelta`
+- `compilation/analysis/alignment.ts` — `AlignmentContext`, `CohortStats`
+- `compilation/analysis/statefulness.ts` — `StatefulSelectorEntry`, `NormalizedRuleDeclaration`
+- `compilation/core/css-syntax-tree.ts` — `CSSSyntaxTree`
+- `compilation/core/solid-syntax-tree.ts` — `SolidSyntaxTree`
+- `compilation/symbols/symbol-table.ts` — `SymbolTable`
+- `compilation/symbols/class-name.ts` — `ClassNameSymbol`
+
 ### Step 8.1 — Read
-- `SPEC.ts` section 10 (AnalysisDispatcher, AnalysisRule, AnalysisActionRegistry)
+- `SPEC.ts` section 10 (AnalysisDispatcher, AnalysisRule, AnalysisActionRegistry — reference only, implement from scratch)
 - `tables/table-1e-rules.md` — all 31 rules
 - `packages/ganko/src/cross-file/rule.ts` — CrossRule, CrossRuleContext
 - The 3 Tier 0 rule files
@@ -523,10 +617,10 @@ All tests pass.
 ### Step 8.2 — Create files
 ```
 compilation/dispatch/
-├── rule.ts
-├── registry.ts
-├── tier-resolver.ts
-└── dispatcher.ts
+├── rule.ts             (NEW)
+├── registry.ts         (NEW)
+├── tier-resolver.ts    (NEW)
+└── dispatcher.ts       (NEW)
 ```
 
 ### Step 8.3 — Type-check gate
@@ -550,6 +644,15 @@ Run BOTH old and new dispatchers on test suite → identical diagnostics. Same r
 ## Phase 9: Rule Migration
 
 ### No new files. Rules re-targeted in `cross-file/rules/` in place.
+
+### Type imports for migrated rules
+Rules import types from:
+- Tier 0: `compilation/core/css-syntax-tree.ts` (`CSSSyntaxTree`), `compilation/symbols/symbol-table.ts` (`SymbolTable`)
+- Tier 1: Above + `compilation/core/solid-syntax-tree.ts` (`SolidSyntaxTree`)
+- Tier 2: Above + `compilation/binding/element-builder.ts` (`ElementNode`), `compilation/binding/semantic-model.ts` (`FileSemanticModel`)
+- Tier 3: Above + `compilation/analysis/layout-fact.ts` (`LayoutFactMap`, `LayoutFactKind`)
+- Tier 4: Above + `compilation/binding/signal-builder.ts` (`SignalSnapshot`), `compilation/analysis/cascade-analyzer.ts` (`ConditionalSignalDelta`), `compilation/binding/cascade-binder.ts` (`ElementCascade`)
+- Tier 5: Above + `compilation/analysis/alignment.ts` (`AlignmentContext`, `CohortStats`)
 
 ### Step 9.1 — Migrate Tier 1 (11 rules)
 jsxNoUndefinedCssClass, cssNoUnreferencedComponentClass, jsxClasslistBooleanValues, jsxClasslistNoAccessorReference, jsxClasslistNoConstantLiterals, jsxClasslistStaticKeys, jsxStyleKebabCaseKeys, jsxStyleNoFunctionValues, jsxStyleNoUnusedCustomProp, jsxLayoutClasslistGeometryToggle, jsxLayoutPictureSourceRatioConsistency
@@ -588,8 +691,11 @@ Zero differences.
 ## Phase 10: Incremental Updates
 
 ### Step 10.1 — Read
-- `SPEC.ts` section 11 (CompilationTracker with diagnostic caching — Constraint 14)
-- `packages/ganko/src/cache.ts` — GraphCache
+- `SPEC.ts` section 11 (CompilationTracker — reference only)
+- `compilation/core/compilation.ts` — StyleCompilation (wire symbolTable + dependencyGraph getters)
+- `compilation/symbols/declaration-table.ts` — DeclarationTable (two-forest pattern)
+- `compilation/incremental/dependency-graph.ts` — DependencyGraph
+- `packages/ganko/src/cache.ts` — GraphCache (what's being replaced)
 - `packages/lsp/src/core/analyze.ts` — diagnostic pipeline
 
 ### Step 10.2 — Create files
@@ -598,6 +704,8 @@ compilation/incremental/
 ├── tracker.ts              (NEW)
 └── change-propagation.ts   (NEW)
 ```
+
+Also: UPDATE `compilation/core/compilation.ts` to wire symbolTable and dependencyGraph (replace Phase 1 throw stubs with real DeclarationTable + DependencyGraph integration).
 
 ### Step 10.3 — Type-check gate
 Zero errors.
@@ -628,6 +736,7 @@ test/compilation/phase10.test.ts
 ### Step 11.2 — Retain (do NOT delete)
 - `solid/phases/`, `solid/entities/`, `solid/queries/`
 - `css/phases/`, `css/entities/`, `css/parser/`
+- ALL files in `compilation/` (the new system)
 
 ### Step 11.3 — Update
 - `packages/lsp/src/core/analyze.ts` → use AnalysisDispatcher exclusively

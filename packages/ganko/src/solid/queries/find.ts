@@ -1,7 +1,7 @@
 /**
  * Predicate-based search: find, some, every, filter, count
  */
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import { queryOps } from "../../util/query-ops";
 
 const fnOps = queryOps<SolidGraph, SolidGraph["functions"][number]>((g) => g.functions);
