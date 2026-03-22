@@ -28,7 +28,6 @@ import type { CompilationTracker } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import {
   classifyFile,
-  contentHash,
   isToolingConfig,
   ALL_EXTENSIONS,
   prefixLogger,
@@ -39,7 +38,7 @@ import type { Project } from "../core/project";
 import type { FeatureHandlerContext } from "./handlers/handler-context";
 import type { LifecyclePhase } from "./server-state";
 import { readFileSync } from "node:fs";
-import { buildSolidSyntaxTreeForPath } from "../core/analyze";
+import { buildSolidTreeForPath } from "../core/analyze";
 import { createLspWriter, createFileWriter, createCompositeWriter, type Logger, type LeveledLogger } from "../core/logger";
 import { GcTimer } from "./gc-timer";
 import { MemoryWatcher } from "./memory-watcher";
@@ -61,7 +60,7 @@ import { setupFeatureHandlers } from "./routing/feature";
 function createFeatureHandlerContext(
   tsService: TsService,
   project: Project,
-  graphCache: CompilationTracker,
+  _tracker: CompilationTracker,
   diagCache: ResourceMap<readonly Diagnostic[]>,
   handlerLog: Logger,
 ): FeatureHandlerContext {
@@ -100,8 +99,7 @@ function createFeatureHandlerContext(
       if (classifyFile(path) !== "solid") return null;
       const sourceFile = tsService.getSourceFile(path);
       if (!sourceFile) return null;
-      const version = contentHash(sourceFile.text);
-      return graphCache.getSolidSyntaxTree(path, version, buildSolidSyntaxTreeForPath(project, path, graphCache.logger));
+      return buildSolidTreeForPath(project, path);
     },
   };
 }

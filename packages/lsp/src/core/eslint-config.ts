@@ -72,7 +72,7 @@ function isGlobalIgnoresOnly(config: FlatConfigObject): boolean {
  * @param configs - Flat config objects from subprocess
  * @returns Global ignore patterns
  */
-function extractGlobalIgnores(configs: readonly FlatConfigObject[]): readonly string[] {
+export function extractGlobalIgnores(configs: readonly FlatConfigObject[]): readonly string[] {
   const ignores: string[] = [];
   for (let i = 0; i < configs.length; i++) {
     const config = configs[i];
@@ -99,7 +99,7 @@ function extractGlobalIgnores(configs: readonly FlatConfigObject[]): readonly st
  * @param configs - Flat config objects from subprocess
  * @returns Rule overrides (non-default only)
  */
-function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
+export function extractOverrides(configs: readonly FlatConfigObject[]): RuleOverrides {
   const raw = new Map<string, RuleSeverityOverride>();
 
   for (let i = 0; i < configs.length; i++) {

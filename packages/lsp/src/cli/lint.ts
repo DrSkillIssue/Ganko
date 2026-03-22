@@ -13,7 +13,6 @@
  */
 import { resolve, dirname, sep } from "node:path";
 import { readFileSync, statSync, globSync } from "node:fs";
-<<<<<<< HEAD
 import { SolidPlugin, GraphCache, buildSolidGraph, runSolidRules, resolveTailwindValidator, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
@@ -21,16 +20,6 @@ import { createProject } from "../core/project";
 import { createFileIndex } from "../core/file-index";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit, parseWithOptionalProgram, readCSSFilesFromDisk, runAllCrossFileDiagnostics } from "../core/analyze";
-=======
-import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, resolveTailwindValidator, scanDependencyCustomProperties, buildCSSGraph, buildLayoutGraph, runCrossFileRules, createOverrideEmit } from "@drskillissue/ganko";
-import type { Diagnostic, SolidGraph, CSSInput } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
-import { createBatchProgram } from "../core/batch-program";
-import { createFileIndex } from "../core/file-index";
-import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
-import { readCSSFilesFromDisk } from "../core/analyze";
->>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
 import { createLogger, parseLogLevel, type LogLevel, type RuleOverrides } from "@drskillissue/ganko-shared";
@@ -489,7 +478,6 @@ export async function runLint(args: readonly string[]): Promise<void> {
     if (log.enabled) log.info("daemon unavailable, falling back to in-process analysis");
   }
 
-<<<<<<< HEAD
   if (log.enabled) log.trace(`lint: creating project with SolidPlugin only (root=${projectRoot})`);
   const project = createProject({
     rootPath: projectRoot,
@@ -582,125 +570,6 @@ export async function runLint(args: readonly string[]): Promise<void> {
           return null;
         }
       };
-=======
-  if (filesToLint.length === 0) {
-    if (options.format === "json") {
-      console.log("[]");
-    } else {
-      console.log("No files to lint.");
-    }
-    if (fileHandle !== undefined) await fileHandle.close();
-    return process.exit(0);
-  }
-
-  const allDiagnostics: Diagnostic[] = [];
-
-  /* Read CSS files once, build a content map for cross-file reuse. */
-  const allCSSFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-  const cssContentMap = new Map<string, string>();
-  for (let i = 0, len = allCSSFiles.length; i < len; i++) {
-    const cssFile = allCSSFiles[i];
-    if (!cssFile) continue;
-    cssContentMap.set(cssFile.path, cssFile.content);
-  }
-
-  if (log.enabled) log.trace(`lint: read ${allCSSFiles.length} CSS files from disk, ${cssContentMap.size} in content map`);
-
-  const tailwind = await resolveTailwindValidator(allCSSFiles).catch(() => null);
-  if (log.enabled) log.info(`tailwind: ${tailwind !== null ? "resolved" : "not found"}`);
-
-  const tLib = performance.now();
-  const externalCustomProperties = scanDependencyCustomProperties(projectRoot);
-  if (log.enabled) log.info(`library analysis: ${externalCustomProperties.size} external custom properties in ${(performance.now() - tLib).toFixed(0)}ms`);
-
-  const tsconfigPath = ts.findConfigFile(projectRoot, ts.sys.fileExists, "tsconfig.json");
-  if (!tsconfigPath) die(`No tsconfig.json found in ${projectRoot}`);
-
-  /* Filter solid files (skip CSS — handled separately in cross-file). */
-  const solidFilesToLint: string[] = [];
-  for (let i = 0, len = filesToLint.length; i < len; i++) {
-    const f = filesToLint[i];
-    if (!f) continue;
-    if (classifyFile(f) !== "css") solidFilesToLint.push(f);
-  }
-
-  /* All solid files in the project — used as rootNames for ts.createProgram
-     when tsconfig doesn't include them (e.g. monorepo with `files: []`). */
-  const allSolidFiles = Array.from(fileIndex.solidFiles);
-
-  const WORKER_THRESHOLD = 20;
-  const workerCount = options.maxWorkers > 0
-    ? options.maxWorkers
-    : defaultWorkerCount();
-  const useWorkers = solidFilesToLint.length > WORKER_THRESHOLD && workerCount > 1;
-
-  const t0 = performance.now();
-  let serialBatch: ReturnType<typeof createBatchProgram> | undefined;
-  /* Collected during serial analysis for cross-file reuse — avoids double graph build.
-     Empty after parallel path (workers can't share ts.Node references across threads). */
-  const solidGraphsForCrossFile: SolidGraph[] = [];
-
-  if (useWorkers) {
-    /* ── Parallel path: dispatch file chunks to worker threads ── */
-    const chunks = partitionFiles(solidFilesToLint, workerCount);
-    if (log.enabled) log.info(`dispatching ${solidFilesToLint.length} files to ${chunks.length} workers`);
-
-    const pool = createWorkerPool(chunks.length);
-    try {
-      const tasks = chunks.map((files) => ({
-        tsconfigPath,
-        files,
-        rootPath: projectRoot,
-        overrides: eslintResult.overrides,
-      }));
-
-      /* Start building main-thread program concurrently while workers run.
-         Workers are in separate threads so this synchronous call doesn't block them. */
-      const workerPromise = pool.dispatch(tasks);
-
-      if (options.crossFile) {
-        serialBatch = createBatchProgram(projectRoot, allSolidFiles);
-      }
-
-      const workerResults = await workerPromise;
-
-      for (let i = 0, len = workerResults.length; i < len; i++) {
-        const wr = workerResults[i];
-        if (!wr) continue;
-        for (let j = 0, dLen = wr.diagnostics.length; j < dLen; j++) {
-          const d = wr.diagnostics[j];
-          if (!d) continue;
-          allDiagnostics.push(d);
-        }
-      }
-    } catch (err: unknown) {
-      if (log.enabled) log.warning(`worker error: ${err instanceof Error ? err.message : String(err)}, falling back to serial`);
-      allDiagnostics.length = 0;
-      serialBatch ??= createBatchProgram(projectRoot, allSolidFiles);
-      runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
-    } finally {
-      await pool.terminate();
-    }
-  } else {
-    /* ── Serial path: few files, no worker overhead ── */
-    if (log.enabled) log.info(`serial analysis: ${solidFilesToLint.length} files`);
-    serialBatch = createBatchProgram(projectRoot, allSolidFiles);
-    runSerialAnalysis(serialBatch.program, solidFilesToLint, eslintResult.overrides, allDiagnostics, solidGraphsForCrossFile, log);
-  }
-
-  const t1 = performance.now();
-  if (log.enabled) log.info(`single-file analysis: ${allDiagnostics.length} diagnostics in ${(t1 - t0).toFixed(0)}ms`);
-
-  let exitCode = 0;
-  try {
-    if (options.crossFile) {
-      /* Cross-file analysis builds all three graphs (Solid, CSS, Layout) on the
-         main thread and calls runCrossFileRules directly — no intermediary Project
-         or GraphCache version negotiation. The CLI owns the full pipeline. */
-      const batch = serialBatch ?? createBatchProgram(projectRoot, allSolidFiles);
-      const ownsBatch = serialBatch === undefined;
-      const program = batch.program;
->>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
 
       /* 1. Collect SolidGraphs — reuse from serial path or rebuild after parallel path. */
       let solidGraphs: SolidGraph[];
@@ -801,11 +670,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     }
 
   } finally {
-<<<<<<< HEAD
     project.dispose();
-=======
-    serialBatch?.dispose();
->>>>>>> 205d4bb (Phase 2: worker_threads parallelism for CLI lint)
     if (fileHandle !== undefined) await fileHandle.close();
   }
 
