@@ -114,13 +114,6 @@ export function buildCSSResult(input: CSSInput): CSSBuildResult {
   }
 }
 
-/**
- * Backwards-compatible entry point. Returns workspace view (rules/queries use this).
- */
-export function buildCSSGraph(input: CSSInput): CSSWorkspaceView {
-  return buildCSSResult(input).workspace
-}
-
 // ── Freeze to CSSSyntaxTree[] ─────────────────────────────────────────────
 
 function freezeToSyntaxTrees(ctx: CSSBuildContext): readonly CSSSyntaxTree[] {

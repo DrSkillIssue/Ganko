@@ -1,32 +1,19 @@
 /**
  * ESLint Plugin
  *
- * Aggregates all ganko rule engines (Solid, CSS, cross-file) into
- * a single ESLint plugin. Each plugin directory owns its own ESLint
- * adapter; this module merges their rules and builds configs.
- *
- * @example
- * ```js
- * // eslint.config.mjs
- * import solid from "@drskillissue/ganko/eslint-plugin"
- *
- * export default [
- *   ...solid.configs.recommended,
- * ]
- * ```
+ * Aggregates ganko rule engines (Solid, CSS) into a single ESLint plugin.
  */
 import type { TSESLint } from "@typescript-eslint/utils"
 import type { RuleModule } from "./eslint-adapter"
-import { eslintRules as solidRules, rules as solidRuleList } from "./solid/eslint-plugin"
-import { eslintRules as cssRules, rules as cssRuleList } from "./css/eslint-plugin"
-import { eslintRules as crossFileRules, rules as crossFileRuleList } from "./cross-file/eslint-plugin"
+import { eslintRules as solidRules } from "./solid/eslint-plugin"
+import { rules as solidRuleList } from "./solid/rules"
+import { eslintRules as cssRules } from "./css/eslint-plugin"
+import { rules as cssRuleList } from "./css/rules"
 import { SOLID_EXTENSIONS, CSS_EXTENSIONS, extensionsToGlobs } from "@drskillissue/ganko-shared"
 
-/** Merge all rule modules into a single record. */
 const allRules: Record<string, RuleModule> = {
   ...solidRules,
   ...cssRules,
-  ...crossFileRules,
 }
 
 interface SolidLintPlugin {
@@ -60,7 +47,6 @@ function buildRuleConfig(
 
 const solidOnlyRules = buildRuleConfig(solidRuleList)
 const cssOnlyRules = buildRuleConfig(cssRuleList)
-const crossFileOnlyRules = buildRuleConfig(crossFileRuleList)
 
 const tsFiles = extensionsToGlobs(SOLID_EXTENSIONS)
 const cssFiles = extensionsToGlobs(CSS_EXTENSIONS)
@@ -75,11 +61,6 @@ plugin.configs["recommended"] = [
     plugins: { solid: plugin },
     files: cssFiles,
     rules: cssOnlyRules,
-  },
-  {
-    plugins: { solid: plugin },
-    files: [...tsFiles, ...cssFiles],
-    rules: crossFileOnlyRules,
   },
 ]
 

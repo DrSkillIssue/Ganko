@@ -1,24 +1,19 @@
 import { describe, expect, it } from "vitest"
 import { buildGraph as buildSolidGraph } from "../solid/test-utils"
-import { buildGraph as buildCSSGraph } from "../css/test-utils"
-import { solidGraphToSyntaxTree } from "../../src/compilation/core/solid-syntax-tree"
-import { cssGraphToSyntaxTrees } from "../../src/compilation/core/css-syntax-tree"
+import { buildTrees as buildCSSTrees } from "../css/test-utils"
 import { createCompilationFromLegacy } from "../../src/compilation/core/compilation"
 import { createCompilationTracker } from "../../src/compilation/incremental/tracker"
 import { propagateChanges, filterStaleSolidFiles } from "../../src/compilation/incremental/change-propagation"
 import { buildDependencyGraph } from "../../src/compilation/incremental/dependency-graph"
 
 function buildTestCompilation() {
-  const solidGraph = buildSolidGraph(`
+  const solidTree = buildSolidGraph(`
     import "./app.css";
     function App() {
       return <div class="container">Hello</div>;
     }
   `, "/src/app.tsx")
-  const cssGraph = buildCSSGraph(`.container { width: 100%; }`, "/src/app.css")
-
-  const solidTree = solidGraphToSyntaxTree(solidGraph, "v1")
-  const cssTrees = cssGraphToSyntaxTrees(cssGraph)
+  const cssTrees = buildCSSTrees(`.container { width: 100%; }`, "/src/app.css")
 
   return createCompilationFromLegacy([solidTree], cssTrees)
 }
@@ -132,7 +127,7 @@ describe("Phase 10: Incremental Updates", () => {
     it("setCachedCrossFileDiagnostics stores and retrieves diagnostics", () => {
       const compilation = buildTestCompilation()
       const tracker = createCompilationTracker(compilation)
-      const diag = { file: "/src/app.tsx", message: "test", ruleId: "test", messageId: "test", severity: "warn" as const, start: { line: 1, column: 0 }, end: { line: 1, column: 1 } }
+      const diag = { file: "/src/app.tsx", rule: "test", messageId: "test", message: "test", severity: "warn" as const, loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } }
       tracker.setCachedCrossFileDiagnostics("/src/app.tsx", [diag])
       expect(tracker.getCachedCrossFileDiagnostics("/src/app.tsx")).toEqual([diag])
     })
@@ -146,7 +141,7 @@ describe("Phase 10: Incremental Updates", () => {
     it("setCachedCrossFileResults stores and retrieves results", () => {
       const compilation = buildTestCompilation()
       const tracker = createCompilationTracker(compilation)
-      const diag = { file: "/src/app.tsx", message: "test", ruleId: "test", messageId: "test", severity: "warn" as const, start: { line: 1, column: 0 }, end: { line: 1, column: 1 } }
+      const diag = { file: "/src/app.tsx", rule: "test", messageId: "test", message: "test", severity: "warn" as const, loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } }
       tracker.setCachedCrossFileResults([diag])
       const results = tracker.getCachedCrossFileResults()
       expect(results).not.toBeNull()
@@ -156,7 +151,7 @@ describe("Phase 10: Incremental Updates", () => {
     it("applyChange invalidates cross-file diagnostics for changed file", () => {
       const compilation = buildTestCompilation()
       const tracker = createCompilationTracker(compilation)
-      const diag = { file: "/src/app.tsx", message: "test", ruleId: "test", messageId: "test", severity: "warn" as const, start: { line: 1, column: 0 }, end: { line: 1, column: 1 } }
+      const diag = { file: "/src/app.tsx", rule: "test", messageId: "test", message: "test", severity: "warn" as const, loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 1 } } }
       tracker.setCachedCrossFileDiagnostics("/src/app.tsx", [diag])
       const next = tracker.applyChange("/src/app.tsx", "changed", "v2")
       expect(next.getCachedCrossFileDiagnostics("/src/app.tsx")).toEqual([])

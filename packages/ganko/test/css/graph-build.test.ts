@@ -25,7 +25,6 @@ describe("CSSPlugin.build() integration", () => {
         }
       `);
 
-      expect(graph.kind).toBe("css");
       expect(graph.files.length).toBe(1);
       expect(graph.rules.length).toBe(1);
       expect(graph.declarations.length).toBe(1);

@@ -1,4 +1,4 @@
-export { SolidPlugin, analyzeInput, buildSolidGraph, runSolidRules } from "./plugin"
+export { SolidPlugin, analyzeInput, runSolidRules } from "./plugin"
 export { createSolidInput } from "./create-input"
 export type { SolidSyntaxTree } from "../compilation/core/solid-syntax-tree"
 export type { SolidBuildContext } from "./build-context"

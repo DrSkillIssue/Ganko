@@ -1,9 +1,10 @@
 import ts from "typescript"
 import { resolve } from "path"
-import { buildSolidGraph, analyzeInput } from "../../src/solid/plugin"
+import { buildSolidSyntaxTree } from "../../src/solid/impl"
+import { analyzeInput } from "../../src/solid/plugin"
 import { createSolidInput } from "../../src/solid/create-input"
 import type { Emit } from "../../src/graph"
-import type { SolidGraph, SolidInput } from "../../src"
+import type { SolidSyntaxTree, SolidInput } from "../../src"
 import type { Diagnostic, FixOperation } from "../../src/diagnostic"
 
 const compilerOptions: ts.CompilerOptions = {
@@ -90,23 +91,23 @@ export function parseCode(code: string, filePath = "test.tsx"): SolidInput {
 }
 
 /**
- * Build a SolidGraph from code string.
+ * Build a SolidSyntaxTree from code string.
  */
-export function buildGraph(code: string, filePath = "test.tsx"): SolidGraph {
+export function buildGraph(code: string, filePath = "test.tsx"): SolidSyntaxTree {
   const input = parseCode(code, filePath)
-  return buildSolidGraph(input)
+  return buildSolidSyntaxTree(input, "")
 }
 
 export interface RuleTestResult {
   diagnostics: readonly Diagnostic[]
-  graph: SolidGraph
+  graph: SolidSyntaxTree
   code: string
 }
 
 /**
  * Run a single rule against code.
  */
-export function checkRule(rule: { check: (graph: SolidGraph, emit: Emit) => void }, code: string): RuleTestResult {
+export function checkRule(rule: { check: (graph: SolidSyntaxTree, emit: Emit) => void }, code: string): RuleTestResult {
   const graph = buildGraph(code)
   const diagnostics: Diagnostic[] = []
   rule.check(graph, (d) => diagnostics.push(d))
@@ -131,7 +132,7 @@ export function checkRule(rule: { check: (graph: SolidGraph, emit: Emit) => void
  * ```
  */
 export function createRuleBatch(
-  rule: { check: (graph: SolidGraph, emit: Emit) => void },
+  rule: { check: (graph: SolidSyntaxTree, emit: Emit) => void },
   snippets: readonly string[],
   setupPerSnippet?: readonly ((() => void) | null)[],
 ): readonly RuleTestResult[] {
@@ -149,14 +150,14 @@ export function createRuleBatch(
   }
   const program = createTestProgram(fileMap)
 
-  // Build SolidGraph and run rule for each file independently
+  // Build SolidSyntaxTree and run rule for each file independently
   const results: RuleTestResult[] = []
   const collector: { target: Diagnostic[] | null } = { target: null }
   const collect = (d: Diagnostic) => collector.target!.push(d)
   for (let i = 0; i < snippets.length; i++) {
     const filePath = resolve(`batch_${i}.tsx`)
     const input = createSolidInput(filePath, program)
-    const graph = buildSolidGraph(input)
+    const graph = buildSolidSyntaxTree(input, "")
     const diagnostics: Diagnostic[] = []
     const setup = setupPerSnippet?.[i]
     if (setup) setup()
@@ -194,7 +195,7 @@ export function createRuleBatch(
  * })
  * ```
  */
-export function lazyRuleBatch(rule: { check: (graph: SolidGraph, emit: Emit) => void }): {
+export function lazyRuleBatch(rule: { check: (graph: SolidSyntaxTree, emit: Emit) => void }): {
   add(code: string, setup?: () => void): number
   result(index: number): RuleTestResult
 } {
@@ -282,7 +283,7 @@ export function lazyParseBatch(): {
  */
 export function checkAll(code: string): RuleTestResult {
   const input = parseCode(code)
-  const graph = buildSolidGraph(input)
+  const graph = buildSolidSyntaxTree(input, "")
   const diagnostics: Diagnostic[] = []
   analyzeInput(input, (d) => diagnostics.push(d))
   return { diagnostics, graph, code }

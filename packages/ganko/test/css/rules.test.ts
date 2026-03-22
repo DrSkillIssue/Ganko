@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
-import { analyzeCSSInput, buildCSSGraph } from "../../src/css/plugin"
+import { analyzeCSSInput } from "../../src/css/plugin"
+import { buildCSSResult } from "../../src/css/impl"
 import { selectorMaxAttributeAndUniversal } from "../../src/css/rules/selector"
 import { setActivePolicy } from "../../src/css/policy"
 
@@ -337,7 +338,7 @@ describe("CSS rules", () => {
 
   it("reports attribute and universal selector threshold violations", () => {
     const ds: Diagnostic[] = []
-    const graph = buildCSSGraph({
+    const { workspace: graph } = buildCSSResult({
       files: [{
         path: "test.css",
         content: `

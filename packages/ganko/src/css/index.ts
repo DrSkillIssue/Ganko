@@ -1,4 +1,5 @@
-export { CSSPlugin, analyzeCSSInput, buildCSSGraph } from "./plugin"
+export { CSSPlugin, analyzeCSSInput } from "./plugin"
+export { buildCSSResult } from "./impl"
 export type { CSSBuildContext } from "./build-context"
 export type { CSSInput, CSSOptions } from "./input"
 export type { CSSRule } from "./rule"
