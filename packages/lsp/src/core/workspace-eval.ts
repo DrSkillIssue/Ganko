@@ -140,18 +140,15 @@ export interface WorkspaceEvaluator {
  * @returns Evaluator with request/response interface
  */
 export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEvaluator {
-  const proc = Bun.spawn(["bun", "-e", EVAL_SCRIPT], {
+  const { spawn: nodeSpawn } = require("node:child_process") as typeof import("node:child_process");
+  const proc = nodeSpawn("bun", ["-e", EVAL_SCRIPT], {
     cwd,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (r: WorkspaceEvalResponse) => void; reject: (e: Error) => void }>();
   let buffer = "";
-
-  const reader = proc.stdout.getReader();
 
   function processChunk(chunk: string): void {
     buffer += chunk;
@@ -173,18 +170,14 @@ export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEva
     }
   }
 
-  (async () => {
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      processChunk(decoder.decode(value, { stream: true }));
-    }
+  proc.stdout!.setEncoding("utf-8");
+  proc.stdout!.on("data", (chunk: string) => processChunk(chunk));
+  proc.on("close", () => {
     for (const [, entry] of pending) {
       entry.reject(new Error("workspace evaluator subprocess exited"));
     }
     pending.clear();
-  })();
+  });
 
   return {
     request(req: WorkspaceEvalRequest): Promise<WorkspaceEvalResponse> {
@@ -192,12 +185,12 @@ export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEva
       const reqWithId = { ...req, id };
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        proc.stdin.write(JSON.stringify(reqWithId) + "\n");
+        proc.stdin!.write(JSON.stringify(reqWithId) + "\n");
       });
     },
 
     dispose(): void {
-      proc.stdin.end();
+      proc.stdin!.end();
       proc.kill();
     },
   };
@@ -281,9 +274,10 @@ process.stdout.write(JSON.stringify(res));
 `;
 
   try {
-    const result = Bun.spawnSync(["bun", "-e", script], { cwd });
-    if (result.exitCode !== 0 && result.stdout.length === 0) return null;
-    const text = result.stdout.toString();
+    const { spawnSync: nodeSpawnSync } = require("node:child_process") as typeof import("node:child_process");
+    const result = nodeSpawnSync("bun", ["-e", script], { cwd, encoding: "utf-8", timeout: 30000 });
+    if (result.status !== 0 && (!result.stdout || result.stdout.length === 0)) return null;
+    const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
     if (text.length === 0) return null;
     return JSON.parse(text);
   } catch {

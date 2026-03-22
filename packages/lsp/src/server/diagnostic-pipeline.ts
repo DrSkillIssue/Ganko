@@ -105,7 +105,7 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
 
   if (log.isLevelEnabled(Level.Debug)) {
     const elapsed = (performance.now() - t0).toFixed(1);
-    log.debug(`pipeline: ${key} single=${singleFile.length} cross=${crossFile.length} elapsed=${elapsed}ms`);
+    log.debug(`pipeline: ${key} single=${singleFile.length} elapsed=${elapsed}ms`);
   }
 }
 

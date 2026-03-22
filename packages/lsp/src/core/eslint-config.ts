@@ -186,6 +186,9 @@ export async function loadESLintConfig(
 
   const response = await evaluateWorkspace(rootPath, { type: "eslint", eslintConfigPath: configPath }, log);
   if (response === null || response.eslint === undefined) {
+    if (response?.error && log?.isLevelEnabled(Level.Warning)) {
+      log.warning(`eslintConfig: evaluation failed: ${response.error}`);
+    }
     return EMPTY_ESLINT_RESULT;
   }
 

@@ -238,6 +238,9 @@ export async function runLint(args: readonly string[]): Promise<void> {
       return process.exit(0);
     }
 
+    log.info(`project root: ${projectRoot}`);
+    log.info(`files to lint: ${filesToLint.length}`);
+
     const allDiagnostics: Diagnostic[] = [];
     const program = project.getProgram();
     const t0 = performance.now();
