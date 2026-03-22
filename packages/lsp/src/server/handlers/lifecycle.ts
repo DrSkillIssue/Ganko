@@ -22,6 +22,8 @@ import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../cor
 import type { ServerContext } from "../server";
 import type { PhaseEnriched } from "../session";
 import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
+import { buildFullCompilation } from "../../core/compilation-builder";
+import { createCompilationTracker } from "@drskillissue/ganko";
 import { createCancellationSource } from "../cancellation";
 import { SessionMutator } from "../session-mutator";
 import type { Logger } from "../../core/logger";
@@ -246,15 +248,25 @@ export async function handleInitialized(
     batchableValidator: enrichment.batchableValidator,
   };
   context.phase = enrichedPhase;
+
+  // Build full compilation from workspace files and populate the tracker.
+  // The tracker starts empty — it must be populated with all workspace
+  // solid + CSS trees so that IncrementalAnalyzer can run cross-file rules.
+  {
+    const { compilation } = buildFullCompilation({
+      solidFiles: enrichment.registry.solidFiles,
+      cssFiles: enrichment.registry.cssFiles,
+      getProgram: () => project.getProgram(),
+      tailwindValidator: enrichment.tailwindValidator,
+      externalCustomProperties: enrichment.externalCustomProperties,
+      resolveContent: context.resolveContent,
+      logger: log,
+    });
+    context.graphCache = createCompilationTracker(compilation);
+  }
+
   // Rebuild session with enrichment data (file sets, tailwind, etc.)
   { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
-
-  /* Invalidate any cross-file results that may have been cached during the
-     enrichment window. Even though fileIndex is set atomically after tailwind
-     resolves, belt-and-suspenders: force the re-diagnosis loop to rebuild
-     cross-file results with the fully-enriched context. */
-  // Force cross-file re-analysis by clearing cached results
-  context.graphCache.setCachedCrossFileResults([]);
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 

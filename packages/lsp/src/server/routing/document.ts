@@ -65,7 +65,7 @@ export function setupDocumentHandlers(context: ServerContext): void {
       if (token.isCancelled) break;
       const change = changes[i];
       if (!change) continue;
-      runDiagnosticPipeline({ context, project, path: change.path, content: change.content, includeCrossFile: false, token });
+      runDiagnosticPipeline({ context, project, path: change.path, content: change.content, includeCrossFile: true, token });
       diagnosed.add(change.path);
     }
 

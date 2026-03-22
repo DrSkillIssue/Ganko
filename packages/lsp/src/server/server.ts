@@ -113,7 +113,7 @@ export interface ServerContext {
   readonly documents: FilteredTextDocuments
   readonly log: LeveledLogger
   readonly serverState: ServerState
-  readonly graphCache: CompilationTracker
+  graphCache: CompilationTracker
   readonly gcTimer: GcTimer
   readonly memoryWatcher: MemoryWatcher
   readonly identity: ResourceIdentity

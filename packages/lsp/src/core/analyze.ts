@@ -94,7 +94,8 @@ function rebuildAndRunDispatcher(
 
   const dispatcher = createAnalysisDispatcher();
   for (let i = 0; i < allRules.length; i++) {
-    dispatcher.register(allRules[i]);
+    const rule = allRules[i];
+    if (rule) dispatcher.register(rule);
   }
 
   const result = dispatcher.run(compilation);

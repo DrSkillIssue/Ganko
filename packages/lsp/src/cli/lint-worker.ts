@@ -7,7 +7,7 @@
  */
 import { parentPort } from "node:worker_threads";
 import ts from "typescript";
-import { buildSolidGraph, runSolidRules, createSolidInput, createOverrideEmit } from "@drskillissue/ganko";
+import { buildSolidSyntaxTree, runSolidRules, createSolidInput, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
@@ -52,7 +52,7 @@ function runLintTask(task: WorkerTask): readonly WorkerResult[] {
     if (!sourceFile) continue;
 
     const input = createSolidInput(key, program);
-    const graph = buildSolidGraph(input);
+    const graph = buildSolidSyntaxTree(input, "");
 
     diagnostics = [];
     runSolidRules(graph, input.sourceFile, baseEmit);
