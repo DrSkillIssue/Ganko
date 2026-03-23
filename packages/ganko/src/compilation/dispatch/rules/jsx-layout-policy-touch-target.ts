@@ -19,7 +19,7 @@ const messages = {
   noReservedInlineSize: "Interactive element `<{{tag}}>` has no declared width (minimum `{{min}}px` required by policy `{{policy}}`). The element is content-sized and may not meet the touch-target threshold.",
 } as const
 
-const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea", "label", "summary"])
+const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea", "summary"])
 const INTERACTIVE_ARIA_ROLES = new Set([
   "button", "link", "checkbox", "radio", "combobox", "listbox",
   "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "tab",
