@@ -1,6 +1,6 @@
 {
   "name": "@drskillissue/ganko",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "Static analysis SDK for Solid.js — graphs, rules, ESLint adapter",
   "license": "MIT",
   "type": "module",
