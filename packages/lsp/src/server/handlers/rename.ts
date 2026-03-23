@@ -13,7 +13,7 @@ import type {
 import ts from "typescript";
 import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/prepareRename request.
@@ -23,7 +23,8 @@ export function handlePrepareRename(
   ctx: FeatureHandlerContext,
 ): { range: Range; placeholder: string } | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;
@@ -55,7 +56,8 @@ export function handleRename(
   ctx: FeatureHandlerContext,
 ): WorkspaceEdit | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;

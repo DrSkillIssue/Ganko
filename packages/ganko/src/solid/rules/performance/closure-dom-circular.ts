@@ -159,7 +159,7 @@ export const closureDomCircular = defineSolidRule({
         if (readStart >= closureStart && readEnd <= closureEnd) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               pa.node,
               graph.sourceFile,
               "closure-dom-circular",

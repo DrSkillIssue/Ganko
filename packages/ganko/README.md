@@ -299,8 +299,8 @@ bun run --cwd packages/ganko generate
 <!-- BEGIN AUTO-GENERATED:rule-catalog -->
 Totals:
 
-- 164 rules total
-- 101 Solid rules, 32 CSS rules, 31 cross-file rules
+- 165 rules total
+- 101 Solid rules, 0 CSS rules, 64 cross-file rules
 - 24 fixable rules
 
 Category breakdown:
@@ -313,7 +313,7 @@ Category breakdown:
 | `css-cascade` | 5 |
 | `css-jsx` | 15 |
 | `css-layout` | 15 |
-| `css-property` | 7 |
+| `css-property` | 8 |
 | `css-selector` | 5 |
 | `css-structure` | 4 |
 | `jsx` | 10 |

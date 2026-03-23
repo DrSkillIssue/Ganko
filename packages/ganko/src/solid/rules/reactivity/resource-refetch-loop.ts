@@ -19,7 +19,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import type { VariableEntity, ReadEntity } from "../../entities/variable";
@@ -272,7 +272,7 @@ export const resourceRefetchLoop = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             read.node,
             graph.sourceFile,
             "resource-refetch-loop",

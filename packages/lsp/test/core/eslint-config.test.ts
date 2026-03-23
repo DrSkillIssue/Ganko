@@ -1,299 +1,208 @@
 /**
- * ESLint Config Reader Tests
+ * ESLint Config Extraction Tests
  *
- * Tests for loading ESLint flat config files and extracting ganko
- * rule overrides (filtered against manifest defaults), global ignores,
- * and the VS Code priority merge.
+ * Tests extractOverrides and extractGlobalIgnores directly with config objects.
+ * No subprocess spawning — pure unit tests of the extraction logic.
  */
-
 import { describe, it, expect } from "vitest";
-import { join } from "path";
-import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../src/core/eslint-config";
+import { extractOverrides, extractGlobalIgnores, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../src/core/eslint-config";
 
-const FIXTURES_DIR = join(__dirname, "../fixtures/eslint-configs");
+describe("extractOverrides", () => {
+  it("extracts solid/ rules that differ from manifest defaults", () => {
+    const overrides = extractOverrides([
+      { rules: { "no-console": "error", "solid/signal-call": "error", "solid/no-banner-comments": "off" } },
+      { rules: { "solid/derived-signal": "warn", "solid/signal-call": "warn" } },
+    ]);
 
-describe("loadESLintConfig", () => {
-  describe("flat array config", () => {
-    it("extracts solid/ rules that differ from manifest defaults", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-
-      expect(result.overrides).toHaveProperty("signal-call");
-      expect(result.overrides).toHaveProperty("no-banner-comments");
-      expect(result.overrides).toHaveProperty("derived-signal");
-    });
-
-    it("excludes non-solid rules", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-
-      expect(result.overrides).not.toHaveProperty("no-console");
-    });
-
-    it("applies later config objects over earlier ones", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-
-      /** flat-array.mjs: first config sets signal-call to "error", second overrides to "warn" */
-      expect(result.overrides["signal-call"]).toBe("warn");
-    });
-
-    it("preserves rules not overridden by later configs", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-
-      expect(result.overrides["no-banner-comments"]).toBe("off");
-      expect(result.overrides["derived-signal"]).toBe("warn");
-    });
-
-    it("returns empty globalIgnores when config has none", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-
-      expect(result.globalIgnores).toHaveLength(0);
-    });
+    expect(overrides).toHaveProperty("signal-call");
+    expect(overrides).toHaveProperty("no-banner-comments");
+    expect(overrides).toHaveProperty("derived-signal");
   });
 
-  describe("numeric severity", () => {
-    it("filters out numeric severity matching manifest default", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "numeric-severity.mjs");
+  it("excludes non-solid rules", () => {
+    const overrides = extractOverrides([
+      { rules: { "no-console": "error", "solid/signal-call": "warn" } },
+    ]);
 
-      /** signal-call: 2 → "error" matches default "error" → filtered */
-      expect(result.overrides).not.toHaveProperty("signal-call");
-    });
-
-    it("maps 0 to off when it differs from default", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "numeric-severity.mjs");
-
-      expect(result.overrides["no-banner-comments"]).toBe("off");
-    });
-
-    it("handles array format [severity, options]", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "numeric-severity.mjs");
-
-      /** [1, { allowInline: true }] → "warn" ≠ default "error" → kept */
-      expect(result.overrides["derived-signal"]).toBe("warn");
-    });
+    expect(overrides).not.toHaveProperty("no-console");
   });
 
-  describe("single object config", () => {
-    it("filters out rules matching manifest default severity", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "single-object.mjs");
+  it("applies later config objects over earlier ones", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/signal-call": "error" } },
+      { rules: { "solid/signal-call": "warn" } },
+    ]);
 
-      /** signal-call: "error" matches default "error" → filtered */
-      expect(result.overrides).not.toHaveProperty("signal-call");
-    });
-
-    it("keeps rules differing from manifest default", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "single-object.mjs");
-
-      expect(result.overrides["derived-signal"]).toBe("off");
-    });
-
-    it("excludes non-solid rules from single object", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "single-object.mjs");
-
-      expect(result.overrides).not.toHaveProperty("no-unused-vars");
-    });
+    expect(overrides["signal-call"]).toBe("warn");
   });
 
-  describe("no solid rules", () => {
-    it("returns empty overrides when config has no solid/ rules", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "no-solid-rules.mjs");
+  it("preserves rules not overridden by later configs", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/no-banner-comments": "off", "solid/derived-signal": "warn" } },
+      { rules: { "solid/signal-call": "warn" } },
+    ]);
 
-      expect(Object.keys(result.overrides)).toHaveLength(0);
-    });
+    expect(overrides["no-banner-comments"]).toBe("off");
+    expect(overrides["derived-signal"]).toBe("warn");
   });
 
-  describe("empty config", () => {
-    it("returns empty result for empty config array", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "empty.mjs");
+  it("filters out numeric severity matching manifest default", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/signal-call": 2 } },
+    ]);
 
-      expect(Object.keys(result.overrides)).toHaveLength(0);
-      expect(result.globalIgnores).toHaveLength(0);
-    });
+    expect(overrides).not.toHaveProperty("signal-call");
   });
 
-  describe("missing config", () => {
-    it("returns EMPTY_ESLINT_RESULT when explicit path does not exist", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "nonexistent.mjs");
+  it("maps 0 to off when it differs from default", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/no-banner-comments": 0 } },
+    ]);
 
-      expect(result).toBe(EMPTY_ESLINT_RESULT);
-    });
-
-    it("returns EMPTY_ESLINT_RESULT when no config found in directory", async () => {
-      const result = await loadESLintConfig(join(FIXTURES_DIR, "nonexistent-dir"));
-
-      expect(result).toBe(EMPTY_ESLINT_RESULT);
-    });
+    expect(overrides["no-banner-comments"]).toBe("off");
   });
 
-  describe("default severity filtering", () => {
-    it("filters out all rules matching their manifest default severity", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "recommended-spread.mjs");
+  it("handles array format [severity, options]", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/derived-signal": [1, { allowInline: true }] } },
+    ]);
 
-      /** signal-call "error" and no-banner-comments "error" match defaults → filtered */
-      expect(result.overrides).not.toHaveProperty("signal-call");
-      expect(result.overrides).not.toHaveProperty("no-banner-comments");
-    });
-
-    it("keeps rules whose final severity differs from manifest default", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "recommended-spread.mjs");
-
-      /** missing-jsdoc-comments "off" ≠ default "error" → kept */
-      expect(result.overrides["missing-jsdoc-comments"]).toBe("off");
-    });
-
-    it("keeps recommended rules that set non-default severity", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "recommended-spread.mjs");
-
-      /** derived-signal "warn" ≠ default "error" → kept */
-      expect(result.overrides["derived-signal"]).toBe("warn");
-    });
-
-    it("produces exactly 2 overrides from a config with 2 non-default rules", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "recommended-spread.mjs");
-
-      expect(Object.keys(result.overrides)).toHaveLength(2);
-    });
+    expect(overrides["derived-signal"]).toBe("warn");
   });
 
-  describe("global ignores", () => {
-    it("extracts global ignore patterns from ignores-only config objects", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "global-ignores.mjs");
+  it("filters out all rules matching their manifest default severity", () => {
+    const overrides = extractOverrides([
+      { plugins: { solid: {} }, files: true, rules: { "solid/signal-call": "error", "solid/no-banner-comments": "error", "solid/derived-signal": "warn" } },
+      { rules: { "solid/missing-jsdoc-comments": "off" } },
+    ]);
 
-      expect(result.globalIgnores).toEqual(["backend/**", "scripts/**"]);
-    });
-
-    it("extracts overrides alongside global ignores", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "global-ignores.mjs");
-
-      expect(result.overrides["signal-call"]).toBe("warn");
-    });
-
-    it("does not treat scoped ignores (with files key) as global", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "scoped-ignores.mjs");
-
-      expect(result.globalIgnores).toHaveLength(0);
-    });
-
-    it("still extracts overrides from scoped-ignores config", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "scoped-ignores.mjs");
-
-      expect(result.overrides["signal-call"]).toBe("warn");
-    });
-
-    it("does not treat ignores with languageOptions as global (regression: passthrough keys)", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "global-ignores-with-language-options.mjs");
-
-      /** The ignores entry has languageOptions — per ESLint semantics it is NOT global. */
-      expect(result.globalIgnores).toHaveLength(0);
-      expect(result.overrides["signal-call"]).toBe("warn");
-    });
+    expect(overrides).not.toHaveProperty("signal-call");
+    expect(overrides).not.toHaveProperty("no-banner-comments");
   });
 
-  describe("non-standard rule values (regression: strict schema)", () => {
-    it("extracts ganko overrides even when other rules have boolean values", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "boolean-rule-value.mjs");
+  it("keeps rules whose final severity differs from manifest default", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/missing-jsdoc-comments": "off" } },
+    ]);
 
-      /** A boolean rule value from another plugin must not cause the entire config to be rejected. */
-      expect(result.overrides["signal-call"]).toBe("warn");
-    });
+    expect(overrides["missing-jsdoc-comments"]).toBe("off");
   });
 
-  describe("relative imports (regression: importFresh must preserve directory)", () => {
-    it("loads a config that uses a relative import to a sibling module", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "relative-import.mjs");
+  it("returns empty overrides when config has no solid/ rules", () => {
+    const overrides = extractOverrides([
+      { rules: { "no-console": "error", "react/jsx-no-undef": "warn" } },
+    ]);
 
-      /** If importFresh copies the file to tmpdir(), relative import fails
-       * and EMPTY_ESLINT_RESULT is returned — both overrides would be missing. */
-      expect(result.overrides["signal-call"]).toBe("warn");
-      expect(result.overrides["no-banner-comments"]).toBe("off");
-    });
-
-    it("does not leave temporary files in the fixtures directory", async () => {
-      await loadESLintConfig(FIXTURES_DIR, "relative-import.mjs");
-
-      const { readdirSync } = await import("node:fs");
-      const files = readdirSync(FIXTURES_DIR);
-      const tempFiles = files.filter((f) => f.startsWith(".ganko-eslint-"));
-      expect(tempFiles).toHaveLength(0);
-    });
+    expect(Object.keys(overrides)).toHaveLength(0);
   });
 
-  describe("CommonJS config (regression: importFresh must preserve .cjs extension)", () => {
-    it("loads a .cjs config and extracts overrides", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "cjs-config.cjs");
-
-      /** If importFresh renames .cjs to .mjs, the CJS module.exports syntax
-       * is interpreted as ESM, causing a parse error and EMPTY_ESLINT_RESULT. */
-      expect(result.overrides["signal-call"]).toBe("warn");
-      expect(result.overrides["no-banner-comments"]).toBe("off");
-    });
+  it("returns empty for empty config array", () => {
+    const overrides = extractOverrides([]);
+    expect(Object.keys(overrides)).toHaveLength(0);
   });
 
-  describe("function export (regression: Zod rejects non-object/array exports)", () => {
-    it("returns EMPTY_ESLINT_RESULT for a config that exports a function", async () => {
-      const result = await loadESLintConfig(FIXTURES_DIR, "function-export.mjs");
-
-      /** A function export is not a valid ESLint flat config. Zod validation
-       * must reject it gracefully rather than crashing. */
-      expect(result).toBe(EMPTY_ESLINT_RESULT);
-    });
+  it("returns empty for config without rules", () => {
+    const overrides = extractOverrides([{}]);
+    expect(Object.keys(overrides)).toHaveLength(0);
   });
 
-  describe("config reload (regression: importFresh cache-busting)", () => {
-    it("returns fresh results when the same config is loaded twice", async () => {
-      const first = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
-      const second = await loadESLintConfig(FIXTURES_DIR, "flat-array.mjs");
+  it("handles single object config", () => {
+    const overrides = extractOverrides([
+      { rules: { "solid/signal-call": "error", "solid/derived-signal": "off", "no-unused-vars": "warn" } },
+    ]);
 
-      /** Both calls must return equivalent results — importFresh must bypass
-       * the module cache on each call. */
-      expect(second.overrides["signal-call"]).toBe(first.overrides["signal-call"]);
-      expect(Object.keys(second.overrides)).toEqual(Object.keys(first.overrides));
-    });
+    expect(overrides).not.toHaveProperty("signal-call");
+    expect(overrides["derived-signal"]).toBe("off");
+    expect(overrides).not.toHaveProperty("no-unused-vars");
+  });
+
+  it("extracts ganko overrides even when other rules have boolean values", () => {
+    const overrides = extractOverrides([
+      { rules: { "some-plugin/rule": true, "solid/signal-call": "warn" } },
+    ]);
+
+    expect(overrides["signal-call"]).toBe("warn");
+  });
+});
+
+describe("extractGlobalIgnores", () => {
+  it("extracts global ignore patterns from ignores-only config objects", () => {
+    const ignores = extractGlobalIgnores([
+      { ignores: ["backend/**", "scripts/**"] },
+      { rules: { "solid/signal-call": "warn" } },
+    ]);
+
+    expect(ignores).toEqual(["backend/**", "scripts/**"]);
+  });
+
+  it("returns empty when config has no ignores", () => {
+    const ignores = extractGlobalIgnores([
+      { rules: { "solid/signal-call": "warn" } },
+    ]);
+
+    expect(ignores).toHaveLength(0);
+  });
+
+  it("does not treat scoped ignores (with files key) as global", () => {
+    const ignores = extractGlobalIgnores([
+      { ignores: ["dist/**"], files: true },
+    ]);
+
+    expect(ignores).toHaveLength(0);
+  });
+
+  it("does not treat ignores with other keys as global", () => {
+    const ignores = extractGlobalIgnores([
+      { ignores: ["dist/**"], rules: { "solid/signal-call": "warn" } },
+    ]);
+
+    expect(ignores).toHaveLength(0);
+  });
+
+  it("returns empty for empty config array", () => {
+    expect(extractGlobalIgnores([])).toHaveLength(0);
   });
 });
 
 describe("mergeOverrides", () => {
   it("returns vscode overrides when eslint overrides are empty", () => {
     const vscode = { "signal-call": "error" as const };
-    const result = mergeOverrides({}, vscode);
-
-    expect(result).toBe(vscode);
+    expect(mergeOverrides({}, vscode)).toBe(vscode);
   });
 
   it("returns eslint overrides when vscode overrides are empty", () => {
     const eslint = { "signal-call": "warn" as const };
-    const result = mergeOverrides(eslint, {});
-
-    expect(result).toBe(eslint);
+    expect(mergeOverrides(eslint, {})).toBe(eslint);
   });
 
   it("vscode overrides take priority over eslint overrides", () => {
-    const eslint = {
-      "signal-call": "error" as const,
-      "derived-signal": "warn" as const,
-    };
-    const vscode = {
-      "signal-call": "off" as const,
-    };
-
-    const result = mergeOverrides(eslint, vscode);
+    const result = mergeOverrides(
+      { "signal-call": "error" as const, "derived-signal": "warn" as const },
+      { "signal-call": "off" as const },
+    );
 
     expect(result["signal-call"]).toBe("off");
     expect(result["derived-signal"]).toBe("warn");
   });
 
   it("includes rules from both sources", () => {
-    const eslint = { "signal-call": "error" as const };
-    const vscode = { "derived-signal": "warn" as const };
-
-    const result = mergeOverrides(eslint, vscode);
+    const result = mergeOverrides(
+      { "signal-call": "error" as const },
+      { "derived-signal": "warn" as const },
+    );
 
     expect(result["signal-call"]).toBe("error");
     expect(result["derived-signal"]).toBe("warn");
   });
 
   it("returns empty object when both are empty", () => {
-    const result = mergeOverrides({}, {});
+    expect(Object.keys(mergeOverrides({}, {}))).toHaveLength(0);
+  });
+});
 
-    /** Fast path: returns vscodeOverrides directly */
-    expect(Object.keys(result)).toHaveLength(0);
+describe("EMPTY_ESLINT_RESULT", () => {
+  it("has empty overrides and globalIgnores", () => {
+    expect(Object.keys(EMPTY_ESLINT_RESULT.overrides)).toHaveLength(0);
+    expect(EMPTY_ESLINT_RESULT.globalIgnores).toHaveLength(0);
   });
 });

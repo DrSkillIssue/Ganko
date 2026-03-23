@@ -1,4 +1,4 @@
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import type { DeclarationEntity } from "../entities";
 import { isUtilityClass } from "./pattern";
 

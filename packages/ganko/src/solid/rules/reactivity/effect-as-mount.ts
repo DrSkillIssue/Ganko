@@ -32,7 +32,7 @@
 import ts from "typescript";
 import type { Fix } from "../../../diagnostic";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { FunctionEntity, VariableEntity, ScopeEntity } from "../../entities";
 import { defineSolidRule } from "../../rule";
 import { buildSolidImportFix } from "../util";
@@ -95,7 +95,7 @@ export const effectAsMount = defineSolidRule({
       const name = calleeName(call.node);
       const fix = buildFix(call.node, name, graph);
       const resolved = resolveMessage(messages.effectAsMount, { primitive: name });
-      emit(createDiagnostic(graph.file, call.node, graph.sourceFile, "effect-as-mount", "effectAsMount", resolved, "error", fix));
+      emit(createDiagnostic(graph.filePath, call.node, graph.sourceFile, "effect-as-mount", "effectAsMount", resolved, "error", fix));
     }
   },
 });

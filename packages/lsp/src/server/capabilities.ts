@@ -5,10 +5,10 @@
  * This determines what features the server advertises to clients.
  *
  * Removed features (pending re-implementation):
- * - documentSymbolProvider (required SolidGraph)
+ * - documentSymbolProvider (required SolidSyntaxTree)
  * - workspaceSymbolProvider (required CrossFileIndex)
- * - semanticTokensProvider (required SolidGraph)
- * - inlayHintProvider (required SolidGraph)
+ * - semanticTokensProvider (required SolidSyntaxTree)
+ * - inlayHintProvider (required SolidSyntaxTree)
  */
 
 import {

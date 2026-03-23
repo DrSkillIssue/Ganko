@@ -5,7 +5,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getContainingFunction, getScopeFor, getVariableByNameInScope, iterateVariables } from "../../queries"
@@ -158,7 +158,7 @@ export const avoidQuadraticPairComparison = defineSolidRule({
 
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               inner.forLoop,
               graph.sourceFile,
               "avoid-quadratic-pair-comparison",

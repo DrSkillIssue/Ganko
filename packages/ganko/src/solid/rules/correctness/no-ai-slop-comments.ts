@@ -148,7 +148,7 @@ export const noAiSlopComments = defineSolidRule({
 
         emit(
           createDiagnosticFromComment(
-            graph.file,
+            graph.filePath,
             comment,
             "no-ai-slop-comments",
             "forbiddenWord",

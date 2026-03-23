@@ -47,7 +47,7 @@ export const noPerCharSubstringScan = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "no-per-char-substring-scan",

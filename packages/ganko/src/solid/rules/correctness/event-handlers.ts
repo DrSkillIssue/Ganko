@@ -370,7 +370,7 @@ export const eventHandlers = defineSolidRule({
       if (staticIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             staticIssue.node,
             sourceFile,
             "event-handlers",
@@ -387,7 +387,7 @@ export const eventHandlers = defineSolidRule({
       if (nonstandardIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             nonstandardIssue.node,
             sourceFile,
             "event-handlers",
@@ -421,7 +421,7 @@ export const eventHandlers = defineSolidRule({
       if (staticIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             staticIssue.node,
             sourceFile,
             "event-handlers",
@@ -439,7 +439,7 @@ export const eventHandlers = defineSolidRule({
       if (nonstandardIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             nonstandardIssue.node,
             sourceFile,
             "event-handlers",
@@ -456,7 +456,7 @@ export const eventHandlers = defineSolidRule({
       if (capitalizationIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             capitalizationIssue.node,
             sourceFile,
             "event-handlers",
@@ -473,7 +473,7 @@ export const eventHandlers = defineSolidRule({
       if (ambiguousIssue) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             ambiguousIssue.node,
             sourceFile,
             "event-handlers",

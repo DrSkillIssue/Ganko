@@ -110,7 +110,7 @@ export const selfReferencingStore = defineSolidRule({
         if (containsAnyIdentifier(nodeToCheck, storeNames)) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               callNode,
               graph.sourceFile,
               "self-referencing-store",

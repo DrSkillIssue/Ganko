@@ -49,7 +49,7 @@ export const avoidSpreadSortMapJoinPipeline = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           join.node,
           graph.sourceFile,
           "avoid-spread-sort-map-join-pipeline",

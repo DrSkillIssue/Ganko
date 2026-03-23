@@ -17,7 +17,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import type { Diagnostic, Fix, FixOperation } from "@drskillissue/ganko";
 import type { FeatureHandlerContext } from "./handler-context";
 import { toLSPDiagnostic } from "./diagnostics";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 
 const KIND_QUICKFIX = CodeActionKind.QuickFix;
 const KIND_SUPPRESS = `${CodeActionKind.QuickFix}.suppress`;
@@ -32,7 +32,8 @@ export function handleCodeAction(
   ctx: FeatureHandlerContext,
 ): CodeAction[] | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const diagnostics = ctx.getDiagnostics(path);
   if (diagnostics.length === 0) return null;
 

@@ -6,7 +6,7 @@
 import type { DefinitionParams, Definition } from "vscode-languageserver";
 import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset, textSpanToRange } from "./ts-utils";
-import { uriToPath, pathToUri, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, pathToUri, Level } from "@drskillissue/ganko-shared";
 
 /**
  * Handle textDocument/definition request.
@@ -16,7 +16,8 @@ export function handleDefinition(
   ctx: FeatureHandlerContext,
 ): Definition | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) {
     if (log.isLevelEnabled(Level.Trace)) log.trace(`definition: no TS file for ${path}`);

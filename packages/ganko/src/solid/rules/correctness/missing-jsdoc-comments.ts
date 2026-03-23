@@ -271,7 +271,7 @@ export const missingJsdocComments = defineSolidRule({
 
         const name = cls.name ?? "<anonymous>"
         emit(
-          createDiagnostic(graph.file, cls.node, sourceFile, "missing-jsdoc-comments", "missingClassJsdoc", resolveMessage(messages.missingClassJsdoc, { name }), "error"),
+          createDiagnostic(graph.filePath, cls.node, sourceFile, "missing-jsdoc-comments", "missingClassJsdoc", resolveMessage(messages.missingClassJsdoc, { name }), "error"),
         )
       }
     }
@@ -282,7 +282,7 @@ export const missingJsdocComments = defineSolidRule({
 
       const name = prop.name ?? "<anonymous>"
       emit(
-        createDiagnostic(graph.file, prop.node, sourceFile, "missing-jsdoc-comments", "missingPropertyJsdoc", resolveMessage(messages.missingPropertyJsdoc, { name }), "error"),
+        createDiagnostic(graph.filePath, prop.node, sourceFile, "missing-jsdoc-comments", "missingPropertyJsdoc", resolveMessage(messages.missingPropertyJsdoc, { name }), "error"),
       )
     }
 
@@ -296,7 +296,7 @@ export const missingJsdocComments = defineSolidRule({
       const jsDocComment = findJsDoc(fn.declarationNode, comments, sourceFile)
 
       if (jsDocComment === null) {
-        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingJsdoc", resolveMessage(messages.missingJsdoc, { name }), "error"))
+        emit(createDiagnostic(graph.filePath, fn.node, sourceFile, "missing-jsdoc-comments", "missingJsdoc", resolveMessage(messages.missingJsdoc, { name }), "error"))
         continue
       }
 
@@ -309,22 +309,22 @@ export const missingJsdocComments = defineSolidRule({
           if (!param) continue;
           if (param.name !== null && !jsDoc.params.has(param.name)) {
             emit(
-              createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingParam", resolveMessage(messages.missingParam, { name, param: param.name }), "error"),
+              createDiagnostic(graph.filePath, fn.node, sourceFile, "missing-jsdoc-comments", "missingParam", resolveMessage(messages.missingParam, { name, param: param.name }), "error"),
             )
           }
         }
       }
 
       if (options.requireReturn && fn.hasNonVoidReturn && !jsDoc.hasReturn) {
-        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingReturn", resolveMessage(messages.missingReturn, { name }), "error"))
+        emit(createDiagnostic(graph.filePath, fn.node, sourceFile, "missing-jsdoc-comments", "missingReturn", resolveMessage(messages.missingReturn, { name }), "error"))
       }
 
       if (options.requireThrows && fn.hasThrowStatement && !jsDoc.hasThrows) {
-        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingThrows", resolveMessage(messages.missingThrows, { name }), "error"))
+        emit(createDiagnostic(graph.filePath, fn.node, sourceFile, "missing-jsdoc-comments", "missingThrows", resolveMessage(messages.missingThrows, { name }), "error"))
       }
 
       if (options.requireExample && !jsDoc.hasExample) {
-        emit(createDiagnostic(graph.file, fn.node, sourceFile, "missing-jsdoc-comments", "missingExample", resolveMessage(messages.missingExample, { name }), "error"))
+        emit(createDiagnostic(graph.filePath, fn.node, sourceFile, "missing-jsdoc-comments", "missingExample", resolveMessage(messages.missingExample, { name }), "error"))
       }
     }
   },

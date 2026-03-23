@@ -77,7 +77,7 @@ export const unboundedCollection = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           diagNode,
           graph.sourceFile,
           "unbounded-collection",

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type { Diagnostic } from "../../src/diagnostic"
-import { analyzeCSSInput, buildCSSGraph } from "../../src/css/plugin"
-import { selectorMaxAttributeAndUniversal } from "../../src/css/rules/selector"
+import { createCSSInput } from "../../src/css/input"
+import type { CSSInputBuilder } from "../../src/css/input"
+import { buildCSSResult } from "../../src/css/impl"
+import { createStyleCompilation } from "../../src/compilation/core/compilation"
+import { createAnalysisDispatcher } from "../../src/compilation/dispatch/dispatcher"
+import { allRules } from "../../src/compilation/dispatch/rules"
 import { setActivePolicy } from "../../src/css/policy"
 
 function first(arr: readonly Diagnostic[]): Diagnostic {
@@ -10,28 +14,30 @@ function first(arr: readonly Diagnostic[]): Diagnostic {
   return item
 }
 
-function lint(css: string): readonly Diagnostic[] {
-  const ds: Diagnostic[] = []
-
-  analyzeCSSInput(
-    {
-      files: [{ path: "test.css", content: css }],
-    },
-    (d) => ds.push(d),
-  )
-
-  return ds
+function runDispatcher(input: CSSInputBuilder, severityOverrides?: Record<string, "error" | "warn" | "off">): readonly Diagnostic[] {
+  const { trees } = buildCSSResult(input)
+  let compilation = createStyleCompilation()
+  compilation = compilation.withCSSTrees(trees)
+  const dispatcher = createAnalysisDispatcher()
+  for (let i = 0; i < allRules.length; i++) {
+    const rule = allRules[i]
+    if (!rule) continue
+    const override = severityOverrides?.[rule.id]
+    if (override !== undefined) {
+      dispatcher.register({ ...rule, severity: override })
+    } else {
+      dispatcher.register(rule)
+    }
+  }
+  return dispatcher.run(compilation).diagnostics
 }
 
-function lintFiles(files: readonly { path: string; content: string }[]): readonly Diagnostic[] {
-  const ds: Diagnostic[] = []
+function lint(css: string, severityOverrides?: Record<string, "error" | "warn" | "off">): readonly Diagnostic[] {
+  return runDispatcher(createCSSInput([{ path: "test.css", content: css }]), severityOverrides)
+}
 
-  analyzeCSSInput(
-    { files },
-    (d) => ds.push(d),
-  )
-
-  return ds
+function lintFiles(files: readonly { path: string; content: string }[], severityOverrides?: Record<string, "error" | "warn" | "off">): readonly Diagnostic[] {
+  return runDispatcher(createCSSInput(files), severityOverrides)
 }
 
 describe("CSS rules", () => {
@@ -336,22 +342,15 @@ describe("CSS rules", () => {
   })
 
   it("reports attribute and universal selector threshold violations", () => {
-    const ds: Diagnostic[] = []
-    const graph = buildCSSGraph({
-      files: [{
-        path: "test.css",
-        content: `
-          [data-state="open"] .item {
-            color: red;
-          }
+    const ds = lint(`
+      [data-state="open"] .item {
+        color: red;
+      }
 
-          * .card {
-            color: blue;
-          }
-        `,
-      }],
-    })
-    selectorMaxAttributeAndUniversal.check(graph, (d) => ds.push(d))
+      * .card {
+        color: blue;
+      }
+    `, { "selector-max-attribute-and-universal": "warn" })
 
     const selectorThresholds = ds.filter((d) => d.rule === "selector-max-attribute-and-universal")
     expect(selectorThresholds).toHaveLength(2)
@@ -1289,46 +1288,17 @@ describe("CSS policy rules", () => {
 
   describe("library analysis (external custom properties)", () => {
     it("resolves external custom properties provided via externalCustomProperties", () => {
-      const ds: Diagnostic[] = []
-      analyzeCSSInput(
-        {
-          files: [
-            {
-              path: "component.css",
-              content: `
-                .accordion-content {
-                  height: var(--kb-accordion-content-height);
-                }
-              `,
-            },
-          ],
-          externalCustomProperties: new Set(["--kb-accordion-content-height"]),
-        },
-        (d) => ds.push(d),
-      )
+      const input = createCSSInput([{ path: "component.css", content: `.accordion-content { height: var(--kb-accordion-content-height); }` }])
+      input.externalCustomProperties = new Set(["--kb-accordion-content-height"])
+      const ds = runDispatcher(input)
       const unresolved = ds.filter((d) => d.rule === "no-unresolved-custom-properties")
       expect(unresolved).toHaveLength(0)
     })
 
     it("still reports unresolved properties not in external set", () => {
-      const ds: Diagnostic[] = []
-      analyzeCSSInput(
-        {
-          files: [
-            {
-              path: "component.css",
-              content: `
-                .accordion-content {
-                  height: var(--kb-accordion-content-height);
-                  width: var(--kb-nonexistent);
-                }
-              `,
-            },
-          ],
-          externalCustomProperties: new Set(["--kb-accordion-content-height"]),
-        },
-        (d) => ds.push(d),
-      )
+      const input = createCSSInput([{ path: "component.css", content: `.accordion-content { height: var(--kb-accordion-content-height); width: var(--kb-nonexistent); }` }])
+      input.externalCustomProperties = new Set(["--kb-accordion-content-height"])
+      const ds = runDispatcher(input)
       const unresolved = ds.filter((d) => d.rule === "no-unresolved-custom-properties")
       expect(unresolved).toHaveLength(1)
       expect(first(unresolved).message).toContain("--kb-nonexistent")

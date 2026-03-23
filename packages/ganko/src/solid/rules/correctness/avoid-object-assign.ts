@@ -10,7 +10,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { CallEntity } from "../../entities/call"
 import type { Fix } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic"
@@ -145,14 +145,14 @@ export const avoidObjectAssign = defineSolidRule({
       if (isEmptyObjectLiteral(firstArg)) {
         const fix = buildMergeFix(call, text, graph.sourceFile)
         emit(
-          createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-object-assign", "avoidMerge", messages.avoidMerge, "error", fix),
+          createDiagnostic(graph.filePath, call.node, graph.sourceFile, "avoid-object-assign", "avoidMerge", messages.avoidMerge, "error", fix),
         )
         continue
       }
 
       // Case 2: Mutation (non-empty first arg) - flag without auto-fix
       emit(
-        createDiagnostic(graph.file, call.node, graph.sourceFile, "avoid-object-assign", "avoidMutation", messages.avoidMutation, "error"),
+        createDiagnostic(graph.filePath, call.node, graph.sourceFile, "avoid-object-assign", "avoidMutation", messages.avoidMutation, "error"),
       )
     }
   },

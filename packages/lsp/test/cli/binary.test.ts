@@ -194,7 +194,7 @@ describe("ganko binary", () => {
       expect(crashed).toBe(false);
     });
 
-    it("responds to LSP initialize request", () => {
+    it("responds to LSP initialize request", async () => {
       const initRequest = JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
@@ -203,13 +203,17 @@ describe("ganko binary", () => {
       });
       const message = `Content-Length: ${Buffer.byteLength(initRequest)}\r\n\r\n${initRequest}`;
 
-      const result = spawnSync(BINARY, ["--stdio"], {
-        encoding: "utf-8",
-        timeout: 5000,
-        input: message,
+      const { spawn } = await import("node:child_process");
+      const output = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(BINARY, ["--stdio"], { stdio: ["pipe", "pipe", "pipe"] });
+        let stdout = "";
+        proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        proc.on("error", reject);
+        proc.on("close", () => resolve(stdout));
+        proc.stdin.write(message);
+        proc.stdin.end();
       });
 
-      const output = result.stdout ?? "";
       expect(output).toContain("Content-Length:");
       expect(output).toContain("jsonrpc");
     });
@@ -226,7 +230,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "lint.log");
 
-      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file", "--no-daemon"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,
@@ -244,7 +248,7 @@ describe("ganko binary", () => {
       tempDir = mkdtempSync(join(tmpdir(), "ganko-logfile-test-"));
       const logPath = join(tempDir, "dual.log");
 
-      const dualResult = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file"], {
+      const dualResult = spawnSync("node", [ENTRY, "lint", "--verbose", "--log-file", logPath, "--no-cross-file", "--no-daemon"], {
         cwd: BASIC_APP,
         encoding: "utf-8",
         timeout: 30000,

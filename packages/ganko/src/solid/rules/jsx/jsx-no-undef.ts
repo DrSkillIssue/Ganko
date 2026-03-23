@@ -9,7 +9,7 @@
 
 import ts from "typescript";
 import type { Diagnostic } from "../../../diagnostic"
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { JSXAttributeEntity, JSXElementEntity } from "../../entities/jsx";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { defineSolidRule } from "../../rule";
@@ -86,7 +86,7 @@ export const jsxNoUndef = defineSolidRule({
       const entry = directiveAttrs[i];
       if (!entry) continue;
       const { attr, element } = entry;
-      const directiveIssue = checkCustomDirective(attr, element, graph, graph.file);
+      const directiveIssue = checkCustomDirective(attr, element, graph, graph.filePath);
       if (directiveIssue) {
         emit(directiveIssue);
       }

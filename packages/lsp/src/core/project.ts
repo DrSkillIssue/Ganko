@@ -25,6 +25,9 @@ export interface ProjectConfig {
 
 /** Project state */
 export interface Project {
+  /** Resolved absolute path to the tsconfig.json used by this project. */
+  readonly tsconfigPath: string
+
   /** Run plugins on files and get diagnostics */
   run(files: readonly string[]): readonly Diagnostic[]
 
@@ -71,6 +74,7 @@ export function createProject(config: ProjectConfig): Project {
   if (log?.isLevelEnabled(Level.Trace)) log.trace(`createProject: plugins=[${config.plugins.map(p => p.kind).join(", ")}]`);
 
   return {
+    tsconfigPath: tsService.tsconfigPath,
     run(files) {
       if (log?.isLevelEnabled(Level.Trace)) log.trace(`project.run: ${files.length} files`);
       const result = runner.run(files);

@@ -1,0 +1,225 @@
+import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
+import { LAYOUT_POSITIONED_OFFSET_PROPERTIES } from "../../../css/layout-taxonomy"
+import { parseBlockShorthand, parseQuadShorthand } from "../../../css/parser/value-tokenizer"
+import type { StatefulSelectorEntry, NormalizedRuleDeclaration } from "../../analysis/statefulness"
+import type { FileSemanticModel } from "../../binding/semantic-model"
+import { defineAnalysisRule, ComputationTier, type Emit } from "../rule"
+
+const messages = {
+  statefulBoxModelShift:
+    "State selector '{{selector}}' changes layout-affecting '{{property}}'. Keep geometry stable across states to avoid CLS.",
+} as const
+
+export const cssLayoutStatefulBoxModelShift = defineAnalysisRule({
+  id: "css-layout-stateful-box-model-shift",
+  severity: "warn",
+  messages,
+  meta: {
+    description: "Disallow stateful selector changes that alter element geometry and trigger layout shifts.",
+    fixable: false,
+    category: "css-layout",
+  },
+  requirement: { tier: ComputationTier.SelectiveLayoutFacts },
+  register(registry) {
+    let processed = false
+
+    registry.registerFactAction("flowParticipation", (_element, _fact, semanticModel, emit) => {
+      if (processed) return
+      processed = true
+
+      runStatefulBoxModelCheck(semanticModel, emit)
+    })
+  },
+})
+
+function runStatefulBoxModelCheck(semanticModel: FileSemanticModel, emit: Emit): void {
+  const baseValueIndex = semanticModel.getStatefulBaseValueIndex()
+  const reported = new Set<number>()
+
+  // Iterate all CSS rules via the compilation's CSS syntax trees
+  const rulesSeen = new Set<number>()
+
+  for (const [, cssTree] of semanticModel.compilation.cssTrees) {
+    for (let r = 0; r < cssTree.rules.length; r++) {
+      const rule = cssTree.rules[r]
+      if (!rule) continue
+      if (rulesSeen.has(rule.id)) continue
+      rulesSeen.add(rule.id)
+
+    const selectors = semanticModel.getStatefulSelectorEntries(rule.id)
+    if (selectors.length === 0) continue
+
+    const declarations = semanticModel.getStatefulNormalizedDeclarations(rule.id)
+    if (declarations.length === 0) continue
+
+    for (let j = 0; j < declarations.length; j++) {
+      const declaration = declarations[j]
+      if (!declaration) continue
+      if (declaration.property === "position") continue
+      if (reported.has(declaration.declarationId)) continue
+
+      const match = firstStatefulSelectorWithDelta(
+        selectors,
+        declaration.property,
+        declaration.normalizedValue,
+        baseValueIndex,
+      )
+      if (!match) continue
+      if (LAYOUT_POSITIONED_OFFSET_PROPERTIES.has(declaration.property)
+        && !hasStatefulPositionContext(selectors, declarations, baseValueIndex)) {
+        continue
+      }
+
+      if (isVisualFeedbackTransform(declaration.property, match.isDirectInteraction)) continue
+
+      emit(createCSSDiagnostic(
+        declaration.filePath, declaration.startLine, declaration.startColumn,
+        cssLayoutStatefulBoxModelShift.id, "statefulBoxModelShift",
+        resolveMessage(messages.statefulBoxModelShift, {
+          selector: match.raw,
+          property: declaration.property,
+        }), "warn",
+      ))
+      reported.add(declaration.declarationId)
+    }
+    }
+  }
+}
+
+function isVisualFeedbackTransform(property: string, isDirectInteraction: boolean): boolean {
+  if (!isDirectInteraction) return false
+  return property === "transform" || property === "translate"
+}
+
+interface StatefulSelectorMatch {
+  readonly raw: string
+  readonly isDirectInteraction: boolean
+}
+
+function firstStatefulSelectorWithDelta(
+  selectors: readonly StatefulSelectorEntry[],
+  property: string,
+  stateValue: string,
+  baseValueIndex: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+): StatefulSelectorMatch | null {
+  for (let i = 0; i < selectors.length; i++) {
+    const selector = selectors[i]
+    if (!selector) continue
+    if (!selector.isStateful) continue
+    if (selector.baseLookupKeys.length === 0) return { raw: selector.raw, isDirectInteraction: selector.isDirectInteraction }
+
+    const baseByProperty = lookupBaseByProperty(baseValueIndex, selector.baseLookupKeys)
+    if (!baseByProperty) return { raw: selector.raw, isDirectInteraction: selector.isDirectInteraction }
+
+    if (!matchesBasePropertyValue(baseByProperty, property, stateValue)) return { raw: selector.raw, isDirectInteraction: selector.isDirectInteraction }
+  }
+
+  return null
+}
+
+function hasStatefulPositionContext(
+  selectors: readonly StatefulSelectorEntry[],
+  declarations: readonly NormalizedRuleDeclaration[],
+  baseValueIndex: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+): boolean {
+  if (hasNonStaticPositionInDeclarations(declarations)) return true
+
+  for (let i = 0; i < selectors.length; i++) {
+    const selector = selectors[i]
+    if (!selector) continue
+    if (!selector.isStateful) continue
+    if (selector.baseLookupKeys.length === 0) continue
+
+    const baseByProperty = lookupBaseByProperty(baseValueIndex, selector.baseLookupKeys)
+    if (!baseByProperty) continue
+    const positionValues = baseByProperty.get("position")
+    if (!positionValues) continue
+
+    for (const value of positionValues) {
+      if (value !== "static") return true
+    }
+  }
+
+  return false
+}
+
+function hasNonStaticPositionInDeclarations(
+  declarations: readonly NormalizedRuleDeclaration[],
+): boolean {
+  for (let i = 0; i < declarations.length; i++) {
+    const decl = declarations[i]
+    if (!decl) continue
+    if (decl.property !== "position") continue
+    if (decl.normalizedValue !== "static") return true
+  }
+  return false
+}
+
+function matchesBasePropertyValue(
+  baseByProperty: ReadonlyMap<string, ReadonlySet<string>>,
+  property: string,
+  stateValue: string,
+): boolean {
+  if (hasBaseValue(baseByProperty, property, stateValue)) return true
+
+  if (property === "padding" || property === "margin" || property === "border-width" || property === "inset") {
+    const quad = parseQuadShorthand(stateValue)
+    if (!quad) return false
+
+    if (property === "padding") {
+      return hasBaseValue(baseByProperty, "padding-top", quad.top)
+        && hasBaseValue(baseByProperty, "padding-bottom", quad.bottom)
+        && hasBaseValue(baseByProperty, "padding-left", quad.left)
+        && hasBaseValue(baseByProperty, "padding-right", quad.right)
+    }
+
+    if (property === "margin") {
+      return hasBaseValue(baseByProperty, "margin-top", quad.top)
+        && hasBaseValue(baseByProperty, "margin-bottom", quad.bottom)
+        && hasBaseValue(baseByProperty, "margin-left", quad.left)
+        && hasBaseValue(baseByProperty, "margin-right", quad.right)
+    }
+
+    if (property === "border-width") {
+      return hasBaseValue(baseByProperty, "border-top-width", quad.top)
+        && hasBaseValue(baseByProperty, "border-bottom-width", quad.bottom)
+        && hasBaseValue(baseByProperty, "border-left-width", quad.left)
+        && hasBaseValue(baseByProperty, "border-right-width", quad.right)
+    }
+
+    return hasBaseValue(baseByProperty, "top", quad.top)
+      && hasBaseValue(baseByProperty, "bottom", quad.bottom)
+  }
+
+  if (property === "inset-block") {
+    const block = parseBlockShorthand(stateValue)
+    if (!block) return false
+    return hasBaseValue(baseByProperty, "inset-block-start", block.start)
+      && hasBaseValue(baseByProperty, "inset-block-end", block.end)
+  }
+
+  return false
+}
+
+function hasBaseValue(
+  baseByProperty: ReadonlyMap<string, ReadonlySet<string>>,
+  property: string,
+  expectedValue: string,
+): boolean {
+  const values = baseByProperty.get(property)
+  if (!values) return false
+  return values.has(expectedValue)
+}
+
+function lookupBaseByProperty(
+  baseValueIndex: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+  selectorKeys: readonly string[],
+): ReadonlyMap<string, ReadonlySet<string>> | null {
+  for (let i = 0; i < selectorKeys.length; i++) {
+    const key = selectorKeys[i]
+    if (!key) continue
+    const value = baseValueIndex.get(key)
+    if (value) return value
+  }
+  return null
+}

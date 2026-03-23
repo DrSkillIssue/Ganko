@@ -7,7 +7,7 @@ import type { CompletionParams, CompletionItem } from "vscode-languageserver";
 import { CompletionItemKind } from "vscode-languageserver";
 import type { FeatureHandlerContext } from "./handler-context";
 import { positionToOffset } from "./ts-utils";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
 const SOLID_CONTROL_FLOW: readonly CompletionItem[] = [
@@ -60,7 +60,8 @@ export function handleCompletion(
   ctx: FeatureHandlerContext,
 ): CompletionItem[] | null {
   const { log } = ctx;
-  const path = uriToPath(params.textDocument.uri);
+  const path = uriToCanonicalPath(params.textDocument.uri);
+  if (path === null) return null;
   const tsFile = ctx.getTSFileInfo(path);
   if (!tsFile) return null;
   const { ls, sf } = tsFile;

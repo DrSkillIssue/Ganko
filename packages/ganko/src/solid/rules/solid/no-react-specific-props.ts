@@ -10,7 +10,8 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph, JSXElementEntity, JSXAttributeEntity } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
+import type { JSXElementEntity, JSXAttributeEntity } from "../../entities/jsx"
 import type { Fix } from "../../../diagnostic"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -113,7 +114,7 @@ export const noReactSpecificProps = defineSolidRule({
         if (replacement) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               attr.node,
               graph.sourceFile,
               "no-react-specific-props",
@@ -132,7 +133,7 @@ export const noReactSpecificProps = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             attr.node,
             graph.sourceFile,
             "no-react-specific-props",

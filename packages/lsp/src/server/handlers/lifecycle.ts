@@ -13,16 +13,23 @@ import type {
   InitializedParams,
 } from "vscode-languageserver";
 
-import { SolidPlugin, CSSPlugin, setActivePolicy, resolveTailwindValidator, scanDependencyCustomProperties, type TailwindValidator } from "@drskillissue/ganko";
-import { canonicalPath, uriToPath, pathToUri, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
+import { SolidPlugin, setActivePolicy } from "@drskillissue/ganko";
+import { pathToUri, projectRootFromUri, acceptProjectRoot, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
-import { createFileIndex, type FileIndex } from "../../core/file-index";
-import { readCSSFilesFromDisk } from "../../core/analyze";
+import { runEnrichment } from "../../core/enrichment";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
-import type { ServerContext } from "../connection";
-import type { PhaseEnriched } from "../server-state";
-import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
+import type { ServerContext } from "../server";
+import type { PhaseEnriched } from "../session";
+import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
+import { buildFullCompilation } from "../../core/compilation-builder";
+import { createCompilationDiagnosticProducer } from "../../core/compilation-diagnostic-producer";
+import { batchValidateTailwindClasses } from "../../core/enrichment";
+import { prepareTailwindEval } from "@drskillissue/ganko";
+import type { Diagnostic } from "@drskillissue/ganko";
+import { createCompilationTracker } from "@drskillissue/ganko";
+import { createCancellationSource } from "../cancellation";
+import { SessionMutator } from "../session-mutator";
 import type { Logger } from "../../core/logger";
 
 
@@ -101,12 +108,12 @@ export function handleInitialize(
   const workspaceFolder = params.workspaceFolders?.[0];
   if (workspaceFolder) {
     state.rootUri = workspaceFolder.uri;
-    state.rootPath = uriToPath(workspaceFolder.uri);
+    state.rootPath = projectRootFromUri(workspaceFolder.uri).path;
   } else if (params.rootUri) {
     state.rootUri = params.rootUri;
-    state.rootPath = uriToPath(params.rootUri);
+    state.rootPath = projectRootFromUri(params.rootUri).path;
   } else if (params.rootPath) {
-    state.rootPath = canonicalPath(params.rootPath);
+    state.rootPath = acceptProjectRoot(params.rootPath).path;
     state.rootUri = pathToUri(state.rootPath);
   }
 
@@ -190,7 +197,7 @@ export async function handleInitialized(
 
   const project = createProject({
     rootPath,
-    plugins: [SolidPlugin, CSSPlugin],
+    plugins: [SolidPlugin],
     rules: state.config.ruleOverrides,
     log,
   });
@@ -199,6 +206,8 @@ export async function handleInitialized(
   const handlerCtx = context.setProject(project);
   state.initialized = true;
   context.resolveReady();
+  // Build initial session (Quick tier, no enrichment)
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
 
@@ -209,97 +218,90 @@ export async function handleInitialized(
      synchronous program build blocks the event loop. */
 
   await project.watchProgramReady();
-  context.phase = { tag: "running", project, handlerCtx, fileIndex: null };
+  context.phase = { tag: "running", project, handlerCtx };
+  // Rebuild session with Incremental tier
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase B: full program ready (Tier 2 active)");
 
   /* Re-diagnose open files with full program (no cross-file yet — workspace
      enrichment hasn't run). */
-  const openPaths = context.docManager.openPaths() as string[];
-  for (let i = 0, len = openPaths.length; i < len; i++) {
-    const p = openPaths[i];
-    if (!p) continue;
-    publishFileDiagnostics(context, project, p, undefined, false);
+  {
+    const phaseBToken = createCancellationSource().token;
+    const openPaths = context.docManager.openPaths() as string[];
+    runDiagnosticPipelineBatch(context, project, openPaths, false, phaseBToken);
   }
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
-  const enrichment = await enrichWorkspace(rootPath, state, context);
+  const enrichment = await runEnrichment(rootPath, effectiveExclude(state), {
+    graphCache: context.graphCache,
+    diagnosticEviction: context.diagManager,
+    log,
+  });
   const enrichedPhase: PhaseEnriched = {
     tag: "enriched",
     project,
     handlerCtx,
-    fileIndex: enrichment.fileIndex,
+    registry: enrichment.registry,
+    layout: enrichment.layout,
     tailwindValidator: enrichment.tailwindValidator,
     externalCustomProperties: enrichment.externalCustomProperties,
+    tailwindState: enrichment.tailwindState,
+    evaluator: enrichment.evaluator,
+    batchableValidator: enrichment.batchableValidator,
   };
   context.phase = enrichedPhase;
 
-  /* Invalidate any cross-file results that may have been cached during the
-     enrichment window. Even though fileIndex is set atomically after tailwind
-     resolves, belt-and-suspenders: force the re-diagnosis loop to rebuild
-     cross-file results with the fully-enriched context. */
-  context.graphCache.invalidateAll();
+  // Build full compilation from workspace files and populate the tracker.
+  // The tracker starts empty — it must be populated with all workspace
+  // solid + CSS trees so that IncrementalAnalyzer can run cross-file rules.
+  {
+    const { compilation } = buildFullCompilation({
+      solidFiles: enrichment.registry.solidFiles,
+      cssFiles: enrichment.registry.cssFiles,
+      getProgram: () => project.getProgram(),
+      tailwindValidator: enrichment.tailwindValidator,
+      externalCustomProperties: enrichment.externalCustomProperties,
+      resolveContent: context.resolveContent,
+      logger: log,
+    });
+    context.graphCache = createCompilationTracker(compilation);
+
+    // Batch-validate Tailwind arbitrary classes before cross-file analysis
+    if (enrichment.batchableValidator !== null && enrichedPhase.tailwindState !== null) {
+      const twParams = prepareTailwindEval(
+        enrichment.registry.loadAllCSSContent(),
+        rootPath,
+        Array.from(enrichment.layout.packagePaths),
+        log,
+      );
+      if (twParams !== null) {
+        await batchValidateTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
+      }
+    }
+
+    // Run cross-file analysis and cache results so didOpen reads instantly
+    const crossProducer = createCompilationDiagnosticProducer();
+    const crossByFile = crossProducer.runAll(compilation, state.config.ruleOverrides);
+    const crossFlat: Diagnostic[] = [];
+    for (const [, diags] of crossByFile) { for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) crossFlat.push(d); } }
+    context.graphCache.setCachedCrossFileResults(crossFlat);
+    if (log.isLevelEnabled(Level.Info)) log.info(`cross-file cache: ${crossFlat.length} diagnostics`);
+  }
+
+  // Rebuild session with enrichment data (file sets, tailwind, etc.)
+  { const mutator = new SessionMutator(); context.session = mutator.buildSession(context); }
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase C: workspace enrichment complete (Tier 3 active)");
 
-  /* Re-diagnose ALL currently open files with cross-file results.
-     Recapture open paths — files may have been opened during Phase B→C
-     (5-10s of async work). Using the stale Phase B snapshot would miss
-     any file opened after line 218, leaving it with single-file-only
-     diagnostics permanently. */
-  const currentOpenPaths = context.docManager.openPaths() as string[];
-  for (let i = 0, len = currentOpenPaths.length; i < len; i++) {
-    const p = currentOpenPaths[i];
-    if (!p) continue;
-    publishFileDiagnostics(context, project, p);
+  /* Re-diagnose ALL currently open files with cross-file results. */
+  {
+    const phaseCToken = createCancellationSource().token;
+    const currentOpenPaths = context.docManager.openPaths() as string[];
+    runDiagnosticPipelineBatch(context, project, currentOpenPaths, true, phaseCToken);
+    propagateTsDiagnosticsAsync(context, project, new Set(), phaseCToken);
   }
-
-  propagateTsDiagnostics(context, project, new Set());
-}
-
-/**
- * Workspace enrichment: file index, Tailwind validator, library analysis.
- *
- * Runs as Phase C of handleInitialized, after the full TypeScript program
- * is available. These operations are needed for cross-file diagnostics
- * but not for single-file Tier 1/2 analysis.
- */
-interface EnrichmentResult {
-  readonly fileIndex: FileIndex
-  readonly tailwindValidator: TailwindValidator | null
-  readonly externalCustomProperties: ReadonlySet<string> | undefined
-}
-
-async function enrichWorkspace(
-  rootPath: string,
-  state: ServerState,
-  context: ServerContext,
-): Promise<EnrichmentResult> {
-  const { log } = context;
-
-  const fileIndex = createFileIndex(rootPath, effectiveExclude(state), log);
-  if (log.isLevelEnabled(Level.Info)) log.info(`file index: ${fileIndex.solidFiles.size} solid, ${fileIndex.cssFiles.size} css`);
-
-  let tailwindValidator: TailwindValidator | null = null;
-  if (fileIndex.cssFiles.size > 0) {
-    const cssFiles = readCSSFilesFromDisk(fileIndex.cssFiles);
-    tailwindValidator = await resolveTailwindValidator(cssFiles, log)
-      .catch((err) => {
-        if (log.isLevelEnabled(Level.Warning)) log.warning(`tailwind validator: uncaught error: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      });
-    if (log.isLevelEnabled(Level.Info)) log.info(`tailwind validator: ${tailwindValidator !== null ? "resolved" : "not found"}`);
-  }
-
-  const externalProps = scanDependencyCustomProperties(rootPath);
-  let externalCustomProperties: ReadonlySet<string> | undefined;
-  if (externalProps.size > 0) {
-    externalCustomProperties = externalProps;
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
-  }
-
-  return { fileIndex, tailwindValidator, externalCustomProperties };
 }
 
 /**

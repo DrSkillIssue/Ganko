@@ -14,7 +14,7 @@
  * Context determines whether signal reads are tracked for reactivity.
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import type { ScopeEntity, TrackingContext } from "../entities/scope";
 import type { CallEntity } from "../entities/call";
@@ -23,7 +23,7 @@ import { UNKNOWN_CONTEXT as _UNKNOWN_CONTEXT } from "../entities/scope";
 import { getScopeFor } from "../queries/scope";
 import { findFunctionChildExpression } from "../util/jsx";
 
-export function runContextPhase(graph: SolidGraph, _input: SolidInput): void {
+export function runContextPhase(graph: SolidBuildContext, _input: SolidInput): void {
     // Set component context for component functions first
     const componentFunctions = graph.componentFunctions;
     for (let i = 0, len = componentFunctions.length; i < len; i++) {
@@ -97,7 +97,7 @@ function setFunctionContext(
   node: ts.ArrowFunction | ts.FunctionExpression,
   type: "tracked" | "deferred" | "untracked",
   call: CallEntity,
-  graph: SolidGraph,
+  graph: SolidBuildContext,
 ): void {
   const fnScope = getScopeFor(graph, node);
   const primitiveName = call.primitive?.name ?? "unknown";
@@ -161,7 +161,7 @@ function shouldOverrideContext(existingType: string, newType: string): boolean {
  * Event handlers (onClick, onInput, on:click, etc.) execute later, not during render.
  * @param graph - The solid graph
  */
-function setEventHandlerContexts(graph: SolidGraph): void {
+function setEventHandlerContexts(graph: SolidBuildContext): void {
   const eventHandlerAttrs = graph.jsxAttrsByKind.get("event-handler");
   if (!eventHandlerAttrs) return;
 
@@ -238,7 +238,7 @@ const FLOW_SEMANTICS = new Map<string, FlowCallbackSemantic>([
  *
  * @param graph - The solid graph
  */
-function setFlowComponentContexts(graph: SolidGraph): void {
+function setFlowComponentContexts(graph: SolidBuildContext): void {
   for (const [tag, semantic] of FLOW_SEMANTICS) {
     const elements = graph.jsxByTag.get(tag);
     if (!elements) continue;
@@ -272,7 +272,7 @@ function setFlowComponentContexts(graph: SolidGraph): void {
  * @param context - The tracking context to set
  */
 function setFallbackPropContext(
-  graph: SolidGraph,
+  graph: SolidBuildContext,
   element: JSXElementEntity,
   context: TrackingContext,
 ): void {

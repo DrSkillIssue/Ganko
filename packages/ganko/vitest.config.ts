@@ -11,6 +11,7 @@ export default defineConfig({
             "test/css/**/*.test.ts",
             "test/integration/**/*.test.ts",
             "test/cache.test.ts",
+            "test/compilation/**/*.test.ts",
           ],
           // isolate: false reuses the module graph across test files within
           // each worker, eliminating redundant lib .d.ts parses.

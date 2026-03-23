@@ -1,15 +1,18 @@
-export { CSSPlugin, analyzeCSSInput, buildCSSGraph } from "./plugin"
-export { CSSGraph } from "./impl"
-export type { CSSInput, CSSOptions } from "./input"
+export { CSSPlugin, analyzeCSSInput } from "./plugin"
+export { buildCSSResult } from "./impl"
+export type { CSSBuildContext } from "./build-context"
+export type { CSSInput, CSSInputBuilder, CSSOptions } from "./input"
+export { createCSSInput } from "./input"
 export type { CSSRule } from "./rule"
 export * from "./entities"
 export { hasClassSelector, getClassDefinitions, getAllClassNames } from "./queries/class"
 export type { ClassDefinition } from "./queries/class"
-export type { TailwindValidator } from "./tailwind"
+export type { TailwindValidator, TailwindEvalParams, BatchableTailwindValidator } from "./tailwind"
 export {
   createLiveValidator,
   createStaticValidator,
   detectTailwindEntry,
-  resolveTailwindValidator,
+  prepareTailwindEval,
+  buildTailwindValidatorFromEval,
   resolveTailwindValidatorSync,
 } from "./tailwind"

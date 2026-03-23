@@ -100,7 +100,7 @@ export const unboundedSignalAccumulation = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             callNode,
             graph.sourceFile,
             "unbounded-signal-accumulation",

@@ -52,7 +52,7 @@ export const noShiftSpliceHeadConsume = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "no-shift-splice-head-consume",

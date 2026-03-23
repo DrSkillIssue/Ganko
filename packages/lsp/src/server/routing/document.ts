@@ -2,90 +2,44 @@
  * Document Handler Routing
  *
  * Wires LSP text document lifecycle events to their handlers:
- * didOpen, didChange (with debounce), didSave, didClose.
+ * didOpen, didChange (coalesced), didSave, didClose.
  *
- * The debounce flow (processChangesCallback) runs four phases:
- *   1. Evict all caches for changed files
- *   2. Publish single-file diagnostics (fast, no cross-file)
- *   3. Refresh cross-file cache for the batch
- *   4. Merge cross-file results into changed files (republish)
+ * Uses DocumentTracker (pure state machine) + DiagnosticPipeline
+ * with CancellationToken. No manual cache eviction ordering.
  */
 
-import { canonicalPath, classifyFile, uriToPath, Level } from "@drskillissue/ganko-shared";
-import { runCrossFileDiagnostics } from "../../core/analyze";
+import { canonicalPath, classifyFile, uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import { isServerReady } from "../handlers/lifecycle";
 import { clearDiagnostics } from "../handlers/diagnostics";
-import {
-  publishFileDiagnostics,
-  publishTier1Diagnostics,
-  republishMergedDiagnostics,
-  propagateTsDiagnostics,
-} from "../diagnostics-push";
-import type { ServerContext } from "../connection";
-import type { DocumentHandlerContext } from "../handlers/handler-context";
-import type { Project } from "../../core/project";
-import { evictCachesForPath } from "../change-processor";
+import { runDiagnosticPipeline, propagateTsDiagnosticsAsync, publishTier1Diagnostics } from "../diagnostic-pipeline";
+import { createCancellationSource } from "../cancellation";
+import { buildSolidTreeForFile } from "../../core/compilation-builder";
+import type { SolidSyntaxTree } from "@drskillissue/ganko";
+import type { ServerContext } from "../server";
 
-/**
- * Rebuild workspace cross-file results once for the current cache state.
- */
-function refreshCrossFileCache(
-  context: ServerContext,
-  project: Project,
-  changed: readonly { readonly path: string }[],
-): void {
-  const phase = context.phase;
-  if (phase.tag !== "enriched") return;
-
-  let seedPath: string | null = null;
-  for (let i = 0, len = changed.length; i < len; i++) {
-    const change = changed[i];
-    if (!change) continue;
-    seedPath = change.path;
-    break;
-  }
-  if (seedPath === null) return;
-
-  runCrossFileDiagnostics(
-    seedPath,
-    phase.fileIndex,
-    project,
-    context.graphCache,
-    phase.tailwindValidator,
-    context.resolveContent,
-    context.serverState.config.ruleOverrides,
-    phase.externalCustomProperties,
-  );
-}
-
-/**
- * Wire document handlers onto the LSP connection.
- */
 export function setupDocumentHandlers(context: ServerContext): void {
-  const { documents, serverState, docManager } = context;
+  const { documents, docManager } = context;
 
-  const docHandlerCtx: DocumentHandlerContext = {
-    identity: context.identity,
-    documents: context.docManager,
-    diagnostics: context.diagManager,
-    log: context.log,
-    runDiagnostics(path: string) {
-      const phase = context.phase;
-      if (phase.tag !== "running" && phase.tag !== "enriched") return;
-      publishFileDiagnostics(context, phase.project, path);
-    },
-  };
+  // ── Coalesced change callback ──
 
   function processChangesCallback(): void {
     const phase = context.phase;
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`processChangesCallback.enter: phase=${phase.tag}`);
     const project = phase.tag === "running" || phase.tag === "enriched" ? phase.project : context.serverState.project;
-    if (!project) return;
+    if (!project) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("processChangesCallback: no project"); return; }
 
     const changes = docManager.drainPendingChanges();
-    if (changes.length === 0) return;
+    if (changes.length === 0) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("processChangesCallback: no pending changes"); return; }
 
+    // Cancel any in-flight diagnostic pipeline
+    context.diagnosticCancellation?.cancel();
+    const cancellation = createCancellationSource();
+    context.diagnosticCancellation = cancellation;
+    const token = cancellation.token;
+
+    // Before running/enriched: Tier 1 only
     if (phase.tag !== "running" && phase.tag !== "enriched") {
-      for (let i = 0, len = changes.length; i < len; i++) {
+      for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
         if (!change) continue;
         project.updateFile(change.path, change.content);
@@ -98,89 +52,122 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     const t0 = performance.now();
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`processChangesCallback: ${changes.length} changes`);
-    const paths: string[] = [];
 
-    for (let i = 0, len = changes.length; i < len; i++) {
+    // Sync TS service, build solid trees, evict diagnostic caches.
+    // Then apply all changes as a single batch to the tracker.
+    // applyBatch: CSS parsed internally via CSSSourceProvider,
+    // solid trees provided externally (need ts.Program to parse).
+    // One dependency graph rebuild for the entire batch.
+    const solidTrees = new Map<string, SolidSyntaxTree>();
+    const batchChanges: { path: string; content: string; version: string }[] = [];
+    const getProgram = () => project.getProgram();
+    for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
-      paths.push(change.path);
       project.updateFile(change.path, change.content);
-      evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, change.path);
+      context.diagManager.evict(change.path);
+      batchChanges.push({ path: change.path, content: change.content, version: String(change.version) });
+      if (classifyFile(change.path) === "solid") {
+        const tree = buildSolidTreeForFile(change.path, getProgram);
+        if (tree) solidTrees.set(change.path, tree);
+      }
     }
+    context.graphCache = context.graphCache.applyBatch(batchChanges, solidTrees);
 
+    // Run pipeline for each changed file
     const diagnosed = new Set<string>();
-    for (let i = 0, len = changes.length; i < len; i++) {
+    for (let i = 0; i < changes.length; i++) {
+      if (token.isCancelled) break;
       const change = changes[i];
       if (!change) continue;
-      publishFileDiagnostics(context, project, change.path, change.content, false);
+      runDiagnosticPipeline({ context, project, path: change.path, content: change.content, includeCrossFile: true, token });
       diagnosed.add(change.path);
     }
 
-    refreshCrossFileCache(context, project, changes);
-    context.changeProcessor.processChanges(
-      paths.map(p => ({ path: p, kind: "changed" as const })),
-      diagnosed,
-    );
-
-    for (let i = 0, len = changes.length; i < len; i++) {
-      const change = changes[i];
-      if (!change) continue;
-      republishMergedDiagnostics(context, change.path);
+    if (!token.isCancelled) {
+      context.connection.tracer.log(
+        `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
+      );
+      propagateTsDiagnosticsAsync(context, project, diagnosed, token);
     }
-
-    context.connection.tracer.log(
-      `processChangesCallback: ${changes.length} changes, ${diagnosed.size} diagnosed in ${(performance.now() - t0).toFixed(1)}ms`,
-    );
-    propagateTsDiagnostics(context, project, diagnosed);
   }
 
-  docManager.onDebouncedChanges(() => processChangesCallback());
+  docManager.onCoalescedChanges(() => processChangesCallback());
+
+  // ── didOpen ──
 
   documents.onDidOpen(async (event) => {
-    const path = docManager.open(event);
-    if (!path) return;
+    const uri = event.document.uri;
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`didOpen.enter: uri=${uri}`);
+    const path = context.identity.uriToPath(uri);
+    const result = docManager.open(uri, path, event.document.version, event.document.getText());
+    if (!result) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("didOpen: docManager.open returned null"); return; }
     await context.ready;
 
-    const key = canonicalPath(path);
+    const key = canonicalPath(result.path);
     const openPhase = context.phase;
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
-      `didOpen: uri=${event.document.uri} path=${key} phase=${openPhase.tag} `
-      + `version=${event.document.version} openDocs=${docManager.openCount}`,
-    );
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`didOpen: path=${key} phase=${openPhase.tag} version=${event.document.version} openDocs=${docManager.openCount}`);
 
     if (openPhase.tag !== "running" && openPhase.tag !== "enriched") {
-      const kind = classifyFile(key);
-      if (kind === "solid") {
+      if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("didOpen: phase not ready, tier1 only");
+      if (classifyFile(key) === "solid") {
         publishTier1Diagnostics(context, key, event.document.getText());
       }
       return;
     }
 
-    publishFileDiagnostics(context, openPhase.project, key, event.document.getText());
+    openPhase.project.updateFile(key, event.document.getText());
+
+    try {
+      runDiagnosticPipeline({
+        context,
+        project: openPhase.project,
+        path: key,
+        content: event.document.getText(),
+        includeCrossFile: true,
+        token: createCancellationSource().token,
+      });
+    } catch (err) {
+      context.log.error(`didOpen pipeline error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+    }
   });
+
+  // ── didChange ──
 
   documents.onDidChangeContent(async (event) => {
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChange: uri=${event.document.uri} version=${event.document.version}`);
     await context.ready;
-    const queued = docManager.change(event);
-    if (!queued || context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
-    context.tsPropagationCancel?.();
+    const queued = docManager.change(event.document.uri, event.document.version, event.document.getText());
+    if (!queued) return;
+
+    // Sync TS service IMMEDIATELY on every keystroke (no coalescing delay).
+    // Feature requests (hover, completion) during the coalescing window must
+    // see current content. Only the diagnostic pipeline trigger is coalesced.
+    const phase = context.phase;
+    if (phase.tag === "running" || phase.tag === "enriched") {
+      const path = context.identity.uriToPath(event.document.uri);
+      phase.project.updateFile(path, event.document.getText());
+      context.tsPropagationCancel?.();
+    }
   });
+
+  // ── didSave ──
 
   documents.onDidSave(async (event) => {
     await context.ready;
     if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didSave ENTER: uri=${event.document.uri} version=${event.document.version}`);
-    if (!isServerReady(serverState)) return;
+    if (!isServerReady(context.serverState)) return;
 
     const savePhase = context.phase;
     const project = savePhase.tag === "running" || savePhase.tag === "enriched" ? savePhase.project : context.serverState.project;
     if (!project) return;
 
-    docManager.save(event);
+    docManager.save(event.document.uri);
 
     if (savePhase.tag !== "running" && savePhase.tag !== "enriched") {
+      docManager.flush();
       const changes = docManager.drainPendingChanges();
-      for (let i = 0, len = changes.length; i < len; i++) {
+      for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
         if (!change) continue;
         project.updateFile(change.path, change.content);
@@ -190,52 +177,55 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
     docManager.flush();
     const changes = docManager.drainPendingChanges();
-    const savedPath = uriToPath(event.document.uri);
+    const savedPath = uriToCanonicalPath(event.document.uri);
+    if (savedPath === null) return;
 
-    for (let i = 0, len = changes.length; i < len; i++) {
+    // Sync TS + build solid trees + evict diagnostic caches, then batch apply.
+    const saveSolidTrees = new Map<string, SolidSyntaxTree>();
+    const saveBatch: { path: string; content: string; version: string }[] = [];
+    const getSaveProgram = () => project.getProgram();
+    for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       project.updateFile(change.path, change.content);
-      evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, change.path);
+      context.diagManager.evict(change.path);
+      saveBatch.push({ path: change.path, content: change.content, version: String(change.version) });
+      if (classifyFile(change.path) === "solid") {
+        const tree = buildSolidTreeForFile(change.path, getSaveProgram);
+        if (tree) saveSolidTrees.set(change.path, tree);
+      }
     }
-    evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, savedPath);
+    if (saveBatch.length > 0) {
+      context.graphCache = context.graphCache.applyBatch(saveBatch, saveSolidTrees);
+    }
+    context.diagManager.evict(savedPath);
 
-    const savedContent = event.document.getText();
+    // Re-diagnose via pipeline
+    const saveToken = createCancellationSource().token;
     const diagnosed = new Set<string>();
-    for (let i = 0, len = changes.length; i < len; i++) {
+    for (let i = 0; i < changes.length; i++) {
       const change = changes[i];
       if (!change) continue;
       if (change.path !== savedPath) {
-        publishFileDiagnostics(context, project, change.path);
+        runDiagnosticPipeline({ context, project, path: change.path, includeCrossFile: true, token: saveToken });
         diagnosed.add(change.path);
       }
     }
-    publishFileDiagnostics(context, project, savedPath, savedContent);
+    runDiagnosticPipeline({ context, project, path: savedPath, content: event.document.getText(), includeCrossFile: true, token: saveToken });
     diagnosed.add(savedPath);
 
-    const paths: string[] = [];
-    for (let i = 0, len = changes.length; i < len; i++) {
-      const change = changes[i];
-      if (!change) continue;
-      paths.push(change.path);
-    }
-    paths.push(savedPath);
-
-    context.changeProcessor.processChanges(
-      paths.map(p => ({ path: p, kind: "changed" as const })),
-      diagnosed,
-    );
-    propagateTsDiagnostics(context, project, new Set([savedPath]));
+    propagateTsDiagnosticsAsync(context, project, new Set([savedPath]), createCancellationSource().token);
   });
 
+  // ── didClose ──
+
   documents.onDidClose((event) => {
-    const path = docHandlerCtx.documents.close(event);
-    if (docHandlerCtx.log.isLevelEnabled(Level.Debug)) docHandlerCtx.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
+    const path = docManager.close(event.document.uri);
+    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didClose: uri=${event.document.uri} path=${path}`);
     if (path) {
       clearDiagnostics(context.connection, event.document.uri);
       const key = canonicalPath(path);
-      context.diagCache.delete(key);
-      docHandlerCtx.diagnostics.onClose(key);
+      context.diagManager.onClose(key);
     }
   });
 }

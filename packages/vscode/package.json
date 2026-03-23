@@ -3,10 +3,26 @@
   "private": true,
   "displayName": "Ganko — Solid.js & CSS Linter",
   "description": "Static analysis for Solid.js and CSS",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "license": "MIT",
   "publisher": "ganko",
   "icon": "icon.png",
+  "homepage": "https://github.com/DrSkillIssue/ganko",
+  "bugs": {
+    "url": "https://github.com/DrSkillIssue/ganko/issues"
+  },
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "preview": true,
+  "badges": [
+    {
+      "url": "https://img.shields.io/badge/license-MIT-green.svg",
+      "href": "https://github.com/DrSkillIssue/ganko/blob/main/LICENSE",
+      "description": "MIT License"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/DrSkillIssue/ganko.git",
@@ -41,7 +57,10 @@
     "onLanguage:sass",
     "onLanguage:less",
     "workspaceContains:**/*.tsx",
-    "workspaceContains:**/*.jsx"
+    "workspaceContains:**/*.jsx",
+    "workspaceContains:**/*.css",
+    "workspaceContains:**/*.scss",
+    "workspaceContains:eslint.config.*"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -57,7 +76,9 @@
         "solid.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Solid.js language server"
+          "scope": "resource",
+          "order": 1,
+          "markdownDescription": "Enable Solid.js language server"
         },
         "solid.exclude": {
           "type": "array",
@@ -65,12 +86,16 @@
             "type": "string"
           },
           "default": [],
-          "description": "Glob patterns to exclude from analysis (e.g. [\"backend/**\", \"scripts/**\"]). Matched relative to workspace root."
+          "scope": "resource",
+          "order": 2,
+          "markdownDescription": "Glob patterns to exclude from analysis (e.g. `[\"backend/**\", \"scripts/**\"]`). Matched relative to workspace root."
         },
         "solid.enableTypeScriptDiagnostics": {
           "type": "boolean",
           "default": false,
-          "description": "Push TypeScript diagnostics alongside ganko diagnostics. Disable VS Code's built-in TypeScript extension to avoid duplicates."
+          "scope": "resource",
+          "order": 3,
+          "markdownDescription": "Push TypeScript diagnostics alongside ganko diagnostics. **Important**: Disable VS Code's built-in TypeScript extension to avoid duplicates."
         },
         "solid.logLevel": {
           "type": "string",
@@ -84,7 +109,6 @@
             "off"
           ],
           "default": "info",
-          "description": "Log level for the Solid language server. Messages below this severity are suppressed.",
           "enumDescriptions": [
             "Show all messages including finest-grained trace output",
             "Show debug messages and above",
@@ -93,7 +117,10 @@
             "Show errors and above",
             "Show only critical errors",
             "Disable all logging"
-          ]
+          ],
+          "scope": "window",
+          "order": 10,
+          "markdownDescription": "Log level for the Solid language server. Messages below this severity are suppressed."
         },
         "solid.trace.server": {
           "type": "string",
@@ -103,7 +130,9 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Traces the communication between VS Code and the Solid language server"
+          "scope": "window",
+          "order": 11,
+          "markdownDescription": "Traces the communication between VS Code and the Solid language server"
         },
         "solid.accessibilityPolicy": {
           "type": "string",
@@ -115,33 +144,43 @@
             "large-text"
           ],
           "default": "wcag-aa",
-          "description": "Accessibility policy template for CSS and JSX style linting. Controls minimum font sizes, touch targets, spacing, and contrast thresholds.",
           "enumDescriptions": [
             "WCAG 2.2 Level AA — legal compliance baseline (24px touch targets, 4.5:1 contrast, 16px body text)",
             "WCAG 2.2 Level AAA — enhanced accessibility (44px touch targets, 7:1 contrast)",
             "Touch-optimized mobile — Apple HIG + Material Design 3 (48px touch targets, 16px button text)",
             "Data-dense desktop — dashboards, admin panels, IDEs (13px body text, 24px touch targets)",
             "Low vision / elderly — exceeds AAA (24px body text, 48px touch targets, 10:1 contrast)"
-          ]
+          ],
+          "scope": "resource",
+          "order": 20,
+          "markdownDescription": "Accessibility policy template for CSS and JSX style linting. Controls minimum font sizes, touch targets, spacing, and contrast thresholds."
         },
         "solid.eslintConfig.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Read rule configuration from eslint.config.{mjs,js,cjs} file in workspace root"
+          "scope": "resource",
+          "order": 30,
+          "markdownDescription": "Read rule configuration from eslint.config.{mjs,js,cjs} file in workspace root"
         },
         "solid.eslintConfig.path": {
           "type": "string",
-          "description": "Custom path to ESLint config file (relative to workspace root). If not set, uses auto-discovery."
+          "scope": "resource",
+          "order": 31,
+          "markdownDescription": "Custom path to ESLint config file (relative to workspace root). If not set, uses auto-discovery."
         },
         "solid.lsp.env": {
           "type": "object",
           "default": {},
-          "description": "Environment variables to pass to the LSP server process",
           "additionalProperties": {
             "type": "string"
-          }
+          },
+          "scope": "resource",
+          "order": 40,
+          "markdownDescription": "Environment variables to pass to the LSP server process"
         },
         "solid.rules.avoid-conditional-spreads": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -159,6 +198,8 @@
           ]
         },
         "solid.rules.avoid-non-null-assertions": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -176,6 +217,8 @@
           ]
         },
         "solid.rules.avoid-object-assign": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -193,6 +236,8 @@
           ]
         },
         "solid.rules.avoid-object-spread": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -210,6 +255,8 @@
           ]
         },
         "solid.rules.avoid-type-casting": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -227,6 +274,8 @@
           ]
         },
         "solid.rules.avoid-unsafe-type-annotations": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -244,6 +293,8 @@
           ]
         },
         "solid.rules.event-handlers": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -261,6 +312,8 @@
           ]
         },
         "solid.rules.missing-jsdoc-comments": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -278,6 +331,8 @@
           ]
         },
         "solid.rules.no-ai-slop-comments": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -295,6 +350,8 @@
           ]
         },
         "solid.rules.no-array-handlers": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -312,6 +369,8 @@
           ]
         },
         "solid.rules.no-banner-comments": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -329,6 +388,8 @@
           ]
         },
         "solid.rules.no-destructure": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -346,6 +407,8 @@
           ]
         },
         "solid.rules.no-inline-imports": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -363,6 +426,8 @@
           ]
         },
         "solid.rules.string-concat-in-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -380,6 +445,8 @@
           ]
         },
         "solid.rules.css-no-outline-none-without-focus-visible": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -397,6 +464,8 @@
           ]
         },
         "solid.rules.css-policy-contrast": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -405,7 +474,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Enforce minimum contrast ratio between foreground and background colors per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Enforce minimum contrast ratio per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -414,6 +483,8 @@
           ]
         },
         "solid.rules.css-policy-spacing": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -422,24 +493,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Enforce minimum letter-spacing, word-spacing, and paragraph spacing per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
-          "enumDescriptions": [
-            "Report as error",
-            "Report as warning",
-            "Disable this rule",
-            "Use default severity (warn)"
-          ]
-        },
-        "solid.rules.jsx-layout-policy-touch-target": {
-          "type": "string",
-          "enum": [
-            "error",
-            "warn",
-            "off",
-            "default"
-          ],
-          "default": "default",
-          "markdownDescription": "Enforce minimum interactive element sizes per accessibility policy via resolved layout signals.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Enforce minimum spacing per accessibility policy.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -448,6 +502,8 @@
           ]
         },
         "solid.rules.css-policy-typography": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -465,6 +521,8 @@
           ]
         },
         "solid.rules.css-require-reduced-motion-override": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -481,7 +539,28 @@
             "Use default severity (warn)"
           ]
         },
+        "solid.rules.jsx-layout-policy-touch-target": {
+          "scope": "language-overridable",
+          "order": 100,
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Enforce minimum interactive element sizes per accessibility policy via resolved layout signals.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
         "solid.rules.css-no-discrete-transition": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -499,6 +578,8 @@
           ]
         },
         "solid.rules.css-no-empty-keyframes": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -516,6 +597,8 @@
           ]
         },
         "solid.rules.no-layout-property-animation": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -533,6 +616,8 @@
           ]
         },
         "solid.rules.no-transition-all": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -541,7 +626,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Disallow transition: all and transition-property: all.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Disallow transition: all.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -550,6 +635,8 @@
           ]
         },
         "solid.rules.no-unknown-animation-name": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -567,6 +654,8 @@
           ]
         },
         "solid.rules.no-unused-keyframes": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -584,6 +673,8 @@
           ]
         },
         "solid.rules.declaration-no-overridden-within-rule": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -601,6 +692,8 @@
           ]
         },
         "solid.rules.media-query-overlap-conflict": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -618,6 +711,8 @@
           ]
         },
         "solid.rules.no-descending-specificity-conflict": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -635,6 +730,8 @@
           ]
         },
         "solid.rules.no-layer-order-inversion": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -652,6 +749,8 @@
           ]
         },
         "solid.rules.no-redundant-override-pairs": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -669,6 +768,8 @@
           ]
         },
         "solid.rules.css-no-unreferenced-component-class": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -686,6 +787,8 @@
           ]
         },
         "solid.rules.jsx-classlist-boolean-values": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -703,6 +806,8 @@
           ]
         },
         "solid.rules.jsx-classlist-no-accessor-reference": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -720,6 +825,8 @@
           ]
         },
         "solid.rules.jsx-classlist-no-constant-literals": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -737,6 +844,8 @@
           ]
         },
         "solid.rules.jsx-classlist-static-keys": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -754,6 +863,8 @@
           ]
         },
         "solid.rules.jsx-layout-classlist-geometry-toggle": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -771,6 +882,8 @@
           ]
         },
         "solid.rules.jsx-layout-fill-image-parent-must-be-sized": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -788,6 +901,8 @@
           ]
         },
         "solid.rules.jsx-layout-picture-source-ratio-consistency": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -805,6 +920,8 @@
           ]
         },
         "solid.rules.jsx-layout-unstable-style-toggle": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -822,6 +939,8 @@
           ]
         },
         "solid.rules.jsx-no-duplicate-class-token-class-classlist": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -839,6 +958,8 @@
           ]
         },
         "solid.rules.jsx-no-undefined-css-class": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -856,6 +977,8 @@
           ]
         },
         "solid.rules.jsx-style-kebab-case-keys": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -873,6 +996,8 @@
           ]
         },
         "solid.rules.jsx-style-no-function-values": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -890,6 +1015,8 @@
           ]
         },
         "solid.rules.jsx-style-no-unused-custom-prop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -907,6 +1034,8 @@
           ]
         },
         "solid.rules.jsx-style-policy": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -924,6 +1053,8 @@
           ]
         },
         "solid.rules.css-layout-animation-layout-property": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -941,6 +1072,8 @@
           ]
         },
         "solid.rules.css-layout-box-sizing-toggle-with-chrome": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -958,6 +1091,8 @@
           ]
         },
         "solid.rules.css-layout-conditional-display-collapse": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -975,6 +1110,8 @@
           ]
         },
         "solid.rules.css-layout-conditional-offset-shift": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -992,6 +1129,8 @@
           ]
         },
         "solid.rules.css-layout-conditional-white-space-wrap-shift": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1009,6 +1148,8 @@
           ]
         },
         "solid.rules.css-layout-content-visibility-no-intrinsic-size": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1026,6 +1167,8 @@
           ]
         },
         "solid.rules.css-layout-dynamic-slot-no-reserved-space": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1043,6 +1186,8 @@
           ]
         },
         "solid.rules.css-layout-font-swap-instability": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1060,6 +1205,8 @@
           ]
         },
         "solid.rules.css-layout-overflow-anchor-instability": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1077,6 +1224,8 @@
           ]
         },
         "solid.rules.css-layout-overflow-mode-toggle-instability": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1094,6 +1243,8 @@
           ]
         },
         "solid.rules.css-layout-scrollbar-gutter-instability": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1111,6 +1262,8 @@
           ]
         },
         "solid.rules.css-layout-sibling-alignment-outlier": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1128,6 +1281,8 @@
           ]
         },
         "solid.rules.css-layout-stateful-box-model-shift": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1145,6 +1300,8 @@
           ]
         },
         "solid.rules.css-layout-transition-layout-property": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1162,6 +1319,8 @@
           ]
         },
         "solid.rules.css-layout-unsized-replaced-element": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1179,6 +1338,8 @@
           ]
         },
         "solid.rules.css-no-custom-property-cycle": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1196,6 +1357,8 @@
           ]
         },
         "solid.rules.css-no-hardcoded-z-index": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1213,6 +1376,8 @@
           ]
         },
         "solid.rules.css-no-legacy-vh-100": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1229,7 +1394,28 @@
             "Use default severity (warn)"
           ]
         },
+        "solid.rules.css-prefer-logical-properties": {
+          "scope": "language-overridable",
+          "order": 100,
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Prefer logical properties over physical left/right properties.\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
         "solid.rules.css-z-index-requires-positioned-context": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1247,6 +1433,8 @@
           ]
         },
         "solid.rules.no-important": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1264,6 +1452,8 @@
           ]
         },
         "solid.rules.no-unresolved-custom-properties": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1281,6 +1471,8 @@
           ]
         },
         "solid.rules.no-unused-custom-properties": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1298,6 +1490,8 @@
           ]
         },
         "solid.rules.no-complex-selectors": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1315,6 +1509,8 @@
           ]
         },
         "solid.rules.no-duplicate-selectors": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1332,6 +1528,8 @@
           ]
         },
         "solid.rules.no-id-selectors": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1349,6 +1547,8 @@
           ]
         },
         "solid.rules.selector-max-attribute-and-universal": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1357,7 +1557,7 @@
             "default"
           ],
           "default": "default",
-          "markdownDescription": "Disallow selectors with attribute or universal selectors beyond configured limits.\n\nDefault severity: `off`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "markdownDescription": "Disallow selectors with attribute or universal selectors.\n\nDefault severity: `off`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
           "enumDescriptions": [
             "Report as error",
             "Report as warning",
@@ -1366,6 +1566,8 @@
           ]
         },
         "solid.rules.selector-max-specificity": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1383,6 +1585,8 @@
           ]
         },
         "solid.rules.css-no-empty-rule": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1400,6 +1604,8 @@
           ]
         },
         "solid.rules.css-no-unknown-container-name": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1417,6 +1623,8 @@
           ]
         },
         "solid.rules.css-no-unused-container-name": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1434,6 +1642,8 @@
           ]
         },
         "solid.rules.layer-requirement-for-component-rules": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1451,6 +1661,8 @@
           ]
         },
         "solid.rules.components-return-once": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1468,6 +1680,8 @@
           ]
         },
         "solid.rules.jsx-no-duplicate-props": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1485,6 +1699,8 @@
           ]
         },
         "solid.rules.jsx-no-script-url": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1502,6 +1718,8 @@
           ]
         },
         "solid.rules.jsx-no-undef": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1519,6 +1737,8 @@
           ]
         },
         "solid.rules.jsx-uses-vars": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1536,6 +1756,8 @@
           ]
         },
         "solid.rules.no-innerhtml": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1553,6 +1775,8 @@
           ]
         },
         "solid.rules.no-unknown-namespaces": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1570,6 +1794,8 @@
           ]
         },
         "solid.rules.show-truthy-conversion": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1587,6 +1813,8 @@
           ]
         },
         "solid.rules.suspense-boundary-missing": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1604,6 +1832,8 @@
           ]
         },
         "solid.rules.validate-jsx-nesting": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1621,6 +1851,8 @@
           ]
         },
         "solid.rules.avoid-arguments-object": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1638,6 +1870,8 @@
           ]
         },
         "solid.rules.avoid-chained-array-methods": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1655,6 +1889,8 @@
           ]
         },
         "solid.rules.avoid-defensive-copy-for-scalar-stat": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1672,6 +1908,8 @@
           ]
         },
         "solid.rules.avoid-delete-operator": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1689,6 +1927,8 @@
           ]
         },
         "solid.rules.avoid-function-allocation-in-hot-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1706,6 +1946,8 @@
           ]
         },
         "solid.rules.avoid-hidden-class-transition": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1723,6 +1965,8 @@
           ]
         },
         "solid.rules.avoid-intermediate-map-copy": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1740,6 +1984,8 @@
           ]
         },
         "solid.rules.avoid-megamorphic-property-access": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1757,6 +2003,8 @@
           ]
         },
         "solid.rules.avoid-quadratic-pair-comparison": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1774,6 +2022,8 @@
           ]
         },
         "solid.rules.avoid-quadratic-spread": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1791,6 +2041,8 @@
           ]
         },
         "solid.rules.avoid-repeated-indexof-check": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1808,6 +2060,8 @@
           ]
         },
         "solid.rules.avoid-slice-sort-pattern": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1825,6 +2079,8 @@
           ]
         },
         "solid.rules.avoid-sparse-arrays": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1842,6 +2098,8 @@
           ]
         },
         "solid.rules.avoid-spread-sort-map-join-pipeline": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1859,6 +2117,8 @@
           ]
         },
         "solid.rules.bounded-worklist-traversal": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1876,6 +2136,8 @@
           ]
         },
         "solid.rules.closure-captured-scope": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1893,6 +2155,8 @@
           ]
         },
         "solid.rules.closure-dom-circular": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1910,6 +2174,8 @@
           ]
         },
         "solid.rules.create-root-dispose": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1927,6 +2193,8 @@
           ]
         },
         "solid.rules.detached-dom-reference": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1944,6 +2212,8 @@
           ]
         },
         "solid.rules.effect-outside-root": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1961,6 +2231,8 @@
           ]
         },
         "solid.rules.finalization-registry-leak": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1978,6 +2250,8 @@
           ]
         },
         "solid.rules.no-char-array-materialization": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -1995,6 +2269,8 @@
           ]
         },
         "solid.rules.no-double-pass-delimiter-count": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2012,6 +2288,8 @@
           ]
         },
         "solid.rules.no-full-split-in-hot-parse": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2029,6 +2307,8 @@
           ]
         },
         "solid.rules.no-heavy-parser-constructor-in-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2046,6 +2326,8 @@
           ]
         },
         "solid.rules.no-leaked-abort-controller": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2063,6 +2345,8 @@
           ]
         },
         "solid.rules.no-leaked-animation-frame": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2080,6 +2364,8 @@
           ]
         },
         "solid.rules.no-leaked-event-listener": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2097,6 +2383,8 @@
           ]
         },
         "solid.rules.no-leaked-observer": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2114,6 +2402,8 @@
           ]
         },
         "solid.rules.no-leaked-subscription": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2131,6 +2421,8 @@
           ]
         },
         "solid.rules.no-leaked-timer": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2148,6 +2440,8 @@
           ]
         },
         "solid.rules.no-loop-string-plus-equals": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2165,6 +2459,8 @@
           ]
         },
         "solid.rules.no-multipass-split-pipeline": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2182,6 +2478,8 @@
           ]
         },
         "solid.rules.no-per-char-substring-scan": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2199,6 +2497,8 @@
           ]
         },
         "solid.rules.no-repeated-token-normalization": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2216,6 +2516,8 @@
           ]
         },
         "solid.rules.no-rescan-indexof-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2233,6 +2535,8 @@
           ]
         },
         "solid.rules.no-rest-slice-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2250,6 +2554,8 @@
           ]
         },
         "solid.rules.no-shift-splice-head-consume": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2267,6 +2573,8 @@
           ]
         },
         "solid.rules.no-write-only-index": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2284,6 +2592,8 @@
           ]
         },
         "solid.rules.prefer-charcode-over-regex-test": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2301,6 +2611,8 @@
           ]
         },
         "solid.rules.prefer-index-scan-over-string-iterator": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2318,6 +2630,8 @@
           ]
         },
         "solid.rules.prefer-lazy-property-access": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2335,6 +2649,8 @@
           ]
         },
         "solid.rules.prefer-map-lookup-over-linear-scan": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2352,6 +2668,8 @@
           ]
         },
         "solid.rules.prefer-map-over-object-dictionary": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2369,6 +2687,8 @@
           ]
         },
         "solid.rules.prefer-precompiled-regex": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2386,6 +2706,8 @@
           ]
         },
         "solid.rules.prefer-set-has-over-equality-chain": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2403,6 +2725,8 @@
           ]
         },
         "solid.rules.prefer-set-lookup-in-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2420,6 +2744,8 @@
           ]
         },
         "solid.rules.recursive-timer": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2437,6 +2763,8 @@
           ]
         },
         "solid.rules.self-referencing-store": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2454,6 +2782,8 @@
           ]
         },
         "solid.rules.unbounded-collection": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2471,6 +2801,8 @@
           ]
         },
         "solid.rules.unbounded-signal-accumulation": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2488,6 +2820,8 @@
           ]
         },
         "solid.rules.async-tracked": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2505,6 +2839,8 @@
           ]
         },
         "solid.rules.children-helper-misuse": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2522,6 +2858,8 @@
           ]
         },
         "solid.rules.cleanup-scope": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2539,6 +2877,8 @@
           ]
         },
         "solid.rules.derived-signal": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2556,6 +2896,8 @@
           ]
         },
         "solid.rules.effect-as-memo": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2573,6 +2915,8 @@
           ]
         },
         "solid.rules.effect-as-mount": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2590,6 +2934,8 @@
           ]
         },
         "solid.rules.inline-component": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2607,6 +2953,8 @@
           ]
         },
         "solid.rules.no-top-level-signal-call": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2624,6 +2972,8 @@
           ]
         },
         "solid.rules.ref-early-access": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2641,6 +2991,8 @@
           ]
         },
         "solid.rules.resource-access-unchecked": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2657,7 +3009,28 @@
             "Use default severity (error)"
           ]
         },
+        "solid.rules.resource-implicit-suspense": {
+          "scope": "language-overridable",
+          "order": 100,
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "off",
+            "default"
+          ],
+          "default": "default",
+          "markdownDescription": "Detect createResource that implicitly triggers or permanently breaks Suspense boundaries. *(fixable)*\n\nDefault severity: `warn`\n\n*Editor-only override. For CLI/CI, configure in `eslint.config.mjs`.*",
+          "enumDescriptions": [
+            "Report as error",
+            "Report as warning",
+            "Disable this rule",
+            "Use default severity (warn)"
+          ]
+        },
         "solid.rules.resource-refetch-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2675,6 +3048,8 @@
           ]
         },
         "solid.rules.signal-call": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2692,6 +3067,8 @@
           ]
         },
         "solid.rules.signal-in-loop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2709,6 +3086,8 @@
           ]
         },
         "solid.rules.store-reactive-break": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2726,6 +3105,8 @@
           ]
         },
         "solid.rules.transition-pending-unchecked": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2743,6 +3124,8 @@
           ]
         },
         "solid.rules.batch-optimization": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2760,6 +3143,8 @@
           ]
         },
         "solid.rules.imports": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2777,6 +3162,8 @@
           ]
         },
         "solid.rules.index-vs-for": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2794,6 +3181,8 @@
           ]
         },
         "solid.rules.no-react-deps": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2811,6 +3200,8 @@
           ]
         },
         "solid.rules.no-react-specific-props": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2828,6 +3219,8 @@
           ]
         },
         "solid.rules.prefer-for": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2845,6 +3238,8 @@
           ]
         },
         "solid.rules.prefer-memo-complex-styles": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2862,6 +3257,8 @@
           ]
         },
         "solid.rules.prefer-show": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2879,6 +3276,8 @@
           ]
         },
         "solid.rules.self-closing-comp": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2896,6 +3295,8 @@
           ]
         },
         "solid.rules.style-prop": {
+          "scope": "language-overridable",
+          "order": 100,
           "type": "string",
           "enum": [
             "error",
@@ -2918,22 +3319,26 @@
       {
         "command": "solid.restartServer",
         "title": "Solid: Restart Language Server",
-        "icon": "$(refresh)"
+        "icon": "$(refresh)",
+        "category": "Solid"
       },
       {
         "command": "solid.showReactiveGraph",
         "title": "Solid: Show Reactive Graph",
-        "icon": "$(graph)"
+        "icon": "$(graph)",
+        "category": "Solid"
       },
       {
         "command": "solid.showOutput",
         "title": "Solid: Show Output Channel",
-        "icon": "$(output)"
+        "icon": "$(output)",
+        "category": "Solid"
       },
       {
         "command": "solid.showMemoryUsage",
         "title": "Solid: Show Memory Usage",
-        "icon": "$(dashboard)"
+        "icon": "$(dashboard)",
+        "category": "Solid"
       }
     ],
     "semanticTokenTypes": [
@@ -2992,28 +3397,136 @@
         "description": "Indicates a declaration site for a reactive construct"
       }
     ],
+    "semanticTokenScopes": [
+      {
+        "scopes": {
+          "solidSignal": [
+            "variable.other.object.property.solid.signal"
+          ],
+          "solidStore": [
+            "variable.other.object.property.solid.store"
+          ],
+          "solidMemo": [
+            "variable.other.object.property.solid.memo"
+          ],
+          "solidDerived": [
+            "variable.other.object.property.solid.derived"
+          ],
+          "solidProps": [
+            "variable.parameter.solid.props"
+          ],
+          "solidResource": [
+            "variable.other.object.property.solid.resource"
+          ],
+          "solidAccessor": [
+            "variable.other.object.property.solid.accessor"
+          ],
+          "solidEffect": [
+            "entity.name.function.solid.effect"
+          ]
+        }
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
           "command": "solid.restartServer",
-          "when": "editorLangId =~ /typescriptreact|javascriptreact|typescript|javascript/"
+          "when": "editorLangId =~ /typescriptreact|javascriptreact|typescript|javascript|css|scss|sass|less/"
         },
         {
           "command": "solid.showReactiveGraph",
           "when": "editorLangId =~ /typescriptreact|javascriptreact/"
+        },
+        {
+          "command": "solid.showOutput"
+        },
+        {
+          "command": "solid.showMemoryUsage"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "solid.showReactiveGraph",
+          "when": "editorLangId =~ /typescriptreact|javascriptreact/",
+          "group": "1_modification"
         }
       ]
-    }
+    },
+    "configurationDefaults": {
+      "[javascript]": {
+        "solid.enable": true
+      },
+      "[typescript]": {
+        "solid.enable": true
+      },
+      "[javascriptreact]": {
+        "solid.enable": true
+      },
+      "[typescriptreact]": {
+        "solid.enable": true
+      },
+      "[css]": {
+        "solid.enable": true
+      },
+      "[scss]": {
+        "solid.enable": true
+      }
+    },
+    "keybindings": [
+      {
+        "command": "solid.restartServer",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorLangId =~ /typescriptreact|javascriptreact|typescript|javascript/"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "ganko",
+        "owner": "solid",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+)\\s+(error|warning)\\s+(.+)\\s+\\S+$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "ganko",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "ganko command to execute (e.g. lint)"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional arguments"
+          }
+        }
+      }
+    ]
   },
   "scripts": {
     "generate": "bun run scripts/generate-package-json.ts",
+    "prebuild": "bun run generate",
     "build": "tsup",
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await Promise.all(['dist', 'node_modules'].map((p) => rm(p, { recursive: true, force: true })));\"",
     "lint": "eslint src",
     "dev": "tsup --watch",
     "package": "bun run generate && vsce package --no-dependencies && code-insiders --install-extension ganko-vscode-$(node -p \"require('./package.json').version\").vsix --force",
     "tsc": "tsc --noEmit",
-    "publish:vsce": "vsce publish --no-dependencies"
+    "publish:vsce": "bun run generate && vsce publish --no-dependencies"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",

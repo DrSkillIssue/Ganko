@@ -110,7 +110,7 @@ export const transitionPendingUnchecked = defineSolidRule({
         // isPending is destructured but never used
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "transition-pending-unchecked",

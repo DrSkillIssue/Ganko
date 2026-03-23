@@ -4,7 +4,7 @@
  * Query functions for traversing the reactive dependency and
  * ownership graphs built by the dependencies phase.
  */
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { ComputationEntity, ComputationKind, DependencyEdge } from "../entities/computation";
 import type { VariableEntity } from "../entities/variable";
 

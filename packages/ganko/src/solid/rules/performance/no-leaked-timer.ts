@@ -79,7 +79,7 @@ export const noLeakedTimer = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           call.node,
           graph.sourceFile,
           "no-leaked-timer",

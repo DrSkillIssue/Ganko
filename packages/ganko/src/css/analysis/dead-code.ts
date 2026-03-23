@@ -15,7 +15,7 @@ import type {
   SCSSFunctionEntity,
   PlaceholderEntity,
 } from "../entities";
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 
 /**
  * Report of unused code in the CSS.

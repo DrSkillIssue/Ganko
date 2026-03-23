@@ -93,7 +93,7 @@ export const noDestructure = defineSolidRule({
         messageId = "noDestructure"
       }
 
-      emit(createDiagnostic(graph.file, pattern, graph.sourceFile, "no-destructure", messageId, messages[messageId], "error"))
+      emit(createDiagnostic(graph.filePath, pattern, graph.sourceFile, "no-destructure", messageId, messages[messageId], "error"))
     }
   },
 })

@@ -165,7 +165,7 @@ export const preferSetHasOverEqualityChain = defineSolidRule({
 
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               firstNode,
               graph.sourceFile,
               "prefer-set-has-over-equality-chain",

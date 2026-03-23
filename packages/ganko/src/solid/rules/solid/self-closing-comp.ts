@@ -201,7 +201,7 @@ export const selfClosingComp = defineSolidRule({
           text: " />",
         }];
         emit(
-          createDiagnostic(graph.file, openingElement, graph.sourceFile, "self-closing-comp", "selfClose", message, "warn", fix),
+          createDiagnostic(graph.filePath, openingElement, graph.sourceFile, "self-closing-comp", "selfClose", message, "warn", fix),
         );
       }
     }

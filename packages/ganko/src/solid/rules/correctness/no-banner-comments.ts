@@ -124,7 +124,7 @@ export const noBannerComments = defineSolidRule({
       }]
       emit(
         createDiagnosticFromComment(
-          graph.file,
+          graph.filePath,
           comment,
           "no-banner-comments",
           "banner",

@@ -55,7 +55,7 @@ export const avoidDefensiveCopyForScalarStat = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           firstArg,
           graph.sourceFile,
           "avoid-defensive-copy-for-scalar-stat",

@@ -12,7 +12,7 @@ import type {
 } from "vscode-languageserver";
 import ts from "typescript";
 import type { FeatureHandlerContext } from "./handler-context";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
 const INITIAL_STACK_SIZE = 128;
@@ -186,7 +186,8 @@ export function handleSelectionRange(
   params: SelectionRangeParams,
   ctx: FeatureHandlerContext,
 ): SelectionRange[] | null {
-  const filePath = uriToPath(params.textDocument.uri);
+  const filePath = uriToCanonicalPath(params.textDocument.uri);
+  if (filePath === null) return null;
   const sf = ctx.getAST(filePath);
   if (!sf) return null;
   if (ctx.log.isLevelEnabled(Level.Trace)) ctx.log.trace(`selectionRange: ${params.positions.length} positions for ${filePath}`);

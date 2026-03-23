@@ -106,7 +106,7 @@ export const noUnknownNamespaces = defineSolidRule({
         if (isComponent) {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               attrNameNode,
               graph.sourceFile,
               "no-unknown-namespaces",
@@ -124,7 +124,7 @@ export const noUnknownNamespaces = defineSolidRule({
         if (category === "style") {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               attrNameNode,
               graph.sourceFile,
               "no-unknown-namespaces",
@@ -139,7 +139,7 @@ export const noUnknownNamespaces = defineSolidRule({
         if (category === "class") {
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               attrNameNode,
               graph.sourceFile,
               "no-unknown-namespaces",
@@ -153,7 +153,7 @@ export const noUnknownNamespaces = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             attrNameNode,
             graph.sourceFile,
             "no-unknown-namespaces",

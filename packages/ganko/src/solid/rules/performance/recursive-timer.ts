@@ -19,7 +19,7 @@
 
 import ts from "typescript"
 import type { Emit } from "../../../graph"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { CallEntity, FunctionEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
@@ -86,7 +86,7 @@ export const recursiveTimer = defineSolidRule({
 function emitDiagnostic(graph: SolidGraph, emit: Emit, call: CallEntity, name: string): void {
   emit(
     createDiagnostic(
-      graph.file,
+      graph.filePath,
       call.node,
       graph.sourceFile,
       "recursive-timer",

@@ -1,11 +1,11 @@
-import type { SolidGraph } from "../../impl";
+import type { SolidBuildContext } from "../../build-context"
 import type { FileEntity } from "../../entities/file";
 import type { FunctionEntity } from "../../entities/function";
 import type { JSXElementEntity } from "../../entities/jsx";
 import type { ClassEntity } from "../../entities/class";
 
 export interface VisitorContext {
-  readonly graph: SolidGraph;
+  readonly graph: SolidBuildContext;
   readonly file: FileEntity;
   
   // Mutable stacks (handlers push, visitors pop)
@@ -21,7 +21,7 @@ export interface VisitorContext {
   readonly componentFunctions: FunctionEntity[];
 }
 
-export function createVisitorContext(graph: SolidGraph): VisitorContext {
+export function createVisitorContext(graph: SolidBuildContext): VisitorContext {
   return {
     graph,
     file: graph.fileEntity,

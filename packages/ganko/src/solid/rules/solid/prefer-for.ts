@@ -28,7 +28,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { CallEntity } from "../../entities";
 import { isMethodCallWithName, getMethodObject } from "../../util";
 import type { FixOperation } from "../../../diagnostic"
@@ -264,7 +264,7 @@ export const preferFor = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           issue.callNode,
           graph.sourceFile,
           "prefer-for",

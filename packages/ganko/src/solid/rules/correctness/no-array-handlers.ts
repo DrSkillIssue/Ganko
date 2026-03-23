@@ -93,7 +93,7 @@ export const noArrayHandlers = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             attr.node,
             graph.sourceFile,
             "no-array-handlers",
@@ -123,7 +123,7 @@ export const noArrayHandlers = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             attr.node,
             graph.sourceFile,
             "no-array-handlers",

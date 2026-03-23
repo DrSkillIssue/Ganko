@@ -1,13 +1,13 @@
 
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import type { ExportEntity } from "../entities/export";
 import type { ReactiveKind } from "../entities/variable";
 import { ExportKind } from "../entities/export";
 import { isComponentName } from "../util/function";
 
-export function runExportsPhase(graph: SolidGraph, input: SolidInput): void {
+export function runExportsPhase(graph: SolidBuildContext, input: SolidInput): void {
     const sourceFile = input.sourceFile;
     const statements = sourceFile.statements;
     if (statements.length === 0) return;
@@ -65,7 +65,7 @@ function hasDefaultModifier(node: ts.Statement): boolean {
  * Extracts exports from statements with export modifiers.
  * Handles: export function foo(), export const x = 1, export class Foo {}
  */
-function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
+function extractModifierExport(stmt: ts.Statement, graph: SolidBuildContext): void {
   const isDefault = hasDefaultModifier(stmt);
 
   if (ts.isFunctionDeclaration(stmt) && stmt.name) {
@@ -156,7 +156,7 @@ function extractModifierExport(stmt: ts.Statement, graph: SolidGraph): void {
  * Extracts named exports from an ExportDeclaration node.
  * Handles: export { x, y }, export { x as y }, export { x } from "./mod"
  */
-function extractNamedExportDeclaration(stmt: ts.ExportDeclaration, graph: SolidGraph): void {
+function extractNamedExportDeclaration(stmt: ts.ExportDeclaration, graph: SolidBuildContext): void {
   const isStmtTypeOnly = stmt.isTypeOnly;
 
   // export { x, y } or export { x } from "./mod"
@@ -219,7 +219,7 @@ function extractNamedExportDeclaration(stmt: ts.ExportDeclaration, graph: SolidG
  * Extracts default export from an ExportAssignment node.
  * Handles: export default expr, export default function() {}
  */
-function extractDefaultExport(stmt: ts.ExportAssignment, graph: SolidGraph): void {
+function extractDefaultExport(stmt: ts.ExportAssignment, graph: SolidBuildContext): void {
   const expression = stmt.expression;
 
   let entityId = -1;

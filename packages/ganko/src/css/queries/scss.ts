@@ -1,7 +1,7 @@
 /**
  * SCSS-specific query functions (mixins, functions, placeholders)
  */
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import type {
   MixinEntity,
   MixinIncludeEntity,

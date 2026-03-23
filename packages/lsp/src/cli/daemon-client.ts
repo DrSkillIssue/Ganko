@@ -8,6 +8,7 @@
 import { connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { getRuntime } from "@drskillissue/ganko-shared";
 import {
   daemonSocketPath,
   MAX_CONNECT_RETRIES,
@@ -56,18 +57,11 @@ function tryConnect(sockPath: string): Promise<Socket> {
  * `daemon start --project-root <root>` subcommand. The child is
  * detached and unref'd so it survives the parent's exit.
  */
-/** Detect Bun-compiled single-file executable where process.execPath IS the CLI binary. */
-function isBunCompiled(): boolean {
-  return process.versions["bun"] !== undefined && process.execPath === process.argv[0];
-}
-
 function spawnDaemon(projectRoot: string): void {
-  const args = isBunCompiled()
-    ? ["daemon", "start", "--project-root", projectRoot]
-    : [resolve(__dirname, "entry.js"), "daemon", "start", "--project-root", projectRoot];
+  const entryScript = resolve(__dirname, "entry.js");
   const child = spawn(
-    process.execPath,
-    args,
+    getRuntime(),
+    [entryScript, "daemon", "start", "--project-root", projectRoot],
     {
       detached: true,
       stdio: "ignore",

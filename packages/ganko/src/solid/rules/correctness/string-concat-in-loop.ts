@@ -6,7 +6,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic } from "../../../diagnostic";
 import type { VariableEntity } from "../../entities/variable"
@@ -100,7 +100,7 @@ export const stringConcatInLoop = defineSolidRule({
 
         const node = assignment.node
         if (ts.isBinaryExpression(node)) {
-          emit(createDiagnostic(graph.file, node, graph.sourceFile, "string-concat-in-loop", "stringConcatInLoop", messages.stringConcatInLoop, "error"))
+          emit(createDiagnostic(graph.filePath, node, graph.sourceFile, "string-concat-in-loop", "stringConcatInLoop", messages.stringConcatInLoop, "error"))
         }
       }
     }

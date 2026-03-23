@@ -56,7 +56,7 @@ export const avoidArgumentsObject = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           ref,
           graph.sourceFile,
           "avoid-arguments-object",

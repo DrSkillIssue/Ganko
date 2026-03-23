@@ -25,7 +25,7 @@ import ts from "typescript";
 import type { ImportEntity, ImportSpecifierEntity } from "../../entities/import"
 import type { Diagnostic } from "../../../diagnostic"
 import type { Emit } from "../../../graph"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { iterateImports } from "../../queries/iterate"
@@ -213,7 +213,7 @@ function checkImport(entity: ImportEntity, emit: Emit, graph: SolidGraph): void 
   for (let i = 0, len = specifiers.length; i < len; i++) {
     const spec = specifiers[i];
     if (!spec) continue;
-    const diagnostic = checkSpecifier(spec, declaration, validSource, graph.file, graph.sourceFile)
+    const diagnostic = checkSpecifier(spec, declaration, validSource, graph.filePath, graph.sourceFile)
     if (diagnostic) {
       emit(diagnostic)
     }

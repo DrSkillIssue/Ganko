@@ -8,14 +8,12 @@
 
 import { FileChangeType } from "vscode-languageserver/node";
 import {
-  canonicalPath,
-  classifyFile,
-  uriToPath,
+  uriToCanonicalPath,
+  acceptProjectRoot,
+  buildWorkspaceLayout,
   parseLogLevel,
-  CROSS_FILE_DEPENDENTS,
   Level,
 } from "@drskillissue/ganko-shared";
-import type { FileKind } from "@drskillissue/ganko-shared";
 import {
   handleInitialize,
   handleInitialized,
@@ -25,16 +23,18 @@ import {
   reloadESLintConfig,
   effectiveExclude,
 } from "../handlers/lifecycle";
-import { createFileIndex } from "../../core/file-index";
+import { createFileRegistry } from "../../core/file-registry";
 import { clearDiagnostics } from "../handlers/diagnostics";
-import { publishFileDiagnostics, propagateTsDiagnostics } from "../diagnostics-push";
-import type { LifecyclePhase } from "../server-state";
-import type { ServerContext } from "../connection";
+import { runDiagnosticPipelineBatch } from "../diagnostic-pipeline";
+import { createCancellationSource } from "../cancellation";
+import { createWorkspaceChangeHandler, type FileChangeEvent } from "../workspace-change-handler";
+import type { LifecyclePhase } from "../session";
+import type { ServerContext } from "../server";
 import type { LifecycleHandlerContext } from "../handlers/handler-context";
-import { evictCachesForPath } from "../change-processor";
 
 export function setupLifecycleHandlers(context: ServerContext): void {
   const { connection, serverState } = context;
+  const workspaceHandler = createWorkspaceChangeHandler();
 
   const lifecycleCtx: LifecycleHandlerContext = {
     connection: context.connection,
@@ -75,93 +75,56 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     await context.ready;
     const watchPhase = context.phase;
     if (watchPhase.tag !== "running" && watchPhase.tag !== "enriched") return;
-    let eslintConfigChanged = false;
-    const changes = params.changes;
-    const paths: string[] = [];
-    const fileIndex = watchPhase.tag === "enriched" ? watchPhase.fileIndex : watchPhase.fileIndex;
 
-    for (let i = 0; i < changes.length; i++) {
-      const change = changes[i];
+    let eslintConfigChanged = false;
+    const fileEvents: FileChangeEvent[] = [];
+    const deletedUris: string[] = [];
+
+    for (let i = 0; i < params.changes.length; i++) {
+      const change = params.changes[i];
       if (!change) continue;
-      const path = uriToPath(change.uri);
-      paths.push(path);
+      const path = uriToCanonicalPath(change.uri);
+      if (path === null) continue;
 
       if (path.endsWith("eslint.config.mjs") || path.endsWith("eslint.config.js") || path.endsWith("eslint.config.cjs")) {
         eslintConfigChanged = true;
       }
 
       if (change.type === FileChangeType.Created) {
-        fileIndex?.add(path);
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
-      }
-      if (change.type === FileChangeType.Changed) {
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
-      }
-      if (change.type === FileChangeType.Deleted) {
-        fileIndex?.remove(path);
-        clearDiagnostics(connection, change.uri);
-        evictCachesForPath(context.diagCache, context.diagManager, context.graphCache, path);
+        fileEvents.push({ path, kind: "created" });
+      } else if (change.type === FileChangeType.Changed) {
+        fileEvents.push({ path, kind: "changed" });
+      } else if (change.type === FileChangeType.Deleted) {
+        fileEvents.push({ path, kind: "deleted" });
+        deletedUris.push(change.uri);
       }
     }
+
+    for (let i = 0; i < deletedUris.length; i++) {
+      const uri = deletedUris[i];
+      if (uri) clearDiagnostics(connection, uri);
+    }
+
+    // Process file events via WorkspaceChangeHandler
+    await workspaceHandler.processFileEvents(context, fileEvents);
 
     if (eslintConfigChanged) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        const newFileIndex = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const curPhase = context.phase;
         if (curPhase.tag === "enriched") {
-          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
-        } else if (curPhase.tag === "running") {
-          lifecycleCtx.transitionPhase({ ...curPhase, fileIndex: newFileIndex });
+          const root = acceptProjectRoot(serverState.rootPath);
+          const newLayout = buildWorkspaceLayout(root, context.log);
+          const newRegistry = createFileRegistry(newLayout, effectiveExclude(serverState), context.log);
+          workspaceHandler.processRegistryRebuild(context, newRegistry, newLayout);
+          lifecycleCtx.transitionPhase({ ...curPhase, registry: newRegistry, layout: newLayout });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) {
-        context.changeProcessor.processWorkspaceChange();
+        // Workspace-level rediagnose: all open files
+        rediagnoseAllOpen(context);
         return;
       }
-    }
-
-    const alreadyDiagnosed = new Set<string>();
-    {
-      const needed = new Set<FileKind>();
-      for (let i = 0, len = paths.length; i < len; i++) {
-        const p = paths[i];
-        if (!p) continue;
-        const deps = CROSS_FILE_DEPENDENTS[classifyFile(p)];
-        for (const dep of deps) needed.add(dep);
-      }
-      if (needed.size > 0) {
-        const open = context.docManager.openPaths();
-        for (let i = 0, len = open.length; i < len; i++) {
-          const p = open[i];
-          if (!p) continue;
-          if (needed.has(classifyFile(p))) alreadyDiagnosed.add(p);
-        }
-      }
-    }
-
-    context.changeProcessor.processChanges(
-      paths.map(p => ({ path: p, kind: "changed" as const })),
-    );
-
-    const rediagPhase = context.phase;
-    if (rediagPhase.tag === "running" || rediagPhase.tag === "enriched") {
-      const project = rediagPhase.project;
-      for (let i = 0; i < paths.length; i++) {
-        const path = paths[i];
-        if (!path) continue;
-        const key = canonicalPath(path);
-        if (alreadyDiagnosed.has(key)) continue;
-        const uri = context.docManager.uriForPath(key);
-        if (uri === undefined) continue;
-        if (context.docManager.getByUri(uri) === null) continue;
-
-        const doc = context.documents.get(uri);
-        const content = doc !== undefined ? doc.getText() : undefined;
-        if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`didChangeWatchedFiles: re-diagnosing open file ${key}`);
-        publishFileDiagnostics(context, project, key, content);
-      }
-      propagateTsDiagnostics(context, project, new Set());
     }
   });
 
@@ -179,31 +142,46 @@ export function setupLifecycleHandlers(context: ServerContext): void {
     let needRediagnose = result.rediagnose || result.rebuildIndex;
 
     if (result.rebuildIndex && serverState.rootPath) {
-      const excludes = effectiveExclude(serverState);
-      const newIdx = createFileIndex(serverState.rootPath, excludes, context.log);
       const cfgPhase = context.phase;
       if (cfgPhase.tag === "enriched") {
-        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
-      } else if (cfgPhase.tag === "running") {
-        lifecycleCtx.transitionPhase({ ...cfgPhase, fileIndex: newIdx });
+        const excludes = effectiveExclude(serverState);
+        const root = acceptProjectRoot(serverState.rootPath);
+        const newLayout = buildWorkspaceLayout(root, context.log);
+        const newRegistry = createFileRegistry(newLayout, excludes, context.log);
+        workspaceHandler.processRegistryRebuild(context, newRegistry, newLayout);
+        lifecycleCtx.transitionPhase({ ...cfgPhase, registry: newRegistry, layout: newLayout });
+        if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file registry rebuilt: ${newRegistry.solidFiles.size} solid, ${newRegistry.cssFiles.size} css`);
       }
-      if (context.log.isLevelEnabled(Level.Info)) context.log.info(`file index rebuilt: ${newIdx.solidFiles.size} solid, ${newIdx.cssFiles.size} css (exclude: ${excludes.length} patterns)`);
     }
 
     if (result.reloadEslint) {
       const outcome = await reloadESLintConfig(serverState, context.log);
       if (outcome.ignoresChanged && serverState.rootPath) {
-        const newIdx = createFileIndex(serverState.rootPath, effectiveExclude(serverState), context.log);
         const eslintPhase = context.phase;
         if (eslintPhase.tag === "enriched") {
-          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
-        } else if (eslintPhase.tag === "running") {
-          lifecycleCtx.transitionPhase({ ...eslintPhase, fileIndex: newIdx });
+          const root = acceptProjectRoot(serverState.rootPath);
+          const newLayout = buildWorkspaceLayout(root, context.log);
+          const newRegistry = createFileRegistry(newLayout, effectiveExclude(serverState), context.log);
+          workspaceHandler.processRegistryRebuild(context, newRegistry, newLayout);
+          lifecycleCtx.transitionPhase({ ...eslintPhase, registry: newRegistry, layout: newLayout });
         }
       }
       if (outcome.overridesChanged || outcome.ignoresChanged) needRediagnose = true;
     }
 
-    if (needRediagnose) context.changeProcessor.processWorkspaceChange(result.rediagnose);
+    if (needRediagnose) rediagnoseAllOpen(context);
   });
+}
+
+/** Re-diagnose all open files via pipeline. Replaces ChangeProcessor.processWorkspaceChange(). */
+function rediagnoseAllOpen(context: ServerContext): void {
+  const phase = context.phase;
+  if (phase.tag !== "running" && phase.tag !== "enriched") return;
+
+  context.graphCache.invalidateCrossFileResults();
+  const openPaths = context.docManager.openPaths() as string[];
+  if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`rediagnoseAllOpen: ${openPaths.length} open files`);
+
+  const token = createCancellationSource().token;
+  runDiagnosticPipelineBatch(context, phase.project, openPaths, true, token);
 }

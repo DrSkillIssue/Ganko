@@ -1,43 +1,21 @@
 /**
  * Analyze — Shared diagnostic analysis pipeline
  *
- * Extracted from the LSP server so both the LSP connection and CLI lint
- * command can run single-file and cross-file diagnostics without duplication.
+ * Uses CompilationTracker + AnalysisDispatcher for cross-file analysis.
  */
 import {
   createSolidInput,
   analyzeInput,
-  buildSolidGraph,
-  buildCSSGraph,
-  buildLayoutGraph,
-  runCrossFileRules,
-  type GraphCache,
   createOverrideEmit,
+  createAnalysisDispatcher,
+  allRules,
 } from "@drskillissue/ganko";
-import type { CSSInput, Diagnostic, SolidGraph, TailwindValidator } from "@drskillissue/ganko";
-import { readFileSync } from "node:fs";
-import { canonicalPath, classifyFile, contentHash, Level } from "@drskillissue/ganko-shared";
+import type { Diagnostic, TailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
-import type { FileIndex } from "./file-index";
-
-/**
- * Read all CSS files from disk, skipping unreadable entries.
- *
- * @param cssFiles - Set of canonical CSS file paths
- * @returns Array of `{ path, content }` pairs
- */
-export function readCSSFilesFromDisk(
-  cssFiles: ReadonlySet<string>,
-): { path: string; content: string }[] {
-  const result: { path: string; content: string }[] = [];
-  for (const cssPath of cssFiles) {
-    try {
-      result.push({ path: cssPath, content: readFileSync(cssPath, "utf-8") });
-    } catch { /* skip unreadable */ }
-  }
-  return result;
-}
+import type { FileRegistry } from "./file-registry";
+import { buildFullCompilation } from "./compilation-builder";
 
 export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; emit: (d: Diagnostic) => void } {
   const results: Diagnostic[] = [];
@@ -47,34 +25,6 @@ export function createEmit(overrides?: RuleOverrides): { results: Diagnostic[]; 
   return { results, emit };
 }
 
-/**
- * Build a SolidGraph for a file path using the project's TypeScript service.
- *
- * @param project - The ganko Project instance
- * @param path - Canonical file path
- * @param logger - Logger for debug output
- * @returns Builder function that produces a SolidGraph
- */
-export function buildSolidGraphForPath(project: Project, path: string, logger?: Logger): () => SolidGraph {
-  return () => {
-    const program = project.getProgram();
-    const input = createSolidInput(path, program, logger);
-    return buildSolidGraph(input);
-  };
-}
-
-/**
- * Run single-file diagnostics.
- *
- * When content is provided (unsaved buffer), uses createSolidInput + analyzeInput
- * to analyze in-memory content rather than reading from disk.
- *
- * @param project - The ganko Project
- * @param path - File path to analyze
- * @param content - In-memory content for unsaved buffers
- * @param overrides - Rule severity overrides
- * @returns Diagnostics produced
- */
 export function runSingleFileDiagnostics(
   project: Project,
   path: string,
@@ -84,208 +34,102 @@ export function runSingleFileDiagnostics(
 ): readonly Diagnostic[] {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
-  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics ENTER: ${key} kind=${kind} content=${content !== undefined ? `${content.length} chars` : "from disk"}`);
+
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile.enter: path=${key} kind=${kind} hasContent=${content !== undefined}`);
 
   if (content === undefined) {
-    const result = project.run([key]);
-    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (runner path)`);
-    return result;
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace("runSingleFile: no content, delegating to project.run");
+    return project.run([key]);
   }
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
     const program = project.getProgram();
-    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics: ${key} program=yes`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace("runSingleFile: got program, creating solid input");
+    const sourceFile = program.getSourceFile(key);
+    if (!sourceFile) {
+      if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile: sourceFile NOT FOUND for ${key}`);
+      return [];
+    }
     const input = createSolidInput(key, program, logger);
     analyzeInput(input, emit);
-    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${results.length} diags (solid path)`);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile.done: ${results.length} diagnostics`);
     return results;
   }
 
-  if (kind === "css") {
-    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} 0 diags (css deferred to cross-file)`);
-    return [];
-  }
+  if (kind === "css") return [];
 
-  const result = project.run([key]);
-  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFileDiagnostics EXIT: ${key} ${result.length} diags (fallback runner path)`);
-  return result;
+  return project.run([key]);
 }
 
-/**
- * Run cross-file analysis using cached graphs.
- *
- * Builds/caches SolidGraphs for each solid file and a single CSSGraph
- * for all CSS files. Only graphs with stale versions are rebuilt.
- * Runs cross-file rules against the cached graphs.
- *
- * @param path - File path to collect diagnostics for
- * @param fileIndex - Workspace file index
- * @param project - Project instance
- * @param cache - Versioned graph cache
- * @param tailwind - Resolved Tailwind validator
- * @param resolveContent - Resolves current file content
- * @param overrides - Rule severity overrides
- * @returns Diagnostics attributed to the requested file
- */
 export function runCrossFileDiagnostics(
   path: string,
-  fileIndex: FileIndex,
+  fileIndex: FileRegistry,
   project: Project,
-  cache: GraphCache,
+  tracker: CompilationTracker,
   tailwind: TailwindValidator | null,
   resolveContent: (path: string) => string | null,
   overrides?: RuleOverrides,
   externalCustomProperties?: ReadonlySet<string>,
+  logger?: Logger,
 ): readonly Diagnostic[] {
-  const log = cache.logger;
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics ENTER: path=${path} solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
+  if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) return [];
 
-  if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) {
-    log.debug("runCrossFileDiagnostics EXIT: no files to analyze");
-    return [];
-  }
-
-  /* Fast path: if no graphs changed since the last workspace-level run,
-     return the cached per-file slice directly — O(1) instead of re-running
-     33 rules across all 230+ files. */
-  const cached = cache.getCachedCrossFileResults();
-  if (cached !== null) {
-    const result = cached.get(path) ?? [];
-    if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics FAST PATH: ${result.length} diags for ${path}`);
-    return result;
-  }
-
-  log.debug("runCrossFileDiagnostics SLOW PATH: rebuilding all graphs");
+  const cached = tracker.getCachedCrossFileResults();
+  if (cached !== null) return cached.get(path) ?? [];
 
   const { results: allResults, emit } = createEmit(overrides);
-  rebuildGraphsAndRunCrossFileRules(fileIndex, project, cache, tailwind, resolveContent, emit, externalCustomProperties);
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics: ${allResults.length} diags`);
+  rebuildAndRunDispatcher(fileIndex, project, tailwind, resolveContent, emit, externalCustomProperties, logger);
 
-  /* Cache all results bucketed by file. Subsequent calls for other files
-     hit the fast path above until a graph changes. */
-  cache.setCachedCrossFileResults(allResults);
-
-  const result = cache.getCachedCrossFileResults()?.get(path) ?? [];
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`runCrossFileDiagnostics EXIT: ${result.length} diags for ${path}`);
-  return result;
+  tracker.setCachedCrossFileResults(allResults);
+  return tracker.getCachedCrossFileResults()?.get(path) ?? [];
 }
 
-/**
- * Shared core: rebuild stale graphs and run all cross-file rules.
- *
- * Both `runCrossFileDiagnostics` (LSP, single-file result) and
- * `runAllCrossFileDiagnostics` (CLI, all results) delegate here
- * for the graph-rebuild + rule-execution pipeline.
- */
-function rebuildGraphsAndRunCrossFileRules(
-  fileIndex: FileIndex,
+function rebuildAndRunDispatcher(
+  fileIndex: FileRegistry,
   project: Project,
-  cache: GraphCache,
   tailwind: TailwindValidator | null,
   resolveContent: (path: string) => string | null,
   emit: (d: Diagnostic) => void,
   externalCustomProperties?: ReadonlySet<string>,
+  logger?: Logger,
 ): void {
-  const log = cache.logger;
-
-  let rebuilt = 0;
-  const program = project.getProgram();
-  for (const solidPath of fileIndex.solidFiles) {
-    const sourceFile = program.getSourceFile(solidPath);
-    if (!sourceFile) continue;
-    const version = contentHash(sourceFile.text);
-    if (!cache.hasSolidGraph(solidPath, version)) {
-      if (log.isLevelEnabled(Level.Trace)) log.trace(`crossFile: rebuilding SolidGraph for ${solidPath} (version=${version})`);
-      cache.getSolidGraph(solidPath, version, buildSolidGraphForPath(project, solidPath, log));
-      rebuilt++;
-    }
-  }
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: rebuilt ${rebuilt}/${fileIndex.solidFiles.size} SolidGraphs`);
-
-  const cssGraph = cache.getCSSGraph(() => {
-    const files: { path: string; content: string }[] = [];
-    for (const cssPath of fileIndex.cssFiles) {
-      const content = resolveContent(cssPath);
-      if (content !== null) {
-        files.push({ path: cssPath, content });
-      } else if (log.isLevelEnabled(Level.Trace)) {
-        log.trace(`crossFile: CSS file unreadable: ${cssPath}`);
-      }
-    }
-    if (log.isLevelEnabled(Level.Trace)) log.trace(`crossFile: building CSSGraph from ${files.length} CSS files (tailwind=${tailwind !== null}, externalProps=${externalCustomProperties?.size ?? 0})`);
-    const cssInput = buildCSSInput(files, log, tailwind, externalCustomProperties);
-    return buildCSSGraph(cssInput);
+  const { compilation } = buildFullCompilation({
+    solidFiles: fileIndex.solidFiles,
+    cssFiles: fileIndex.cssFiles,
+    getProgram: () => project.getProgram(),
+    tailwindValidator: tailwind,
+    externalCustomProperties,
+    resolveContent,
+    logger,
   });
 
-  const solidGraphs = cache.getAllSolidGraphs();
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: about to getLayoutGraph (${solidGraphs.length} solids)`);
-  const layoutGraph = cache.getLayoutGraph(() => buildLayoutGraph(solidGraphs, cssGraph, log));
+  const dispatcher = createAnalysisDispatcher();
+  for (let i = 0; i < allRules.length; i++) {
+    const rule = allRules[i];
+    if (rule) dispatcher.register(rule);
+  }
 
-  const t0 = performance.now();
-  runCrossFileRules(
-    { solids: solidGraphs, css: cssGraph, layout: layoutGraph, logger: log },
-    emit,
-    log,
-  );
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`crossFile: runCrossFileRules took ${performance.now() - t0}ms`);
+  const result = dispatcher.run(compilation);
+  for (let i = 0; i < result.diagnostics.length; i++) {
+    const d = result.diagnostics[i];
+    if (d) emit(d);
+  }
 }
 
-/**
- * Run cross-file analysis collecting diagnostics for ALL files (not filtered to one path).
- *
- * Used by the CLI lint command which needs cross-file diagnostics for every file
- * in the workspace, not just a single open file.
- *
- * @param fileIndex - Workspace file index
- * @param project - Project instance
- * @param cache - Versioned graph cache
- * @param tailwind - Resolved Tailwind validator
- * @param resolveContent - Resolves current file content
- * @param overrides - Rule severity overrides
- * @returns All cross-file diagnostics
- */
 export function runAllCrossFileDiagnostics(
-  fileIndex: FileIndex,
+  fileIndex: FileRegistry,
   project: Project,
-  cache: GraphCache,
+  _tracker: CompilationTracker,
   tailwind: TailwindValidator | null,
   resolveContent: (path: string) => string | null,
   overrides?: RuleOverrides,
   externalCustomProperties?: ReadonlySet<string>,
+  logger?: Logger,
 ): readonly Diagnostic[] {
-  const log = cache.logger;
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`runAllCrossFileDiagnostics ENTER: solids=${fileIndex.solidFiles.size} css=${fileIndex.cssFiles.size}`);
-
   if (fileIndex.solidFiles.size === 0 && fileIndex.cssFiles.size === 0) return [];
 
   const { results, emit } = createEmit(overrides);
-  rebuildGraphsAndRunCrossFileRules(fileIndex, project, cache, tailwind, resolveContent, emit, externalCustomProperties);
-  if (log.isLevelEnabled(Level.Debug)) log.debug(`runAllCrossFileDiagnostics EXIT: ${results.length} diags`);
-
+  rebuildAndRunDispatcher(fileIndex, project, tailwind, resolveContent, emit, externalCustomProperties, logger);
   return results;
-}
-
-/**
- * Build a CSSInput with a consistent object shape per code path.
- *
- * Branches ensure each returned literal includes all intended properties,
- * avoiding both conditional spreads and post-construction property additions.
- */
-function buildCSSInput(
-  files: { path: string; content: string }[],
-  logger: Logger,
-  tailwind: TailwindValidator | null,
-  externalCustomProperties: ReadonlySet<string> | undefined,
-): CSSInput {
-  if (tailwind !== null && externalCustomProperties !== undefined) {
-    return { files, logger, tailwind, externalCustomProperties };
-  }
-  if (tailwind !== null) {
-    return { files, logger, tailwind };
-  }
-  if (externalCustomProperties !== undefined) {
-    return { files, logger, externalCustomProperties };
-  }
-  return { files, logger };
 }

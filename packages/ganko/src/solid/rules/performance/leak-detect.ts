@@ -15,7 +15,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { SolidRule } from "../../rule"
 import { defineSolidRule } from "../../rule"
 import type { CallEntity } from "../../entities/call"
@@ -501,7 +501,7 @@ export function defineConstructorLeakRule(config: {
 
           emit(
             createDiagnostic(
-              graph.file,
+              graph.filePath,
               expr,
               graph.sourceFile,
               config.id,

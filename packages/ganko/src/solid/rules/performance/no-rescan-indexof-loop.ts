@@ -1,5 +1,5 @@
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName, getContainingFunction } from "../../queries"
@@ -36,7 +36,7 @@ export const noRescanIndexofLoop = defineSolidRule({
       if (entry.count < 2) continue
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           entry.node,
           graph.sourceFile,
           "no-rescan-indexof-loop",

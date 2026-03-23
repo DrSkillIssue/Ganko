@@ -18,28 +18,41 @@ export type { Plugin } from "./graph"
 export { createRunner, createOverrideEmit } from "./runner"
 export type { Runner } from "./runner"
 
-// Graph caching
-export { GraphCache } from "./cache"
-
 // Solid plugin
-export { SolidPlugin, analyzeInput, buildSolidGraph, runSolidRules } from "./solid"
+export { SolidPlugin, analyzeInput, runSolidRules } from "./solid"
 export { createSolidInput } from "./solid"
-export type { SolidGraph, SolidInput } from "./solid"
+export { buildSolidSyntaxTree } from "./solid"
+export type { SolidSyntaxTree, SolidBuildContext, SolidInput } from "./solid"
 export type { VariableEntity, ReactiveKind, ReadEntity } from "./solid"
 export type { ComputationEntity, DependencyEdge } from "./solid"
 
 // CSS plugin
-export { CSSPlugin, buildCSSGraph } from "./css"
-export type { CSSGraph, CSSInput } from "./css"
+export { CSSPlugin } from "./css"
+export { buildCSSResult } from "./css"
+export type { CSSBuildResult } from "./css/impl"
+export type { CSSBuildContext } from "./css/build-context"
+export type { CSSWorkspaceView } from "./css/workspace-view"
+export type { CSSInput, CSSInputBuilder } from "./css"
+export { createCSSInput } from "./css"
 export type { TailwindValidator } from "./css"
-export { resolveTailwindValidator } from "./css"
+export { prepareTailwindEval, buildTailwindValidatorFromEval, resolveTailwindValidatorSync } from "./css"
+export type { TailwindEvalParams, BatchableTailwindValidator } from "./css"
 export { scanDependencyCustomProperties } from "./css/library-analysis"
 
 // Accessibility policy
 export { setActivePolicy } from "./css/policy"
 
-// Cross-file plugin
-export { runCrossFileRules, buildLayoutGraph } from "./cross-file"
+// Compilation system
+export { createStyleCompilation, createCompilationFromLegacy } from "./compilation/core/compilation"
+export type { StyleCompilation } from "./compilation/core/compilation"
+export type { SolidSyntaxTree as SolidTree } from "./compilation/core/solid-syntax-tree"
+export type { CSSSyntaxTree } from "./compilation/core/css-syntax-tree"
+export { createCompilationTracker } from "./compilation/incremental/tracker"
+export type { CompilationTracker, CompilationTrackerOptions } from "./compilation/incremental/tracker"
+export { createPlainCSSProvider } from "./compilation/providers/plain-css"
+export { createAnalysisDispatcher } from "./compilation/dispatch/dispatcher"
+export type { AnalysisDispatcher } from "./compilation/dispatch/dispatcher"
+export { allRules } from "./compilation/dispatch/rules/index"
 
 // Rule manifest (auto-generated)
 export { RULES, RULES_BY_CATEGORY, getRule } from "./generated/rules-manifest"

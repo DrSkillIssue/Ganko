@@ -2,7 +2,7 @@
  * Value tracing, passthrough detection, and reachability analysis
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
 import type { ScopeEntity } from "../entities/scope";
 import { HOOK_PATTERN } from "@drskillissue/ganko-shared";
 import { getStaticStringValue } from "../util/static-value";

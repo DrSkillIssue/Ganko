@@ -9,7 +9,7 @@ import { availableParallelism } from "node:os";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import type { Diagnostic } from "@drskillissue/ganko";
-import type { RuleOverrides, AccessibilityPolicy } from "@drskillissue/ganko-shared";
+import type { RuleOverrides } from "@drskillissue/ganko-shared";
 
 export interface WorkerResult {
   readonly file: string
@@ -21,7 +21,6 @@ export interface WorkerTask {
   readonly files: readonly string[]
   readonly rootPath: string
   readonly overrides: RuleOverrides
-  readonly accessibilityPolicy: AccessibilityPolicy | null
 }
 
 interface PendingJob {

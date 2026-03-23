@@ -70,7 +70,7 @@ export const noDoublePassDelimiterCount = defineSolidRule({
       if (!usage.hasCountingSplit) continue
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           usage.node,
           graph.sourceFile,
           "no-double-pass-delimiter-count",

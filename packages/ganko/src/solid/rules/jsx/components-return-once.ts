@@ -328,7 +328,7 @@ export const componentsReturnOnce = defineSolidRule({
       for (let j = 0; j < earlyLen; j++) {
         const earlyReturn = earlyReturns[j];
         if (!earlyReturn) continue;
-        emit(createDiagnostic(graph.file, earlyReturn, graph.sourceFile, "components-return-once", "noEarlyReturn", messages.noEarlyReturn, "error"));
+        emit(createDiagnostic(graph.filePath, earlyReturn, graph.sourceFile, "components-return-once", "noEarlyReturn", messages.noEarlyReturn, "error"));
       }
 
       const argument = lastReturn?.expression;
@@ -337,7 +337,7 @@ export const componentsReturnOnce = defineSolidRule({
       if (ts.isConditionalExpression(argument)) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             lastReturn,
             graph.sourceFile,
             "components-return-once",
@@ -350,7 +350,7 @@ export const componentsReturnOnce = defineSolidRule({
       } else if (ts.isBinaryExpression(argument) && (argument.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || argument.operatorToken.kind === ts.SyntaxKind.BarBarToken || argument.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             argument,
             graph.sourceFile,
             "components-return-once",

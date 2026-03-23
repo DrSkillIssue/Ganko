@@ -1,12 +1,12 @@
 
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import type { VariableEntity, ReactiveKind } from "../entities/variable";
 import type { FunctionEntity } from "../entities/function";
 import { setVariableReactivity } from "../entities/variable";
 
-export function runReactivityPhase(graph: SolidGraph, _input: SolidInput): void {
+export function runReactivityPhase(graph: SolidBuildContext, _input: SolidInput): void {
   // Build set of props variable names for O(1) lookup
   const propsVarNames = new Set<string>();
   const components = graph.componentFunctions;
@@ -98,7 +98,7 @@ export function runReactivityPhase(graph: SolidGraph, _input: SolidInput): void 
  * Caches reactive captures for each function.
  * Must run after variables are marked reactive.
  */
-function wireReactiveCaptures(graph: SolidGraph): void {
+function wireReactiveCaptures(graph: SolidBuildContext): void {
   const functions = graph.functions;
   if (functions.length === 0) return;
 
@@ -123,7 +123,7 @@ function wireReactiveCaptures(graph: SolidGraph): void {
 /**
  * Builds the list of functions that capture reactive variables.
  */
-function buildFunctionsWithReactiveCaptures(graph: SolidGraph): void {
+function buildFunctionsWithReactiveCaptures(graph: SolidBuildContext): void {
   const functions = graph.functions;
   const withCaptures: FunctionEntity[] = [];
 

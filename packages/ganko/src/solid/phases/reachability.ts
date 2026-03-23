@@ -10,7 +10,7 @@
  *
  * Reachability flags are stored as a bitmask on FunctionEntity._reachability.
  */
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import type { FunctionEntity } from "../entities/function";
 import type { CallEntity } from "../entities/call";
@@ -21,7 +21,7 @@ const REACHABILITY_BASE = 1;
 const FLAG_IS_HOOK = 2;
 const FLAG_IS_IIFE_REACTIVE = 4;
 
-export function runReachabilityPhase(graph: SolidGraph, _input: SolidInput): void {
+export function runReachabilityPhase(graph: SolidBuildContext, _input: SolidInput): void {
     const functions = graph.functions;
     if (functions.length === 0) return;
 
@@ -38,7 +38,7 @@ export function runReachabilityPhase(graph: SolidGraph, _input: SolidInput): voi
  * @param graph - The solid graph
  * @returns The reachability flags bitmask
  */
-function computeReachabilityFlags(fn: FunctionEntity, graph: SolidGraph): number {
+function computeReachabilityFlags(fn: FunctionEntity, graph: SolidBuildContext): number {
   let flags = 0;
 
   const context = fn.scope._resolvedContext;
@@ -75,7 +75,7 @@ function computeReachabilityFlags(fn: FunctionEntity, graph: SolidGraph): number
  * @param graph - The solid graph
  * @returns True if the call is in a reactive IIFE
  */
-function isInReactiveIIFE(call: CallEntity, graph: SolidGraph): boolean {
+function isInReactiveIIFE(call: CallEntity, graph: SolidBuildContext): boolean {
   // Find the enclosing function from the call's scope
   const scope = call.scope;
   const enclosingFn = findEnclosingFunction(scope, graph);
@@ -93,7 +93,7 @@ function isInReactiveIIFE(call: CallEntity, graph: SolidGraph): boolean {
  * @param graph - The solid graph
  * @returns The enclosing function entity or null
  */
-function findEnclosingFunction(scope: ScopeEntity, graph: SolidGraph): FunctionEntity | null {
+function findEnclosingFunction(scope: ScopeEntity, graph: SolidBuildContext): FunctionEntity | null {
   let current: ScopeEntity | null = scope;
   while (current) {
     if (current.kind === "function" && current.node) {

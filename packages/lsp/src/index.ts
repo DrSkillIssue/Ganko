@@ -13,8 +13,8 @@
  *
  * // Or use programmatically
  * import { createProject } from "@drskillissue/ganko"
- * import { SolidPlugin, CSSPlugin } from "@drskillissue/ganko"
- * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin, CSSPlugin] })
+ * import { SolidPlugin } from "@drskillissue/ganko"
+ * const project = createProject({ rootPath: "/path/to/project", plugins: [SolidPlugin] })
  * const diagnostics = project.run(["App.tsx"])
  * ```
  */
@@ -31,7 +31,7 @@ export { createBatchProgram, type BatchTypeScriptService } from "./core/batch-pr
 export { createIncrementalProgram, type IncrementalTypeScriptService } from "./core/incremental-program";
 
 // Server exports
-export { createServer, startServer, main } from "./server/connection";
+export { createServer, startServer, main } from "./server/server";
 export { buildServerCapabilities } from "./server/capabilities";
 
 // Handler exports

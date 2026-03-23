@@ -160,13 +160,13 @@ export const noInnerhtml = defineSolidRule({
       if (!ts.isJsxAttribute(attr.node)) continue;
 
       if (attrName === "dangerouslySetInnerHTML") {
-        emit(buildDangerouslySetInnerHTMLDiagnostic(graph.file, attr.node, sourceFile));
+        emit(buildDangerouslySetInnerHTMLDiagnostic(graph.filePath, attr.node, sourceFile));
         continue;
       }
 
       if (attrName === "innerHTML") {
         const issue = buildInnerHTMLDiagnostic(
-          graph.file,
+          graph.filePath,
           attr.node,
           attr,
           element,

@@ -4,7 +4,7 @@
  * Links var() references to variable definitions.
  */
 
-import type { CSSGraph } from "../impl";
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input";
 import type {
   VariableReferenceEntity,
@@ -24,13 +24,13 @@ import { getContainingAtRule } from "../queries/context";
 
 const MAX_FALLBACK_DEPTH = 10;
 
-// TODO REPLACE WITH FUNCTION / CSSGraph
+// TODO REPLACE WITH FUNCTION / CSSBuildContext
 /**
  * Resolve var() references to variable definitions.
  * @param graph CSS graph
  * @param input CSS input
  */
-export function runReferencesPhase(graph: CSSGraph, _input: CSSInput): void {
+export function runReferencesPhase(graph: CSSBuildContext, _input: CSSInput): void {
     if (graph.declarations.length === 0) {
       return;
     }
@@ -66,7 +66,7 @@ export function runReferencesPhase(graph: CSSGraph, _input: CSSInput): void {
  * @returns The created and resolved VariableReferenceEntity
  */
 function createAndResolveReference(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   ref: VarReference,
   declaration: DeclarationEntity,
   file: FileEntity,
@@ -117,7 +117,7 @@ interface DeclarationResolutionContext {
 }
 
 function resolveVariableForDeclaration(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   name: string,
   declaration: DeclarationEntity,
 ): VariableEntity | null {
@@ -269,7 +269,7 @@ function resolutionScore(variable: VariableEntity, context: DeclarationResolutio
  * @returns Array of resolved variable references
  */
 function parseFallbackChainResolved(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   fallback: string,
   declaration: DeclarationEntity,
   file: FileEntity,

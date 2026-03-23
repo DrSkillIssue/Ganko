@@ -14,7 +14,7 @@
  */
 
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByMethodName, getNewExpressionsByCallee } from "../../queries"
@@ -81,7 +81,7 @@ export const finalizationRegistryLeak = defineSolidRule({
       if (extractReferenceName(heldNode) === targetName) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "finalization-registry-leak",
@@ -97,7 +97,7 @@ export const finalizationRegistryLeak = defineSolidRule({
       if (containsIdentifier(heldNode, targetName)) {
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "finalization-registry-leak",

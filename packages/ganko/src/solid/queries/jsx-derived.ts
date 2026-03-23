@@ -1,5 +1,5 @@
 import ts from "typescript"
-import type { SolidGraph } from "../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree"
 import type { JSXAttributeEntity, JSXElementEntity } from "../entities/jsx"
 import { getPropertyKeyName } from "../util/pattern-detection"
 

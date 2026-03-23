@@ -12,7 +12,7 @@ import type {
 
 import ts from "typescript";
 import type { FeatureHandlerContext } from "./handler-context";
-import { uriToPath, Level } from "@drskillissue/ganko-shared";
+import { uriToCanonicalPath, Level } from "@drskillissue/ganko-shared";
 import { packPos } from "./ts-utils";
 
 /**
@@ -27,7 +27,8 @@ export function handleLinkedEditingRanges(
   ctx: FeatureHandlerContext,
 ): LinkedEditingRanges | null {
   const { log } = ctx;
-  const filePath = uriToPath(params.textDocument.uri);
+  const filePath = uriToCanonicalPath(params.textDocument.uri);
+  if (filePath === null) return null;
   const sf = ctx.getAST(filePath);
   if (!sf) return null;
 

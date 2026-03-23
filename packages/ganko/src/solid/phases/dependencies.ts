@@ -19,7 +19,7 @@
  * Requires: scopes, entities, context, wiring, reactivity phases.
  */
 import ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 import type { CallEntity } from "../entities/call";
 import type { FunctionEntity } from "../entities/function";
@@ -31,7 +31,7 @@ import { computationKindFor } from "../entities/computation";
 /** Store/props kinds that support per-property tracking. */
 const PROPERTY_TRACKED_KINDS = new Set(["store", "props"]);
 
-export function runDependenciesPhase(graph: SolidGraph, _input: SolidInput): void {
+export function runDependenciesPhase(graph: SolidBuildContext, _input: SolidInput): void {
   buildComputations(graph);
   buildDependencyEdges(graph);
   buildOwnershipEdges(graph);
@@ -40,7 +40,7 @@ export function runDependenciesPhase(graph: SolidGraph, _input: SolidInput): voi
 /**
  * Creates a ComputationEntity for each computation-creating primitive call.
  */
-function buildComputations(graph: SolidGraph): void {
+function buildComputations(graph: SolidBuildContext): void {
   const calls = graph.calls;
   let nextId = 0;
 
@@ -124,7 +124,7 @@ function findFunctionByNode(call: CallEntity, node: ts.Node): FunctionEntity | n
  * For `const [count, setCount] = createSignal(0)` or `const memo = createMemo(...)`,
  * finds the VariableEntity from the graph.
  */
-function resolveVariable(graph: SolidGraph, call: CallEntity): VariableEntity | null {
+function resolveVariable(graph: SolidBuildContext, call: CallEntity): VariableEntity | null {
   const parent = call.node.parent;
   if (!parent || !ts.isVariableDeclaration(parent)) return null;
 
@@ -162,7 +162,7 @@ function resolveVariable(graph: SolidGraph, call: CallEntity): VariableEntity | 
  * For computations without a resolved callback (e.g. passing a variable
  * reference), we fall back to the computation's captures.
  */
-function buildDependencyEdges(graph: SolidGraph): void {
+function buildDependencyEdges(graph: SolidBuildContext): void {
   const computations = graph.computations;
   if (computations.length === 0) return;
 
@@ -254,7 +254,7 @@ function isReadInUntrackedScope(
  * A computation C is owned by computation P if C's call site scope
  * is within P's callback scope (or a descendant of it).
  */
-function buildOwnershipEdges(graph: SolidGraph): void {
+function buildOwnershipEdges(graph: SolidBuildContext): void {
   const computations = graph.computations;
   if (computations.length < 2) return;
 

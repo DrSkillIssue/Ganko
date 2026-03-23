@@ -36,7 +36,7 @@
  */
 
 import ts from "typescript";
-import type { SolidGraph } from "../../impl";
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { Diagnostic, Fix, FixOperation } from "../../../diagnostic"
 import { createDiagnostic } from "../../../diagnostic";
 import { isAlphaNumeric, CHAR_UNDERSCORE, CHAR_DOLLAR, CHAR_SPACE, CHAR_TAB, CHAR_NEWLINE } from "@drskillissue/ganko-shared";
@@ -425,7 +425,7 @@ function analyzeLogicalExpression(
     );
     const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
     return createDiagnostic(
-      graph.file,
+      graph.filePath,
       expr,
       graph.sourceFile,
       "prefer-show",
@@ -448,7 +448,7 @@ function analyzeLogicalExpression(
   );
   const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
   return createDiagnostic(
-    graph.file,
+    graph.filePath,
     expr,
     graph.sourceFile,
     "prefer-show",
@@ -551,7 +551,7 @@ function analyzeConditionalExpression(
     );
     const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
     return createDiagnostic(
-      graph.file,
+      graph.filePath,
       expr,
       graph.sourceFile,
       "prefer-show",
@@ -575,7 +575,7 @@ function analyzeConditionalExpression(
   );
   const replacementOp: FixOperation = { range: [nodeToReplace.getStart(sourceFile), nodeToReplace.end], text: replacement };
   return createDiagnostic(
-    graph.file,
+    graph.filePath,
     expr,
     graph.sourceFile,
     "prefer-show",

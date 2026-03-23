@@ -62,7 +62,7 @@ export const avoidNonNullAssertions = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           assertion.node,
           graph.sourceFile,
           "avoid-non-null-assertions",

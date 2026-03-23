@@ -1,10 +1,10 @@
 import type { BaseRule } from "../graph"
-import type { CSSGraph } from "./impl"
+import type { CSSWorkspaceView } from "./workspace-view"
 
 /**
  * A CSS lint rule.
  */
-export interface CSSRule extends BaseRule<CSSGraph> {
+export interface CSSRule extends BaseRule<CSSWorkspaceView> {
   readonly options: Record<string, unknown>
 }
 

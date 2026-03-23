@@ -1,5 +1,5 @@
 import ts from "typescript"
-import type { SolidGraph } from "../../impl"
+import type { SolidSyntaxTree as SolidGraph } from "../../../compilation/core/solid-syntax-tree"
 import type { VariableEntity } from "../../entities"
 import { getContainingFunction, getScopeFor, getVariableByNameInScope, typeIncludesString } from "../../queries"
 import { isStringExpression } from "../../util"
@@ -30,7 +30,7 @@ const PARSE_PATH_HINTS = [
 const ASCII_HINTS = ["ascii", "latin1"] as const
 
 export function isLikelyStringParsingContext(graph: SolidGraph, node: ts.Node): boolean {
-  if (hasAnyHint(graph.file.toLowerCase(), PARSE_PATH_HINTS)) return true
+  if (hasAnyHint(graph.filePath.toLowerCase(), PARSE_PATH_HINTS)) return true
 
   const fn = getContainingFunction(graph, node)
   if (!fn) return false
@@ -39,7 +39,7 @@ export function isLikelyStringParsingContext(graph: SolidGraph, node: ts.Node): 
 }
 
 export function isAsciiParsingContext(graph: SolidGraph, node: ts.Node): boolean {
-  const path = graph.file.toLowerCase()
+  const path = graph.filePath.toLowerCase()
   if (hasAnyHint(path, ASCII_HINTS)) return true
 
   const fn = getContainingFunction(graph, node)

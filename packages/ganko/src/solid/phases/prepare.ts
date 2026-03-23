@@ -7,7 +7,7 @@
  * Throws an error if parent links are missing, indicating incorrect parser config.
  */
 import type ts from "typescript";
-import type { SolidGraph } from "../impl";
+import type { SolidBuildContext } from "../build-context"
 import type { SolidInput } from "../input";
 
 /**
@@ -24,6 +24,6 @@ function validateParentLinks(sourceFile: ts.SourceFile): void {
   }
 }
 
-export function runPreparePhase(_graph: SolidGraph, input: SolidInput): void {
+export function runPreparePhase(_graph: SolidBuildContext, input: SolidInput): void {
     validateParentLinks(input.sourceFile);
 }

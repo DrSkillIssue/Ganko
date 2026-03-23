@@ -14,7 +14,7 @@ import { getActivePolicy, getActivePolicyName } from "../../policy"
 import type { PolicyThresholds } from "../../policy"
 import { parseEmValue } from "../../parser/value-util"
 import type { RuleEntity } from "../../entities/rule"
-import type { CSSGraph } from "../../impl"
+import type { CSSWorkspaceView as CSSGraph } from "../../workspace-view"
 import type { Emit } from "../../../graph"
 
 const messages = {

@@ -114,7 +114,7 @@ export const noTopLevelSignalCall = defineSolidRule({
           null,
         );
         emit(createDiagnostic(
-          graph.file,
+          graph.filePath,
           read.node,
           graph.sourceFile,
           "no-top-level-signal-call",
@@ -136,7 +136,7 @@ export const noTopLevelSignalCall = defineSolidRule({
             componentName: enclosingComponent.name,
           };
           emit(createDiagnostic(
-            graph.file,
+            graph.filePath,
             read.node,
             graph.sourceFile,
             "no-top-level-signal-call",

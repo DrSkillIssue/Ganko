@@ -5,7 +5,8 @@
  */
 
 import type { AtRule, Rule, Declaration, Container } from "postcss";
-import { classifyPart, type CSSGraph } from "../impl";
+import { classifyPart } from "../impl"
+import type { CSSBuildContext } from "../build-context"
 import type { CSSInput } from "../input";
 import type {
   FileEntity,
@@ -95,7 +96,7 @@ const ROOT_CONTEXT: NestingContext = {
  * @param graph CSS graph
  * @param _input CSS input
  */
-export function runAstPhase(graph: CSSGraph, _input: CSSInput): void {
+export function runAstPhase(graph: CSSBuildContext, _input: CSSInput): void {
   const files = graph.files;
 
   for (let i = 0; i < files.length; i++) {
@@ -112,7 +113,7 @@ export function runAstPhase(graph: CSSGraph, _input: CSSInput): void {
  * @param graph - The CSS graph to populate
  * @param file - The file entity containing the AST
  */
-function processFileAST(graph: CSSGraph, file: FileEntity): void {
+function processFileAST(graph: CSSBuildContext, file: FileEntity): void {
   const root = file.node;
   if (!root.nodes || root.nodes.length === 0) {
     file.atRules = [];
@@ -143,7 +144,7 @@ function processFileAST(graph: CSSGraph, file: FileEntity): void {
  * @param collector - Collects extracted entities
  */
 function walkAndProcess(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   file: FileEntity,
   container: Container,
   context: NestingContext,
@@ -270,7 +271,7 @@ function walkAndProcess(
  * @param collector - Collects extracted entities
  */
 function processRootLevelDeclaration(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   file: FileEntity,
   collector: FileCollector,
@@ -299,7 +300,7 @@ function processRootLevelDeclaration(
  * @returns The created VariableEntity
  */
 function createRootLevelCSSVariable(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   file: FileEntity,
 ): VariableEntity {
@@ -332,7 +333,7 @@ function createRootLevelCSSVariable(
  * @returns The created VariableEntity
  */
 function createRootLevelSCSSVariable(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   file: FileEntity,
 ): VariableEntity {
@@ -366,7 +367,7 @@ function createRootLevelSCSSVariable(
  * @returns The created DeclarationEntity
  */
 function createRootLevelPlaceholderDeclaration(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   file: FileEntity,
 ): DeclarationEntity {
@@ -423,7 +424,7 @@ function createRootLevelPlaceholderDeclaration(
  * @param collector - Collects extracted entities
  */
 function processDeclaration(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   parent: RuleEntity | AtRuleEntity,
   file: FileEntity,
@@ -458,7 +459,7 @@ function processDeclaration(
  * @returns The created AtRuleEntity
  */
 function createAtRuleEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: AtRule,
   file: FileEntity,
   parent: RuleEntity | AtRuleEntity | null,
@@ -779,7 +780,7 @@ function getRuleBlockOffsets(file: FileEntity, startOffset: number, endOffset: n
  * @returns The created RuleEntity
  */
 function createRuleEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: Rule,
   file: FileEntity,
   context: NestingContext,
@@ -837,7 +838,7 @@ function createRuleEntity(
  * @returns The created SelectorEntity
  */
 function createSelectorEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   raw: string,
   rule: RuleEntity,
 ): SelectorEntity {
@@ -924,7 +925,7 @@ function createSelectorEntity(
  * @returns The created DeclarationEntity
  */
 function createDeclarationEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   node: Declaration,
   parent: RuleEntity | AtRuleEntity,
   file: FileEntity,
@@ -1039,7 +1040,7 @@ function extractImportant(rawValue: string): { value: string; isImportant: boole
  * @returns The computed cascade position
  */
 function getCascadePosition(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   sourceOrder: number,
   isImportant: boolean,
   parent: RuleEntity | AtRuleEntity,
@@ -1088,7 +1089,7 @@ function getCascadePosition(
  * @returns The created VariableEntity
  */
 function createCSSVariableEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   declaration: DeclarationEntity,
   file: FileEntity,
@@ -1128,7 +1129,7 @@ function createCSSVariableEntity(
  * @returns The created VariableEntity
  */
 function createSCSSVariableEntity(
-  graph: CSSGraph,
+  graph: CSSBuildContext,
   decl: Declaration,
   declaration: DeclarationEntity,
   file: FileEntity,
@@ -1207,7 +1208,7 @@ function getVariableScopeFromContext(parent: RuleEntity | AtRuleEntity): ScopeRe
  * Processes @layer declarations to establish cascade layer ordering.
  * @param graph - The CSS graph
  */
-function processLayerOrdering(graph: CSSGraph): void {
+function processLayerOrdering(graph: CSSBuildContext): void {
   if (graph.layers.length === 0) return;
 
   const sortedLayers = graph.layers.toSorted((a, b) => a.sourceOrder - b.sourceOrder);

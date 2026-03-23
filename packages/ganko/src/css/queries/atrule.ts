@@ -1,7 +1,7 @@
 /**
  * At-rule query functions (media, keyframes, layers, etc.)
  */
-import type { CSSGraph } from "../impl";
+import type { CSSWorkspaceView as CSSGraph } from "../workspace-view"
 import type { AtRuleEntity, RuleEntity, DeclarationEntity, AtRuleKind } from "../entities";
 
 export function getKeyframeByName(graph: CSSGraph, name: string): AtRuleEntity | null {

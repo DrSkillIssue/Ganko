@@ -59,7 +59,7 @@ export const noWriteOnlyIndex = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           diagNode,
           graph.sourceFile,
           "no-write-only-index",

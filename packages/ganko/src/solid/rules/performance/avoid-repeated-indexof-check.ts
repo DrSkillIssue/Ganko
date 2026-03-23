@@ -111,7 +111,7 @@ export const avoidRepeatedIndexofCheck = defineSolidRule({
 
       emit(
         createDiagnostic(
-          graph.file,
+          graph.filePath,
           indexDiagNode,
           graph.sourceFile,
           "avoid-repeated-indexof-check",

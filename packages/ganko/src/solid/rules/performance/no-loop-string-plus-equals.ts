@@ -48,7 +48,7 @@ export const noLoopStringPlusEquals = defineSolidRule({
         if (entry.count < 2) continue
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             entry.node,
             graph.sourceFile,
             "no-loop-string-plus-equals",

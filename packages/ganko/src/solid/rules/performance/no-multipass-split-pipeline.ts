@@ -55,7 +55,7 @@ export const noMultipassSplitPipeline = defineSolidRule({
 
         emit(
           createDiagnostic(
-            graph.file,
+            graph.filePath,
             call.node,
             graph.sourceFile,
             "no-multipass-split-pipeline",

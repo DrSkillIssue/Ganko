@@ -1,41 +1,7 @@
-import { declarationNoOverriddenWithinRule, mediaQueryOverlapConflict, noDescendingSpecificityConflict, noLayerOrderInversion, noRedundantOverridePairs } from "./cascade"
-import { cssNoDiscreteTransition, cssNoEmptyKeyframes, noLayoutPropertyAnimation, noTransitionAll, noUnknownAnimationName, noUnusedKeyframes } from "./animation"
-import { noComplexSelectors, noDuplicateSelectors, noIdSelectors, selectorMaxAttributeAndUniversal, selectorMaxSpecificity } from "./selector"
-import { cssNoCustomPropertyCycle, cssNoHardcodedZIndex, cssNoLegacyVh100, cssZIndexRequiresPositionedContext, noImportant, noUnresolvedCustomProperties, noUnusedCustomProperties } from "./property"
-import { cssNoOutlineNoneWithoutFocusVisible, cssPolicyContrast, cssPolicySpacing, cssPolicyTypography, cssRequireReducedMotionOverride } from "./a11y"
-import { cssNoEmptyRule, cssNoUnknownContainerName, cssNoUnusedContainerName, layerRequirementForComponentRules } from "./structure"
-
-export const rules = [
-  cssNoDiscreteTransition,
-  cssNoCustomPropertyCycle,
-  cssNoEmptyKeyframes,
-  cssNoEmptyRule,
-  cssNoHardcodedZIndex,
-  cssNoLegacyVh100,
-  cssNoOutlineNoneWithoutFocusVisible,
-  cssNoUnknownContainerName,
-  cssNoUnusedContainerName,
-  cssRequireReducedMotionOverride,
-  cssZIndexRequiresPositionedContext,
-  declarationNoOverriddenWithinRule,
-  layerRequirementForComponentRules,
-  mediaQueryOverlapConflict,
-  noComplexSelectors,
-  noDescendingSpecificityConflict,
-  noDuplicateSelectors,
-  noIdSelectors,
-  noImportant,
-  noLayoutPropertyAnimation,
-  noLayerOrderInversion,
-  noRedundantOverridePairs,
-  noTransitionAll,
-  noUnknownAnimationName,
-  noUnresolvedCustomProperties,
-  noUnusedCustomProperties,
-  noUnusedKeyframes,
-  selectorMaxAttributeAndUniversal,
-  selectorMaxSpecificity,
-  cssPolicyTypography,
-  cssPolicySpacing,
-  cssPolicyContrast,
-] as const
+/**
+ * CSS rules are disabled — they've been migrated to compilation/dispatch/rules/
+ * and run through the AnalysisDispatcher. This empty array prevents duplicate
+ * diagnostics from the old CSSPlugin path. The old rule implementations in
+ * subdirectories will be removed in a future refactor.
+ */
+export const rules = [] as const

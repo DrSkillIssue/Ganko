@@ -26,6 +26,27 @@ export {
 // URI/path utilities
 export { canonicalPath, uriToPath, pathToUri } from "./path";
 
+// Project root
+export {
+  ProjectRoot,
+  resolveProjectRoot,
+  acceptProjectRoot,
+  projectRootFromUri,
+} from "./project-root";
+
+// Workspace layout
+export {
+  type WorkspaceLayout,
+  type WorkspacePackage,
+  buildWorkspaceLayout,
+} from "./workspace-layout";
+
+// Resource map
+export { ResourceMap } from "./resource-map";
+
+// File URI typed wrappers
+export { type SupportedScheme, uriToCanonicalPath, canonicalPathToUri } from "./file-uri";
+
 // Logging
 export {
   LOG_LEVELS,
@@ -57,6 +78,9 @@ export {
   type ConfigurationChangePayload,
   type RuleSeveritySettingValue,
 } from "./config";
+
+// Runtime detection
+export { getRuntime } from "./runtime";
 
 // Cross-file dependency model
 export { CROSS_FILE_DEPENDENTS } from "./cross-file";
