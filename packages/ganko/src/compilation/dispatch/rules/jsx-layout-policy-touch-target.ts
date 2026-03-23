@@ -4,6 +4,7 @@ import { parsePxValue } from "../../../css/parser/value-util"
 import { getJSXAttributeEntity } from "../../../solid/queries/jsx"
 import { getStaticStringFromJSXValue } from "../../../solid/util/static-value"
 import type { ElementNode } from "../../binding/element-builder"
+import { TextualContentState } from "../../binding/signal-builder"
 import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-builder"
 import { SignalValueKind } from "../../binding/signal-builder"
 import { SignalGuardKind } from "../../binding/cascade-binder"
@@ -105,6 +106,7 @@ function classifyInteractive(element: ElementNode, semanticModel: FileSemanticMo
   if (tag !== null && INTERACTIVE_HTML_TAGS.has(tag)) {
     if (tag === "input" && element.attributes.get("type") === "hidden") return null
     if (tag === "input" || tag === "select" || tag === "textarea") return "input"
+    if (tag === "a" && isInlineTextLink(element)) return null
     return "button"
   }
 
@@ -144,6 +146,17 @@ function isVisuallyHidden(element: ElementNode, snapshot: SignalSnapshot): boole
     && heightSignal && heightSignal.kind === SignalValueKind.Known && heightSignal.px === 1) return true
 
   return false
+}
+
+function isInlineTextLink(element: ElementNode): boolean {
+  const content = element.textualContent
+  if (content !== TextualContentState.Yes && content !== TextualContentState.DynamicText) return false
+  const parent = element.parentElementNode
+  if (parent === null) return false
+  const parentContent = parent.textualContent
+  return parentContent === TextualContentState.Yes
+    || parentContent === TextualContentState.DynamicText
+    || parentContent === TextualContentState.Unknown
 }
 
 type DimensionSignal = "height" | "min-height" | "max-height" | "width" | "min-width" | "max-width" | "padding-left" | "padding-right"

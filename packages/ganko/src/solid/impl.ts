@@ -156,6 +156,8 @@ function buildCompoundComponentParents(ctx: SolidBuildContext): ReadonlyMap<numb
     const childrenSlot = findChildrenForwardingElement(baseRootElement)
     if (childrenSlot === null) continue
 
+    const baseRootTag = baseRootElement.tag
+
     for (let j = 1; j < init.arguments.length; j++) {
       const arg = init.arguments[j]
       if (!arg || !ts.isObjectLiteralExpression(arg)) continue
@@ -165,7 +167,10 @@ function buildCompoundComponentParents(ctx: SolidBuildContext): ReadonlyMap<numb
         const value = prop.initializer
         if (!ts.isIdentifier(value)) continue
         const memberFn = componentsByName.get(value.text)
-        if (memberFn) out.set(memberFn.scope.id, childrenSlot.id)
+        if (!memberFn) continue
+        const memberRoot = findFunctionRootJSXElement(memberFn, ctx)
+        if (memberRoot !== null && memberRoot.tag === baseRootTag) continue
+        out.set(memberFn.scope.id, childrenSlot.id)
       }
     }
   }
