@@ -5,6 +5,8 @@ import { SignalGuardKind } from "../../binding/cascade-binder"
 import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-builder"
 import type { ConditionalSignalDelta } from "../../analysis/cascade-analyzer"
 import { layoutOffsetSignals, type LayoutOffsetSignal } from "../../analysis/alignment"
+import type { ElementNode } from "../../binding/element-builder"
+import type { FileSemanticModel } from "../../binding/semantic-model"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -29,6 +31,8 @@ export const cssLayoutConditionalOffsetShift = defineAnalysisRule({
 
       const matches = collectConditionalOffsets(delta, snapshot)
       if (matches.length === 0) return
+
+      if (isElementOrAncestorOutOfFlow(element, semanticModel)) return
 
       const match = firstActionableOffset(snapshot, baselineBySignal, matches)
       if (!match) return
@@ -83,7 +87,7 @@ function firstActionableOffset(
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i]
     if (!match) continue
-    if (LAYOUT_POSITIONED_OFFSET_SIGNALS.has(match.property) && !hasEffectivePositionForConditionalOffset(snapshot, match.guardKey)) {
+    if (LAYOUT_POSITIONED_OFFSET_SIGNALS.has(match.property) && !hasEffectivePosition(snapshot)) {
       continue
     }
     if (baselineBySignal !== null && hasStableBaseline(baselineBySignal, match.property, match.value)) continue
@@ -93,16 +97,23 @@ function firstActionableOffset(
   return null
 }
 
-function hasEffectivePositionForConditionalOffset(
-  snapshot: SignalSnapshot,
-  guardKey: string,
-): boolean {
+function isElementOrAncestorOutOfFlow(element: ElementNode, semanticModel: FileSemanticModel): boolean {
+  const flow = semanticModel.getLayoutFact(element.elementId, "flowParticipation")
+  if (!flow.inFlow) return true
+
+  let current = element.parentElementNode
+  while (current !== null) {
+    const ancestorFlow = semanticModel.getLayoutFact(current.elementId, "flowParticipation")
+    if (!ancestorFlow.inFlow) return true
+    current = current.parentElementNode
+  }
+  return false
+}
+
+function hasEffectivePosition(snapshot: SignalSnapshot): boolean {
   const position = snapshot.signals.get("position")
   if (!position) return false
   if (position.kind !== SignalValueKind.Known) return false
-  if (position.normalized !== "static") return true
-  if (position.guard.kind !== SignalGuardKind.Conditional) return false
-  if (position.guard.key !== guardKey) return false
   return position.normalized !== "static"
 }
 
