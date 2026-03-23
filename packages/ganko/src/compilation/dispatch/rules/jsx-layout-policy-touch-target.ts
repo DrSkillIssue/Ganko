@@ -100,8 +100,10 @@ export const jsxLayoutPolicyTouchTarget = defineAnalysisRule({
 })
 
 function classifyInteractive(element: ElementNode, semanticModel: FileSemanticModel): InteractiveKind | null {
+  if (element.attributes.has("hidden")) return null
   const tag = element.tagName
   if (tag !== null && INTERACTIVE_HTML_TAGS.has(tag)) {
+    if (tag === "input" && element.attributes.get("type") === "hidden") return null
     if (tag === "input" || tag === "select" || tag === "textarea") return "input"
     return "button"
   }
