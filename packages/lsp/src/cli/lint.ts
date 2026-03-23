@@ -23,7 +23,7 @@ import { createFileRegistry } from "../core/file-registry";
 import { buildFullCompilation, findProjectRoot as findProjectRootShared } from "../core/compilation-builder";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit } from "../core/analyze";
-import { batchValidateTailwindClasses } from "../core/enrichment";
+import { batchResolveTailwindClasses } from "../core/enrichment";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
 import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
@@ -295,9 +295,9 @@ export async function runLint(args: readonly string[]): Promise<void> {
     const tBuild = performance.now();
     log.info(`compilation: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css trees in ${(tBuild - t0).toFixed(0)}ms`);
 
-    // ── Batch-validate Tailwind arbitrary classes before rules run ─────
+    // ── Batch-resolve Tailwind classes — preload CSS into validator ────
     if (tailwind !== null && "preloadBatch" in tailwind && twParams !== null) {
-      await batchValidateTailwindClasses(compilation, tailwind, twParams, projectRoot, null, log);
+      await batchResolveTailwindClasses(compilation, tailwind, twParams, projectRoot, null, log);
     }
 
     // ── Solid rules on targeted files (trees already in compilation) ──

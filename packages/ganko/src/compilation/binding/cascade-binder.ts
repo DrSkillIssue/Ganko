@@ -677,8 +677,6 @@ function matchesRequiredAttributes(
     if (constraint === undefined) continue
     if (!actual.has(constraint.name)) return MatchResult.NoMatch
     if (constraint.operator === "exists") {
-      const existsValue = actual.get(constraint.name)
-      if (existsValue === null) hasConditional = true
       continue
     }
 
@@ -1001,10 +999,9 @@ function augmentCascadeWithTailwindFromSymbolTable(
   for (let i = 0; i < classTokens.length; i++) {
     const token = classTokens[i]
     if (token === undefined) continue
-    const classSymbol = symbolTable.classNames.get(token)
-    if (!classSymbol) continue
-    if (classSymbol.source.kind !== "tailwind") continue
-    const resolvedCSS = classSymbol.source.resolvedCSS
+    const classSymbol = symbolTable.getClassName(token)
+    if (classSymbol === null) continue
+    const resolvedCSS = classSymbol.tailwindResolvedCSS
     if (resolvedCSS === null) continue
 
     const declarations = parseTailwindCssDeclarations(resolvedCSS)

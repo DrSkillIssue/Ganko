@@ -3,7 +3,7 @@
  *
  * Spawns a persistent WorkspaceEvaluator subprocess for project-context
  * module resolution. The evaluator stays alive so Tailwind's candidatesToCss
- * can batch-validate arbitrary value classes before rule execution.
+ * can batch-resolve classes and build synthetic CSS trees before rule execution.
  */
 import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, StyleCompilation, TailwindEvalParams } from "@drskillissue/ganko";
@@ -107,20 +107,24 @@ export async function runEnrichment(
 }
 
 /**
- * Batch-validate Tailwind arbitrary classes from a compilation's solid trees.
+ * Batch-resolve Tailwind classes from a compilation's solid trees.
  *
- * Collects class tokens from all solid trees that aren't in the CSS symbol
- * table or the static validator, sends them to the Tailwind design system
- * via candidatesToCss, and preloads results into the validator's batch cache.
+ * Collects ALL class tokens from solid trees that aren't CSS-defined,
+ * sends them to the Tailwind design system via candidatesToCss, and
+ * preloads resolved CSS strings into the validator's batch cache.
  *
- * Call AFTER buildFullCompilation, BEFORE running analysis rules.
- * Used by CLI lint, daemon, and LSP enrichment.
+ * IMPORTANT: Reads CSS class names from CSS tree indexes — must NOT
+ * access compilation.symbolTable which would trigger premature symbol
+ * table construction before the batch cache is populated.
  *
- * If `evaluator` is provided (LSP path), uses it directly — assumes tailwind
- * is already initialized. If null, spawns a temporary evaluator, inits
- * tailwind from `twParams`, validates, and disposes.
+ * After preloading, the symbol table's lazy getClassName() builds
+ * ClassNameSymbol entries with resolvedCSS from the now-populated
+ * validator, and the cascade binder injects their declarations into
+ * element cascades.
+ *
+ * Call AFTER buildFullCompilation, BEFORE anything accesses symbolTable.
  */
-export async function batchValidateTailwindClasses(
+export async function batchResolveTailwindClasses(
   compilation: StyleCompilation,
   validator: BatchableTailwindValidator,
   twParams: TailwindEvalParams,
@@ -128,21 +132,26 @@ export async function batchValidateTailwindClasses(
   evaluator: WorkspaceEvaluator | null,
   log?: Logger,
 ): Promise<void> {
-  const cssClassNames = compilation.symbolTable.classNames;
-  const unknowns = new Set<string>();
+  const candidates = new Set<string>();
   for (const [, solidTree] of compilation.solidTrees) {
     for (const [, idx] of solidTree.staticClassTokensByElementId) {
       for (let i = 0; i < idx.tokens.length; i++) {
         const t = idx.tokens[i];
-        if (t && !cssClassNames.has(t) && !validator.has(t)) unknowns.add(t);
+        if (t) candidates.add(t);
+      }
+    }
+    for (const [, idx] of solidTree.staticClassListKeysByElementId) {
+      for (let i = 0; i < idx.keys.length; i++) {
+        const t = idx.keys[i];
+        if (t) candidates.add(t);
       }
     }
   }
 
-  if (unknowns.size === 0) return;
+  if (candidates.size === 0) return;
 
-  const classNames = Array.from(unknowns);
-  if (log?.isLevelEnabled(Level.Debug)) log.debug(`tailwind batch: validating ${classNames.length} unknown class names`);
+  const classNames = Array.from(candidates);
+  if (log?.isLevelEnabled(Level.Debug)) log.debug(`tailwind batch: resolving ${classNames.length} class names`);
 
   const ownedEvaluator = evaluator === null;
   const eval_ = evaluator ?? spawnWorkspaceEvaluator(projectRoot, log);
@@ -163,10 +172,10 @@ export async function batchValidateTailwindClasses(
     });
     if (result.validation !== undefined) {
       validator.preloadBatch(classNames, result.validation);
-      if (log?.isLevelEnabled(Level.Info)) log.info(`tailwind batch: ${classNames.length} classes validated`);
+      if (log?.isLevelEnabled(Level.Info)) log.info(`tailwind batch: ${classNames.length} classes resolved`);
     }
   } catch {
-    if (log?.isLevelEnabled(Level.Warning)) log.warning("tailwind batch: validation failed, falling back to static set");
+    if (log?.isLevelEnabled(Level.Warning)) log.warning("tailwind batch: resolution failed, falling back to static set");
   } finally {
     if (ownedEvaluator) eval_.dispose();
   }

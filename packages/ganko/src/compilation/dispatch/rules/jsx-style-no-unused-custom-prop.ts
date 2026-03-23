@@ -19,11 +19,7 @@ export const jsxStyleNoUnusedCustomProp = defineAnalysisRule({
   requirement: { tier: ComputationTier.CrossSyntax },
   register(registry) {
     registry.registerCrossSyntaxAction((solidTree, symbolTable, emit) => {
-      // Collect used CSS variable names from symbol table
-      const usedVarNames = new Set<string>()
-      for (const [name] of symbolTable.customProperties) {
-        usedVarNames.add(name)
-      }
+      const usedVarNames = symbolTable.referencedCustomPropertyNames
 
       // Skip files with classList (dynamic class application makes usage unpredictable)
       if (solidTree.jsxClassListAttributes.length > 0) return

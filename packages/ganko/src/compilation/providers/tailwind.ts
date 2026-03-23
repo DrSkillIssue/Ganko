@@ -253,6 +253,7 @@ export function createTailwindProvider(designSystem: TailwindDesignSystem): Tail
           declarations,
           diagnostics: [],
         },
+        tailwindResolvedCSS: css,
       }
       return { valid: true, candidate: parsed, symbol }
     },
@@ -277,6 +278,7 @@ export function createTailwindProvider(designSystem: TailwindDesignSystem): Tail
             declarations,
             diagnostics: [],
           },
+          tailwindResolvedCSS: css,
         })
       }
       return { classNames }

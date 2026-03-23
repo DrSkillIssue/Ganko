@@ -1931,14 +1931,14 @@ function buildConsistencyEvidence(input: AlignmentCase): ConsistencyEvidence {
 
   const baselinesIrrelevant = input.context.baselineRelevance === "irrelevant"
   const blockAxisIsMainAxis = !input.context.crossAxisIsBlockAxis
-  const suppressAll = blockAxisIsMainAxis
+  const suppressAll = blockAxisIsMainAxis || baselinesIrrelevant
   const offset = suppressAll ? ZERO_STRENGTH : offsetRaw
   const declaredOffset = suppressAll ? ZERO_STRENGTH : declaredOffsetRaw
 
-  const baselineStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
-  const contextStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
-  const replacedStrength = (baselinesIrrelevant || suppressAll) ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
-  const compositionResult = (baselinesIrrelevant || suppressAll) ? null : resolveContentCompositionStrength(input)
+  const baselineStrength = suppressAll ? ZERO_STRENGTH : resolveBaselineStrength(input, lineHeight)
+  const contextStrength = suppressAll ? ZERO_STRENGTH : resolveContextStrength(input, lineHeight)
+  const replacedStrength = suppressAll ? ZERO_STRENGTH : resolveReplacedControlStrength(input, lineHeight)
+  const compositionResult = suppressAll ? null : resolveContentCompositionStrength(input)
   const compositionStrength = compositionResult ? compositionResult.evidence : ZERO_STRENGTH
   const contextCertaintyPenalty = resolveContextCertaintyPenalty(input)
   const provenance = input.cohortProvenance

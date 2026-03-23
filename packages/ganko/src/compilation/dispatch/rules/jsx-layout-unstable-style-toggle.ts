@@ -8,6 +8,7 @@ import { toKebabCase } from "@drskillissue/ganko-shared"
 import type { ElementNode } from "../../binding/element-builder"
 import type { FileSemanticModel } from "../../binding/semantic-model"
 import type { FlowParticipationFact } from "../../analysis/layout-fact"
+import { SignalValueKind } from "../../binding/signal-builder"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
@@ -75,7 +76,7 @@ function isExemptFromCLS(
   element: ElementNode,
   flowFact: FlowParticipationFact,
   property: string,
-  _semanticModel: FileSemanticModel,
+  semanticModel: FileSemanticModel,
 ): boolean {
   if (!flowFact.inFlow) return true
 
@@ -87,7 +88,19 @@ function isExemptFromCLS(
     return true
   }
 
+  if (element.parentElementNode !== null && parentClipsOverflow(element.parentElementNode, semanticModel)) {
+    return true
+  }
+
   return false
+}
+
+const CLIPPING_OVERFLOW_VALUES: ReadonlySet<string> = new Set(["hidden", "clip"])
+
+function parentClipsOverflow(parent: ElementNode, semanticModel: FileSemanticModel): boolean {
+  const snapshot = semanticModel.getSignalSnapshot(parent.elementId)
+  const signal = snapshot.signals.get("overflow")
+  return signal !== undefined && signal.kind === SignalValueKind.Known && CLIPPING_OVERFLOW_VALUES.has(signal.normalized)
 }
 
 function hasLayoutContainment(node: ElementNode): boolean {
