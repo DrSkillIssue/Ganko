@@ -131,6 +131,7 @@ export interface SolidBuildContext {
   firstScope: ScopeEntity | null
   readonly componentScopes: Map<ScopeEntity, { scope: ScopeEntity; name: string }>
   componentFunctions: FunctionEntity[]
+  compoundComponentParents: ReadonlyMap<number, number>
   functionsWithReactiveCaptures: FunctionEntity[]
   reactiveVariables: VariableEntity[]
   propsVariables: VariableEntity[]
@@ -319,6 +320,7 @@ export function createSolidBuildContext(input: SolidInput): SolidBuildContext {
     firstScope: null,
     componentScopes,
     componentFunctions: [],
+    compoundComponentParents: new Map(),
     functionsWithReactiveCaptures: [],
     reactiveVariables: [],
     propsVariables: [],

@@ -1,16 +1,13 @@
 import { createCSSDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getActivePolicy, getActivePolicyName } from "../../../css/policy"
-import { parsePxValue, parseEmValue } from "../../../css/parser/value-util"
+import { parseEmValue } from "../../../css/parser/value-util"
 import { defineAnalysisRule, ComputationTier } from "../rule"
 
 const messages = {
   letterSpacingTooSmall: "Letter spacing `{{value}}` ({{resolved}}em) is below the minimum `{{min}}em` for policy `{{policy}}`.",
   wordSpacingTooSmall: "Word spacing `{{value}}` ({{resolved}}em) is below the minimum `{{min}}em` for policy `{{policy}}`.",
   paragraphSpacingTooSmall: "Paragraph spacing `{{value}}` ({{resolved}}em) is below the minimum `{{min}}em` ({{minMultiplier}}× font-size) for policy `{{policy}}`.",
-  touchTargetTooSmall: "`{{property}}: {{value}}` ({{resolved}}px) is below the minimum `{{min}}px` for interactive elements in policy `{{policy}}`.",
 } as const
-
-const INTERACTIVE_SELECTORS = /button|input|select|textarea|\[role=/i
 
 export const cssPolicySpacing = defineAnalysisRule({
   id: "css-policy-spacing",
@@ -41,20 +38,6 @@ export const cssPolicySpacing = defineAnalysisRule({
   d.file.path, d.startLine, d.startColumn,
   cssPolicySpacing.id, "wordSpacingTooSmall",
   resolveMessage(messages.wordSpacingTooSmall, { value: d.value.trim(), resolved: String(em), min: String(policy.minWordSpacing), policy: name }), "warn",
-))
-        }
-      }
-      for (const prop of ["height", "min-height"]) {
-        const decls = tree.declarationsByProperty.get(prop)
-        if (!decls) continue
-        for (let i = 0; i < decls.length; i++) {
-          const d = decls[i]; if (!d) continue; const rule = d.rule; if (!rule) continue
-          if (!INTERACTIVE_SELECTORS.test(rule.selectorText)) continue
-          const px = parsePxValue(d.value); if (px === null || px >= policy.minButtonHeight) continue
-          emit(createCSSDiagnostic(
-  d.file.path, d.startLine, d.startColumn,
-  cssPolicySpacing.id, "touchTargetTooSmall",
-  resolveMessage(messages.touchTargetTooSmall, { property: prop, value: d.value.trim(), resolved: String(Math.round(px * 100) / 100), min: String(policy.minButtonHeight), policy: name }), "warn",
 ))
         }
       }

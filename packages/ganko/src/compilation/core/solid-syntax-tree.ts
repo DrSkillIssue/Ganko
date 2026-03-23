@@ -105,6 +105,9 @@ export interface SolidSyntaxTree {
   readonly firstScope: ScopeEntity | null;
   readonly componentScopes: ReadonlyMap<ScopeEntity, { readonly scope: ScopeEntity; readonly name: string }>;
   readonly componentFunctions: readonly FunctionEntity[];
+  /** Maps sub-component function scope ID → compound base's children-forwarding JSX element ID.
+   * Built from Object.assign compound component patterns during syntax tree construction. */
+  readonly compoundComponentParents: ReadonlyMap<number, number>;
   readonly functionsWithReactiveCaptures: readonly FunctionEntity[];
   readonly reactiveVariables: readonly VariableEntity[];
   readonly propsVariables: readonly VariableEntity[];
