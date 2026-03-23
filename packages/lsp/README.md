@@ -10,7 +10,7 @@ Language Server Protocol (LSP) server for Solid.js projects. `ganko` powers diag
 - Document symbols and workspace symbols
 - Semantic tokens and inlay hints for reactive constructs
 - Pull diagnostics (LSP 3.17 `textDocument/diagnostic`) for non-interactive clients
-- Custom requests: `solid/showReactiveGraph` (Mermaid + DOT graph payload), `solid/memoryUsage`
+- Custom request: `solid/showReactiveGraph` (Mermaid + DOT graph payload)
 
 Supported source extensions:
 
