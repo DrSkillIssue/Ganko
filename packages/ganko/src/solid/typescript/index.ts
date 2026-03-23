@@ -400,6 +400,8 @@ export class TypeResolver {
     const property = tsType.getProperty(propertyName);
     if (property !== undefined) return true;
 
+    if (this.checker.getIndexTypeOfType(tsType, ts.IndexKind.String) !== undefined) return true;
+
     if (tsType.isUnion()) {
       for (const constituent of tsType.types) {
         const flags = constituent.flags;

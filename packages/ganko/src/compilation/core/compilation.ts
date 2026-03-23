@@ -85,7 +85,20 @@ function makeCompilation(
       if (cachedSymbolTable === null) {
         const allCssTrees: CSSSyntaxTree[] = []
         for (const tree of cssTrees.values()) allCssTrees.push(tree)
-        cachedSymbolTable = buildSymbolTable(allCssTrees, tailwindConfig?.validator ?? null)
+        let solidClassTokens: ReadonlySet<string> | null = null
+        if (tailwindConfig?.validator !== null && tailwindConfig?.validator !== undefined) {
+          const tokens = new Set<string>()
+          for (const st of solidTrees.values()) {
+            for (const [, idx] of st.staticClassTokensByElementId) {
+              for (let i = 0; i < idx.tokens.length; i++) { const t = idx.tokens[i]; if (t) tokens.add(t) }
+            }
+            for (const [, idx] of st.staticClassListKeysByElementId) {
+              for (let i = 0; i < idx.keys.length; i++) { const t = idx.keys[i]; if (t) tokens.add(t) }
+            }
+          }
+          solidClassTokens = tokens
+        }
+        cachedSymbolTable = buildSymbolTable(allCssTrees, tailwindConfig?.validator ?? null, solidClassTokens)
       }
       return cachedSymbolTable
     },

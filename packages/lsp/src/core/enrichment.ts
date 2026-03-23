@@ -5,7 +5,7 @@
  * module resolution. The evaluator stays alive so Tailwind's candidatesToCss
  * can batch-resolve classes and build synthetic CSS trees before rule execution.
  */
-import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, buildCSSResult, createCSSInput } from "@drskillissue/ganko";
+import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
 import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, StyleCompilation, TailwindEvalParams } from "@drskillissue/ganko";
 /** Minimal diagnostic eviction interface. */
 export interface DiagnosticEviction {
@@ -106,21 +106,23 @@ export async function runEnrichment(
   return { registry, layout, tailwindValidator, batchableValidator, externalCustomProperties, tailwindState: twState, evaluator };
 }
 
-const TAILWIND_SYNTHETIC_PATH = "<tailwind-utilities>";
-
 /**
  * Batch-resolve Tailwind classes from a compilation's solid trees.
  *
- * Collects ALL class tokens from solid trees that aren't in the CSS symbol
- * table, sends them to the Tailwind design system via candidatesToCss,
- * preloads CSS strings into the validator's batch cache, then builds a
- * synthetic CSSSyntaxTree from the resolved CSS so that selectors,
- * declarations, and class names enter the symbol table as first-class
- * entities.
+ * Collects ALL class tokens from solid trees that aren't CSS-defined,
+ * sends them to the Tailwind design system via candidatesToCss, and
+ * preloads resolved CSS strings into the validator's batch cache.
  *
- * Returns the updated compilation with the synthetic Tailwind tree.
+ * IMPORTANT: Reads CSS class names from CSS tree indexes — must NOT
+ * access compilation.symbolTable which would trigger premature symbol
+ * table construction before the batch cache is populated.
  *
- * Call AFTER buildFullCompilation, BEFORE creating the tracker / running rules.
+ * After preloading, the symbol table's lazy getClassName() builds
+ * ClassNameSymbol entries with resolvedCSS from the now-populated
+ * validator, and the cascade binder injects their declarations into
+ * element cascades.
+ *
+ * Call AFTER buildFullCompilation, BEFORE anything accesses symbolTable.
  */
 export async function batchResolveTailwindClasses(
   compilation: StyleCompilation,
@@ -129,25 +131,24 @@ export async function batchResolveTailwindClasses(
   projectRoot: string,
   evaluator: WorkspaceEvaluator | null,
   log?: Logger,
-): Promise<StyleCompilation> {
-  const cssClassNames = compilation.symbolTable.classNames;
+): Promise<void> {
   const candidates = new Set<string>();
   for (const [, solidTree] of compilation.solidTrees) {
     for (const [, idx] of solidTree.staticClassTokensByElementId) {
       for (let i = 0; i < idx.tokens.length; i++) {
         const t = idx.tokens[i];
-        if (t && !cssClassNames.has(t)) candidates.add(t);
+        if (t) candidates.add(t);
       }
     }
     for (const [, idx] of solidTree.staticClassListKeysByElementId) {
       for (let i = 0; i < idx.keys.length; i++) {
         const t = idx.keys[i];
-        if (t && !cssClassNames.has(t)) candidates.add(t);
+        if (t) candidates.add(t);
       }
     }
   }
 
-  if (candidates.size === 0) return compilation;
+  if (candidates.size === 0) return;
 
   const classNames = Array.from(candidates);
   if (log?.isLevelEnabled(Level.Debug)) log.debug(`tailwind batch: resolving ${classNames.length} class names`);
@@ -172,28 +173,10 @@ export async function batchResolveTailwindClasses(
     if (result.validation !== undefined) {
       validator.preloadBatch(classNames, result.validation);
       if (log?.isLevelEnabled(Level.Info)) log.info(`tailwind batch: ${classNames.length} classes resolved`);
-
-      const cssFragments: string[] = [];
-      for (let i = 0; i < result.validation.length; i++) {
-        const css = result.validation[i];
-        if (css !== null && css !== undefined) cssFragments.push(css);
-      }
-
-      if (cssFragments.length > 0) {
-        const syntheticCSS = cssFragments.join("\n");
-        const cssInput = createCSSInput([{ path: TAILWIND_SYNTHETIC_PATH, content: syntheticCSS }]);
-        const { trees } = buildCSSResult(cssInput);
-        if (trees[0]) {
-          compilation = compilation.withCSSTree(trees[0]);
-          if (log?.isLevelEnabled(Level.Info)) log.info(`tailwind synthetic tree: ${cssFragments.length} rules, ${syntheticCSS.length} bytes`);
-        }
-      }
     }
   } catch {
     if (log?.isLevelEnabled(Level.Warning)) log.warning("tailwind batch: resolution failed, falling back to static set");
   } finally {
     if (ownedEvaluator) eval_.dispose();
   }
-
-  return compilation;
 }

@@ -257,7 +257,7 @@ export async function handleInitialized(
   // The tracker starts empty — it must be populated with all workspace
   // solid + CSS trees so that IncrementalAnalyzer can run cross-file rules.
   {
-    let { compilation } = buildFullCompilation({
+    const { compilation } = buildFullCompilation({
       solidFiles: enrichment.registry.solidFiles,
       cssFiles: enrichment.registry.cssFiles,
       getProgram: () => project.getProgram(),
@@ -267,7 +267,8 @@ export async function handleInitialized(
       logger: log,
     });
 
-    // Batch-resolve Tailwind classes and build synthetic CSS tree BEFORE tracker/analysis
+    // Batch-resolve Tailwind classes — preloads CSS into validator BEFORE
+    // symbolTable is constructed (tracker creation or rule dispatch).
     if (enrichment.batchableValidator !== null) {
       const twParams = prepareTailwindEval(
         enrichment.registry.loadAllCSSContent(),
@@ -276,7 +277,7 @@ export async function handleInitialized(
         log,
       );
       if (twParams !== null) {
-        compilation = await batchResolveTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
+        await batchResolveTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
       }
     }
 

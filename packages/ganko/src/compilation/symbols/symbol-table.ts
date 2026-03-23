@@ -61,6 +61,7 @@ export interface SymbolTable {
   readonly layers: ReadonlyMap<string, LayerSymbol>
   readonly containers: ReadonlyMap<string, ContainerSymbol>
   readonly themeTokens: ReadonlyMap<string, ThemeTokenSymbol>
+  readonly referencedCustomPropertyNames: ReadonlySet<string>
 
   readonly selectorsByDispatchKey: ReadonlyMap<string, readonly SelectorSymbol[]>
   readonly selectorsBySubjectTag: ReadonlyMap<string, readonly SelectorSymbol[]>
@@ -231,7 +232,7 @@ function pushToMapArray<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else map.set(key, [value])
 }
 
-export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValidator?: TailwindValidator | null): SymbolTable {
+export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValidator?: TailwindValidator | null, solidClassTokens?: ReadonlySet<string> | null): SymbolTable {
   const classNamesMap = new Map<string, { selectors: SelectorEntity[]; filePaths: Set<string> }>()
   const selectorsMap = new Map<number, SelectorSymbol>()
   const customPropertiesMap = new Map<string, CustomPropertySymbol>()
@@ -263,6 +264,7 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValida
   const allSelectors: SelectorEntity[] = []
   const allDeclarations: DeclarationEntity[] = []
   const allVariables: VariableEntity[] = []
+  const referencedCustomPropertyNamesSet = new Set<string>()
   const allAtRules: AtRuleEntity[] = []
   const allKeyframeAtRules: AtRuleEntity[] = []
   const allFontFaceAtRules: AtRuleEntity[] = []
@@ -393,6 +395,12 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValida
       }
     }
 
+    const treeVariableRefs = tree.variableRefs
+    for (let i = 0; i < treeVariableRefs.length; i++) {
+      const ref = treeVariableRefs[i]
+      if (ref) referencedCustomPropertyNamesSet.add(ref.name)
+    }
+
     // At-rules
     const treeAtRules = tree.atRules
     for (let i = 0; i < treeAtRules.length; i++) {
@@ -457,13 +465,35 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValida
     }
   }
 
-  // Build ClassNameSymbol map
+  // Build ClassNameSymbol map — CSS + Tailwind resolved in one pass
+  const twValidator = tailwindValidator ?? null
   const classNameSymbols = new Map<string, ClassNameSymbol>()
   for (const [name, entry] of classNamesMap) {
-    classNameSymbols.set(name, createClassNameSymbol(name, entry.selectors, [...entry.filePaths]))
+    const twCSS = twValidator !== null && twValidator.has(name) ? twValidator.resolve(name) : null
+    classNameSymbols.set(name, createClassNameSymbol(name, entry.selectors, [...entry.filePaths], twCSS))
   }
 
-  const twValidator = tailwindValidator ?? null
+  // Tailwind-only classes from solid trees (not in any CSS selector)
+  if (twValidator !== null && solidClassTokens !== null && solidClassTokens !== undefined) {
+    for (const name of solidClassTokens) {
+      if (classNameSymbols.has(name)) continue
+      if (!twValidator.has(name)) continue
+      const resolvedCSS = twValidator.resolve(name)
+      classNameSymbols.set(name, {
+        symbolKind: "className",
+        name,
+        filePath: null,
+        source: {
+          kind: "tailwind",
+          candidate: { raw: name, variants: [], utility: name, value: null, modifier: null, important: false, negative: false },
+          resolvedCSS,
+          declarations: [],
+          diagnostics: [],
+        },
+        tailwindResolvedCSS: resolvedCSS,
+      })
+    }
+  }
 
   // Build keyframe indexes
   const knownKeyframeNames = new Set<string>()
@@ -865,29 +895,13 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValida
     unusedFunctions: unusedFunctionsArr,
     unusedPlaceholders: unusedPlaceholdersArr,
     tokenCategories: [...tokensByCategoryMap.keys()],
+    referencedCustomPropertyNames: referencedCustomPropertyNamesSet,
 
     hasClassName(name: string): boolean {
-      return classNameSymbols.has(name) || (twValidator !== null && twValidator.has(name))
+      return classNameSymbols.has(name)
     },
     getClassName(name: string): ClassNameSymbol | null {
-      const existing = classNameSymbols.get(name)
-      if (existing !== undefined) return existing
-      if (twValidator === null || !twValidator.has(name)) return null
-      const resolvedCSS = twValidator.resolve(name)
-      const symbol: ClassNameSymbol = {
-        symbolKind: "className",
-        name,
-        filePath: null,
-        source: {
-          kind: "tailwind",
-          candidate: { raw: name, variants: [], utility: name, value: null, modifier: null, important: false, negative: false },
-          resolvedCSS,
-          declarations: [],
-          diagnostics: [],
-        },
-      }
-      classNameSymbols.set(name, symbol)
-      return symbol
+      return classNameSymbols.get(name) ?? null
     },
     getSelectorsByClassName(name: string): readonly SelectorSymbol[] {
       return selectorSymbolsByClassName.get(name) ?? EMPTY_SELECTOR_SYMBOLS

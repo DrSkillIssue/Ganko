@@ -281,7 +281,7 @@ async function handleLintRequest(
       return null;
     };
 
-    let { compilation } = buildFullCompilation({
+    const { compilation } = buildFullCompilation({
       solidFiles: fileIndex.solidFiles,
       cssFiles: fileIndex.cssFiles,
       getProgram: () => project.getProgram(),
@@ -294,7 +294,7 @@ async function handleLintRequest(
     log.info(`compilation build: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css in ${(performance.now() - tResolve).toFixed(0)}ms`);
 
     if (state.tailwind !== null && "preloadBatch" in state.tailwind && twParams !== null) {
-      compilation = await batchResolveTailwindClasses(compilation, state.tailwind, twParams, projectRoot, null, log);
+      await batchResolveTailwindClasses(compilation, state.tailwind, twParams, projectRoot, null, log);
     }
 
     state.tracker = createCompilationTracker(compilation);

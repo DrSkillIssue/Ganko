@@ -185,7 +185,23 @@ function isObjectLiteralTarget(graph: SolidGraph, pa: PropertyAssignmentEntity):
   const variable = getVariableByNameInScope(graph, obj.text, pa.scope);
   if (!variable) return false;
   const init = variable.initializer;
-  return init !== null && ts.isObjectLiteralExpression(init);
+  if (init === null || !ts.isObjectLiteralExpression(init)) return false;
+  if (propertyExistsInLiteral(init, pa)) return false;
+  return true;
+}
+
+function propertyExistsInLiteral(literal: ts.ObjectLiteralExpression, pa: PropertyAssignmentEntity): boolean {
+  let propName: string | null = null;
+  if (!pa.computed && ts.isIdentifier(pa.property)) propName = pa.property.text;
+  else if (ts.isStringLiteral(pa.property)) propName = pa.property.text;
+  if (propName === null) return false;
+  for (let i = 0; i < literal.properties.length; i++) {
+    const prop = literal.properties[i];
+    if (!prop) continue;
+    if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === propName) return true;
+    if (ts.isShorthandPropertyAssignment(prop) && prop.name.text === propName) return true;
+  }
+  return false;
 }
 
 export function getMemberAccessesOnIdentifier(fn: FunctionEntity, identifierName: string): readonly ts.PropertyAccessExpression[] {

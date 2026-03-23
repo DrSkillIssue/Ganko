@@ -26,12 +26,14 @@ export interface ClassNameSymbol {
   readonly name: string
   readonly filePath: string | null
   readonly source: ClassNameSource
+  readonly tailwindResolvedCSS: string | null
 }
 
 export function createClassNameSymbol(
   name: string,
   selectors: readonly SelectorEntity[],
   filePaths: readonly string[],
+  tailwindResolvedCSS?: string | null,
 ): ClassNameSymbol {
   return {
     symbolKind: "className",
@@ -42,5 +44,6 @@ export function createClassNameSymbol(
       selectors,
       filePaths,
     },
+    tailwindResolvedCSS: tailwindResolvedCSS ?? null,
   }
 }

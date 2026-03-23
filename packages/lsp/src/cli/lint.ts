@@ -282,7 +282,7 @@ export async function runLint(args: readonly string[]): Promise<void> {
     const externalCustomProperties = scanDependencyCustomProperties(workspaceLayout);
     if (externalCustomProperties.size > 0) log.info(`library analysis: ${externalCustomProperties.size} external custom properties`);
 
-    let { compilation } = buildFullCompilation({
+    const { compilation } = buildFullCompilation({
       solidFiles: fileRegistry.solidFiles,
       cssFiles: fileRegistry.cssFiles,
       getProgram: () => program,
@@ -295,9 +295,9 @@ export async function runLint(args: readonly string[]): Promise<void> {
     const tBuild = performance.now();
     log.info(`compilation: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css trees in ${(tBuild - t0).toFixed(0)}ms`);
 
-    // ── Batch-resolve Tailwind classes and build synthetic CSS tree ────
+    // ── Batch-resolve Tailwind classes — preload CSS into validator ────
     if (tailwind !== null && "preloadBatch" in tailwind && twParams !== null) {
-      compilation = await batchResolveTailwindClasses(compilation, tailwind, twParams, projectRoot, null, log);
+      await batchResolveTailwindClasses(compilation, tailwind, twParams, projectRoot, null, log);
     }
 
     // ── Solid rules on targeted files (trees already in compilation) ──
