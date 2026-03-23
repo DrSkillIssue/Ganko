@@ -11,7 +11,7 @@ import type { CallEntity, ScopeEntity, VariableEntity, ReadEntity } from "../../
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
 import { buildSolidImportFix, extractSignalDestructures, getContainingStatement } from "../util";
 import { defineSolidRule } from "../../rule";
-import { getCallsByPrimitive, getCallByNode, getFunctionByNode } from "../../queries";
+import { getCallsByPrimitive, getCallByNode, getFunctionByNode, getVariableCallExpressions } from "../../queries";
 
 import type { Fix, FixOperation } from "../../../diagnostic";
 import { isBlank } from "@drskillissue/ganko-shared";
@@ -203,19 +203,13 @@ function findSetterCallsViaReads(setterVariables: SetterInfo[]): SetterCall[] {
   for (let i = 0, len = setterVariables.length; i < len; i++) {
     const setter = setterVariables[i];
     if (!setter) continue;
-    const reads = setter.variable.reads;
+    const callNodes = getVariableCallExpressions(setter.variable);
 
-    for (let j = 0, rlen = reads.length; j < rlen; j++) {
-      const read = reads[j];
+    for (let j = 0, rlen = callNodes.length; j < rlen; j++) {
+      const callNode = callNodes[j];
+      if (!callNode) continue;
+      const read = getSetterReadForCall(setter.variable, callNode);
       if (!read) continue;
-
-      // isProperAccess means the identifier is the callee of a CallExpression
-      if (!read.isProperAccess) {
-        continue;
-      }
-
-      if (!read.node.parent || !ts.isCallExpression(read.node.parent)) continue;
-      const callNode = read.node.parent;
 
       const containingStatement = getContainingStatement(callNode);
 
@@ -229,6 +223,16 @@ function findSetterCallsViaReads(setterVariables: SetterInfo[]): SetterCall[] {
   }
 
   return result;
+}
+
+function getSetterReadForCall(setter: VariableEntity, callNode: ts.CallExpression): ReadEntity | null {
+  const reads = setter.reads;
+  for (let i = 0, len = reads.length; i < len; i++) {
+    const read = reads[i];
+    if (!read || !read.isProperAccess) continue;
+    if (read.node.parent === callNode && callNode.expression === read.node) return read;
+  }
+  return null;
 }
 
 /**

@@ -36,6 +36,7 @@ import {
   formatVariableNames,
   findFunctionChildExpression,
 } from "../../util";
+import { extractSignalDestructures, getFunctionBodyExpression } from "../util";
 import {
   getDescendantScopes,
   getFunctionByNode,
@@ -44,6 +45,7 @@ import {
   getJSXElementsByTag,
   buildDerivedFunctionMap,
   isInDeferredContext,
+  getVariableCallExpressions,
 } from "../../queries";
 import { defineSolidRule } from "../../rule";
 import { createDiagnostic, resolveMessage } from "../../../diagnostic";
@@ -53,6 +55,8 @@ const messages = {
     "Creating signals inside <{{component}}> callback creates new signals on each render. Use a store at the parent level, or derive state from the index.",
   signalCallInvariant:
     "Signal '{{name}}' called inside <{{component}}> produces the same value for every item. Extract to a variable or memoize with createMemo() before the loop.",
+  signalIndexedByLoop:
+    "Signal '{{name}}' is indexed by a loop-dependent key inside <{{component}}>. Each item now depends on the entire signal value, so updating one key re-runs all items. Use createStore for keyed state or derive a per-item accessor outside the loop.",
   derivedCallInvariant:
     "'{{name}}()' inside <{{component}}> captures {{captures}} but doesn't use the loop item. Extract the call before the loop or pass the item as a parameter.",
 } as const;
@@ -84,12 +88,13 @@ export const signalInLoop = defineSolidRule({
     }
 
     const diagnostics: Diagnostic[] = [];
+    const objectMapSignals = collectObjectMapSignals(graph);
 
     // Check 1: Signal/store creation inside loops
     checkSignalCreation(graph, loopScopeIndex, diagnostics, graph.filePath);
 
     // Check 2 & 3: Signal calls and derived function calls inside loops
-    checkSignalCalls(graph, loopScopeIndex, diagnostics, graph.filePath);
+    checkSignalCalls(graph, loopScopeIndex, objectMapSignals, diagnostics, graph.filePath);
 
     for (const diagnostic of diagnostics) {
       emit(diagnostic);
@@ -329,6 +334,7 @@ function checkSignalCreation(
 function checkSignalCalls(
   graph: SolidGraph,
   loopScopeIndex: Map<number, LoopCallbackInfo>,
+  objectMapSignals: ReadonlySet<VariableEntity>,
   diagnostics: Diagnostic[],
   file: string,
 ): void {
@@ -352,6 +358,27 @@ function checkSignalCalls(
 
     // (These are already caught by signalInLoop - no need to also flag their calls)
     if (isVariableDeclaredInLoop(variable, loopInfo, loopScopeIndex)) {
+      return;
+    }
+
+    if (objectMapSignals.has(variable) && isLoopIndexedSignalRead(read.node, loopInfo.paramNames)) {
+      if (reported.has(read.node)) return;
+      reported.add(read.node);
+
+      diagnostics.push(
+        createDiagnostic(
+          file,
+          read.node,
+          graph.sourceFile,
+          "signal-in-loop",
+          "signalIndexedByLoop",
+          resolveMessage(messages.signalIndexedByLoop, {
+            name: variable.name,
+            component: loopInfo.element.tag ?? "For",
+          }),
+          "error",
+        ),
+      );
       return;
     }
 
@@ -382,6 +409,91 @@ function checkSignalCalls(
 
   // Check derived function calls (functions that capture reactive variables)
   checkDerivedCalls(graph, loopScopeIndex, diagnostics, reported, file);
+}
+
+function isLoopIndexedSignalRead(readNode: ts.Node, loopParamNames: Set<string>): boolean {
+  const parent = readNode.parent;
+  if (!parent || !ts.isCallExpression(parent) || parent.expression !== readNode) {
+    return false;
+  }
+
+  const accessorParent = parent.parent;
+  if (!accessorParent || !ts.isElementAccessExpression(accessorParent) || accessorParent.expression !== parent) {
+    return false;
+  }
+
+  const argument = accessorParent.argumentExpression;
+  if (!argument) return false;
+
+  return expressionReferencesAnyDeep(argument, loopParamNames);
+}
+
+function collectObjectMapSignals(graph: SolidGraph): ReadonlySet<VariableEntity> {
+  const signalCalls = getCallsByPrimitive(graph, "createSignal");
+  const destructures = extractSignalDestructures(signalCalls, graph);
+  const result = new Set<VariableEntity>();
+
+  for (let i = 0, len = destructures.length; i < len; i++) {
+    const destructure = destructures[i];
+    if (!destructure) continue;
+    if (!isSignalUpdatedViaSpreadMapSetter(destructure.setterVariable)) continue;
+    result.add(destructure.signalVariable);
+  }
+
+  return result;
+}
+
+function isSignalUpdatedViaSpreadMapSetter(setterVariable: VariableEntity): boolean {
+  const calls = getVariableCallExpressions(setterVariable);
+
+  for (let i = 0, len = calls.length; i < len; i++) {
+    const call = calls[i];
+    if (!call) continue;
+    if (isSpreadMapSetterCall(call)) return true;
+  }
+
+  return false;
+}
+
+function isSpreadMapSetterCall(call: ts.CallExpression): boolean {
+  const firstArg = call.arguments[0];
+  if (!firstArg) return false;
+
+  if (ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg)) {
+    if (firstArg.parameters.length !== 1) return false;
+    const param = firstArg.parameters[0];
+    if (!param || !ts.isIdentifier(param.name)) return false;
+    if (ts.isBlock(firstArg.body) && firstArg.body.statements.length !== 1) return false;
+    const returned = getFunctionBodyExpression(firstArg);
+    if (!returned || !ts.isParenthesizedExpression(returned) && !ts.isObjectLiteralExpression(returned)) return false;
+    const expr = ts.isParenthesizedExpression(returned) ? returned.expression : returned;
+    return isSpreadMapObjectLiteral(expr, param.name.text);
+  }
+
+  return false;
+}
+
+function isSpreadMapObjectLiteral(node: ts.Expression, paramName: string): boolean {
+  if (!ts.isObjectLiteralExpression(node)) return false;
+
+  let hasSpreadPrev = false;
+  let hasComputedKeyWrite = false;
+
+  for (let i = 0, len = node.properties.length; i < len; i++) {
+    const prop = node.properties[i];
+    if (!prop) continue;
+
+    if (ts.isSpreadAssignment(prop) && ts.isIdentifier(prop.expression) && prop.expression.text === paramName) {
+      hasSpreadPrev = true;
+      continue;
+    }
+
+    if (ts.isPropertyAssignment(prop) && prop.name && ts.isComputedPropertyName(prop.name)) {
+      hasComputedKeyWrite = true;
+    }
+  }
+
+  return hasSpreadPrev && hasComputedKeyWrite;
 }
 
 /**

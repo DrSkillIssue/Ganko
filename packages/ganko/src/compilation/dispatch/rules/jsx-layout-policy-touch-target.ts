@@ -4,6 +4,7 @@ import { parsePxValue } from "../../../css/parser/value-util"
 import { getJSXAttributeEntity } from "../../../solid/queries/jsx"
 import { getStaticStringFromJSXValue } from "../../../solid/util/static-value"
 import type { ElementNode } from "../../binding/element-builder"
+import { TextualContentState } from "../../binding/signal-builder"
 import type { SignalSnapshot, LayoutSignalName } from "../../binding/signal-builder"
 import { SignalValueKind } from "../../binding/signal-builder"
 import { SignalGuardKind } from "../../binding/cascade-binder"
@@ -18,7 +19,7 @@ const messages = {
   noReservedInlineSize: "Interactive element `<{{tag}}>` has no declared width (minimum `{{min}}px` required by policy `{{policy}}`). The element is content-sized and may not meet the touch-target threshold.",
 } as const
 
-const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea", "label", "summary"])
+const INTERACTIVE_HTML_TAGS = new Set(["button", "a", "input", "select", "textarea", "summary"])
 const INTERACTIVE_ARIA_ROLES = new Set([
   "button", "link", "checkbox", "radio", "combobox", "listbox",
   "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "tab",
@@ -100,9 +101,12 @@ export const jsxLayoutPolicyTouchTarget = defineAnalysisRule({
 })
 
 function classifyInteractive(element: ElementNode, semanticModel: FileSemanticModel): InteractiveKind | null {
+  if (element.attributes.has("hidden")) return null
   const tag = element.tagName
   if (tag !== null && INTERACTIVE_HTML_TAGS.has(tag)) {
+    if (tag === "input" && element.attributes.get("type") === "hidden") return null
     if (tag === "input" || tag === "select" || tag === "textarea") return "input"
+    if (tag === "a" && isInlineTextLink(element)) return null
     return "button"
   }
 
@@ -144,6 +148,17 @@ function isVisuallyHidden(element: ElementNode, snapshot: SignalSnapshot): boole
   return false
 }
 
+function isInlineTextLink(element: ElementNode): boolean {
+  const content = element.textualContent
+  if (content !== TextualContentState.Yes && content !== TextualContentState.DynamicText) return false
+  const parent = element.parentElementNode
+  if (parent === null) return false
+  const parentContent = parent.textualContent
+  return parentContent === TextualContentState.Yes
+    || parentContent === TextualContentState.DynamicText
+    || parentContent === TextualContentState.Unknown
+}
+
 type DimensionSignal = "height" | "min-height" | "max-height" | "width" | "min-width" | "max-width" | "padding-left" | "padding-right"
 
 function checkDimension(
@@ -169,6 +184,7 @@ function checkDimension(
 
   if (px === null) return
   if (px >= min) return
+  if (px === 0 && (signal === "min-width" || signal === "min-height")) return
 
   emit(createDiagnostic(
     element.solidFile, element.jsxEntity.node, semanticModel.solidTree.sourceFile,

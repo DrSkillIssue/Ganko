@@ -15,6 +15,7 @@ import {
   scanDependencyCustomProperties,
   resolveTailwindValidatorSync,
   prepareTailwindEval,
+  setActivePolicy,
 } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
@@ -47,6 +48,7 @@ interface LintOptions {
   readonly logLevel: LogLevel
   readonly logFile: string | undefined
   readonly noDaemon: boolean
+  readonly accessibilityPolicy: string | undefined
 }
 
 function parseLintArgs(args: readonly string[]): LintOptions {
@@ -60,6 +62,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
   let logLevel: LogLevel = "off";
   let logFile: string | undefined;
   let noDaemon = false;
+  let accessibilityPolicy: string | undefined;
   const cwd = process.cwd();
 
   for (let i = 0; i < args.length; i++) {
@@ -100,6 +103,11 @@ function parseLintArgs(args: readonly string[]): LintOptions {
       maxWarnings = parsed; i++; continue;
     }
     if (arg === "--no-daemon") { noDaemon = true; continue; }
+    if (arg === "--accessibility-policy") {
+      accessibilityPolicy = args[i + 1];
+      if (accessibilityPolicy === undefined) die("--accessibility-policy requires a value (wcag-aa, wcag-aaa).");
+      i++; continue;
+    }
     if (arg === "--exclude") {
       const next = args[i + 1];
       if (next === undefined || next.startsWith("-")) die("--exclude requires a glob pattern argument.");
@@ -109,7 +117,7 @@ function parseLintArgs(args: readonly string[]): LintOptions {
     files.push(arg);
   }
 
-  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon };
+  return { files, exclude, format, crossFile, eslintConfig, noEslintConfig, maxWarnings, cwd, logLevel, logFile, noDaemon, accessibilityPolicy };
 }
 
 const GLOB_CHARS = /[*?{]/;
@@ -239,6 +247,8 @@ export async function runLint(args: readonly string[]): Promise<void> {
       outputAndExit(daemonResult, options);
     }
   }
+
+  if (options.accessibilityPolicy !== undefined) setActivePolicy(options.accessibilityPolicy);
 
   const project = createProject({ rootPath: projectRoot, plugins: [SolidPlugin], rules: eslintResult.overrides, log });
   let exitCode = 0;

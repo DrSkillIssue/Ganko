@@ -31,6 +31,21 @@ export function getVariableAssignments(variable: VariableEntity): readonly Assig
   return variable.assignments;
 }
 
+export function getVariableCallExpressions(variable: VariableEntity): readonly ts.CallExpression[] {
+  const calls: ts.CallExpression[] = [];
+  const reads = variable.reads;
+
+  for (let i = 0, len = reads.length; i < len; i++) {
+    const read = reads[i];
+    if (!read || !read.isProperAccess) continue;
+    const parent = read.node.parent;
+    if (!parent || !ts.isCallExpression(parent) || parent.expression !== read.node) continue;
+    calls.push(parent);
+  }
+
+  return calls;
+}
+
 export function getCapturedVariables(fn: FunctionEntity): readonly VariableEntity[] {
   return fn.captures;
 }

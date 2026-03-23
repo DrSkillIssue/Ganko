@@ -108,6 +108,27 @@ export function extractSignalDestructures(
   return result
 }
 
+export function getFunctionBodyExpression(
+  fn: ts.ArrowFunction | ts.FunctionExpression,
+): ts.Expression | null {
+  if (ts.isArrowFunction(fn) && !ts.isBlock(fn.body)) {
+    return fn.body
+  }
+
+  const body = fn.body
+  if (!ts.isBlock(body)) return null
+
+  for (let i = body.statements.length - 1; i >= 0; i--) {
+    const stmt = body.statements[i]
+    if (!stmt) continue
+    if (ts.isReturnStatement(stmt) && stmt.expression) {
+      return stmt.expression
+    }
+  }
+
+  return null
+}
+
 /**
  * Check if a node is a statement or declaration (analogous to ESTree type name
  * ending in "Statement" or "Declaration").

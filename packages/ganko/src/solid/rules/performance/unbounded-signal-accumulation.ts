@@ -19,7 +19,7 @@ import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByPrimitive } from "../../queries"
-import { extractSignalDestructures } from "../util"
+import { extractSignalDestructures, getFunctionBodyExpression } from "../util"
 
 const messages = {
   unbounded:
@@ -81,7 +81,7 @@ export const unboundedSignalAccumulation = defineSolidRule({
         const paramName = param.name.text
 
         // Get the body expression
-        const body = getBodyExpression(arg)
+        const body = getFunctionBodyExpression(arg)
         if (!body) continue
 
         // Body must be an unbounded accumulation pattern:
@@ -276,32 +276,6 @@ function statementsHaveTruncationExpression(statements: ts.NodeArray<ts.Statemen
     }
   }
   return false
-}
-
-/**
- * Extract the expression body from a function.
- * For arrow functions with expression bodies, returns the expression directly.
- * For block bodies, finds the last return statement with an argument.
- */
-function getBodyExpression(fn: ts.ArrowFunction | ts.FunctionExpression): ts.Expression | null {
-  if (ts.isArrowFunction(fn) && !ts.isBlock(fn.body)) {
-    return fn.body
-  }
-
-  const body = ts.isArrowFunction(fn) ? fn.body : fn.body
-  if (ts.isBlock(body)) {
-    const statements = body.statements
-    // Find the last return statement (the final return value)
-    for (let i = statements.length - 1; i >= 0; i--) {
-      const stmt = statements[i]
-      if (!stmt) continue
-      if (ts.isReturnStatement(stmt) && stmt.expression) {
-        return stmt.expression
-      }
-    }
-  }
-
-  return null
 }
 
 /**

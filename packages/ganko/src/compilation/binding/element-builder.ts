@@ -9,6 +9,7 @@ import ts from "typescript"
 import { ExportKind, type ExportEntity } from "../../solid/entities/export"
 import type { FunctionEntity } from "../../solid/entities/function"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
+import type { ScopeEntity } from "../../solid/entities/scope"
 import type { VariableEntity } from "../../solid/entities/variable"
 import { buildSolidSyntaxTree } from "../../solid/impl"
 import { createSolidInput } from "../../solid/create-input"
@@ -302,7 +303,7 @@ export function buildElementNodes(
     const selectorDispatchKeys = buildSelectorDispatchKeys(attributes, classTokens)
     const inlineStyleValues = inlineStyleValuesByElementId.get(element.id) ?? EMPTY_INLINE_STYLE_VALUES
     const textualContent = getTextualContentState(element, textContentMemo, compositionMetaByElementId)
-    const parentElementId = resolveComposedParentElementId(element, compositionMetaByElementId)
+    const parentElementId = resolveComposedParentElementId(element, compositionMetaByElementId, solidTree.compoundComponentParents)
 
     records.push({
       element,
@@ -336,14 +337,31 @@ export function buildElementNodes(
     }
   }
 
+  // Topological sort: compound parent wiring can reference elements defined
+  // later in source order (sub-component functions appear before the base).
+  const recordsByElementId = new Map<number, FlatRecord>()
+  for (let i = 0; i < records.length; i++) { const r = records[i]; if (r) recordsByElementId.set(r.element.id, r) }
+  const sorted: FlatRecord[] = []
+  const visited = new Set<number>()
+  function visitRecord(r: FlatRecord): void {
+    if (visited.has(r.element.id)) return
+    visited.add(r.element.id)
+    if (r.parentElementId !== null) {
+      const parent = recordsByElementId.get(r.parentElementId)
+      if (parent) visitRecord(parent)
+    }
+    sorted.push(r)
+  }
+  for (let i = 0; i < records.length; i++) { const r = records[i]; if (r) visitRecord(r) }
+
   // Wire into ElementNode tree
   const elements: MutableElementNode[] = []
   const nodeByElementId = new Map<number, MutableElementNode>()
   const lastChildByParentId = new Map<number, MutableElementNode>()
   const siblingTypeSeenByParentId = new Map<number, Map<string, number>>()
 
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i]
+  for (let i = 0; i < sorted.length; i++) {
+    const record = sorted[i]
     if (!record) continue
 
     const parentElementId = record.parentElementId
@@ -553,6 +571,7 @@ function resolveEffectiveTag(element: JSXElementEntity, hostDescriptor: LayoutCo
 function resolveComposedParentElementId(
   element: JSXElementEntity,
   compositionMetaByElementId: ReadonlyMap<number, CompositionMeta>,
+  compoundComponentParents: ReadonlyMap<number, number>,
 ): number | null {
   let parent = element.parent
   while (parent !== null) {
@@ -560,6 +579,18 @@ function resolveComposedParentElementId(
     if (meta && meta.participates) return parent.id
     parent = parent.parent
   }
+
+  // AST parent chain terminated — element is at the root of a component function.
+  // Walk the scope chain to find the owning component's scope. If it's a member
+  // of a compound component (Object.assign), the syntax tree carries the mapping
+  // from scope ID → compound base's children-forwarding element ID.
+  let scope: ScopeEntity | null = element.scope
+  while (scope !== null) {
+    const compoundParent = compoundComponentParents.get(scope.id)
+    if (compoundParent !== undefined) return compoundParent
+    scope = scope.parent
+  }
+
   return null
 }
 

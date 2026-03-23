@@ -383,14 +383,14 @@ export function createFileSemanticModel(
     },
 
     getLayoutFact<K extends LayoutFactKind>(elementId: number, factKind: K): LayoutFactMap[K] {
-      const cascade = this.getElementCascade(elementId)
+      const snapshot = this.getSignalSnapshot(elementId)
       const allElements = this.getElementNodes()
       return computeLayoutFact(
         factKind,
         elementId,
-        cascade.declarations,
+        snapshot,
         allElements,
-        (id) => this.getElementCascade(id).declarations,
+        (id) => this.getSignalSnapshot(id),
       )
     },
 

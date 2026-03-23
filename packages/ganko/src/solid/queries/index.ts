@@ -155,6 +155,7 @@ export {
 export {
   getArgumentKind,
   getVariableReads,
+  getVariableCallExpressions,
   getVariableAssignments,
   getCapturedVariables,
   getCalledFunction,

@@ -6,13 +6,13 @@
  * subprocess for project-context module resolution.
  */
 import { prepareTailwindEval, buildTailwindValidatorFromEval } from "@drskillissue/ganko";
-import type { TailwindValidator } from "@drskillissue/ganko";
+import type { BatchableTailwindValidator } from "@drskillissue/ganko";
 import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
 import type { FileRegistry } from "./file-registry";
 import { evaluateWorkspace } from "./workspace-eval";
 
 export interface TailwindState {
-  validator: TailwindValidator | null
+  validator: BatchableTailwindValidator | null
   reResolve(registry: FileRegistry, layout: WorkspaceLayout, log?: Logger): Promise<void>
 }
 
@@ -22,7 +22,7 @@ export interface TailwindState {
  * @param initial - Initial validator from enrichment (null if not resolved)
  * @returns Mutable tailwind state
  */
-export function createTailwindState(initial: TailwindValidator | null): TailwindState {
+export function createTailwindState(initial: BatchableTailwindValidator | null): TailwindState {
   const state: TailwindState = {
     validator: initial,
 

@@ -14,7 +14,7 @@ import type { SelectorSymbol, CompiledSelectorMatcher } from "../symbols/selecto
 import type { SymbolTable } from "../symbols/symbol-table"
 import type { ScopedSelectorIndex } from "./scope-resolver"
 import type { ElementNode } from "./element-builder"
-import type { LayoutSignalName } from "./signal-builder"
+import type { LayoutSignalName, SignalSnapshot } from "./signal-builder"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-builder"
 
 
@@ -1022,156 +1022,31 @@ function augmentCascadeWithTailwindFromSymbolTable(
 
 // ── Layout fact computation from cascade ─────────────────────────────────
 
-import type { LayoutFactKind, LayoutFactMap, ReservedSpaceFact, ScrollContainerFact, FlowParticipationFact, ContainingBlockFact } from "../analysis/layout-fact"
+import type { LayoutFactKind, LayoutFactMap, ContainingBlockFact } from "../analysis/layout-fact"
+import { computeReservedSpaceFact, computeScrollContainerFact, computeFlowParticipationFact } from "../analysis/layout-fact"
 
-const SCROLLABLE_VALUES: ReadonlySet<string> = new Set(["auto", "scroll"])
-const OUT_OF_FLOW_POSITIONS: ReadonlySet<string> = new Set(["absolute", "fixed", "sticky"])
 
 export function computeLayoutFact<K extends LayoutFactKind>(
   factKind: K,
   elementId: number,
-  declarations: ReadonlyMap<string, CascadedDeclaration>,
+  snapshot: SignalSnapshot,
   allElements: readonly ElementNode[],
-  getCascadeForElement: (id: number) => ReadonlyMap<string, CascadedDeclaration>,
+  getSnapshotForElement: (id: number) => SignalSnapshot,
 ): LayoutFactMap[K] {
   switch (factKind) {
-    case "reservedSpace": return computeReservedSpaceFact(declarations) as LayoutFactMap[K]
-    case "scrollContainer": return computeScrollContainerFact(declarations) as LayoutFactMap[K]
-    case "flowParticipation": return computeFlowParticipationFact(declarations) as LayoutFactMap[K]
-    case "containingBlock": return computeContainingBlockFact(elementId, allElements, getCascadeForElement) as LayoutFactMap[K]
+    case "reservedSpace": return computeReservedSpaceFact(snapshot) as LayoutFactMap[K]
+    case "scrollContainer": return computeScrollContainerFact(snapshot) as LayoutFactMap[K]
+    case "flowParticipation": return computeFlowParticipationFact(snapshot) as LayoutFactMap[K]
+    case "containingBlock": return computeContainingBlockFact(elementId, allElements, getSnapshotForElement) as LayoutFactMap[K]
     default: throw new Error(`Unknown layout fact kind: ${factKind}`)
-  }
-}
-
-function getCascadeValue(declarations: ReadonlyMap<string, CascadedDeclaration>, property: string): string | null {
-  const decl = declarations.get(property)
-  if (!decl) return null
-  return decl.value.trim().toLowerCase()
-}
-
-function computeReservedSpaceFact(declarations: ReadonlyMap<string, CascadedDeclaration>): ReservedSpaceFact {
-  const reasons: string[] = []
-
-  const height = getCascadeValue(declarations, "height")
-  if (height !== null && height !== "auto" && height !== "fit-content" && height !== "min-content" && height !== "max-content") {
-    reasons.push("height")
-  }
-
-  const blockSize = getCascadeValue(declarations, "block-size")
-  if (blockSize !== null && blockSize !== "auto" && blockSize !== "fit-content" && blockSize !== "min-content" && blockSize !== "max-content") {
-    reasons.push("block-size")
-  }
-
-  const minHeight = getCascadeValue(declarations, "min-height")
-  if (minHeight !== null && minHeight !== "0" && minHeight !== "0px" && minHeight !== "auto") {
-    reasons.push("min-height")
-  }
-
-  const minBlockSize = getCascadeValue(declarations, "min-block-size")
-  if (minBlockSize !== null && minBlockSize !== "0" && minBlockSize !== "0px" && minBlockSize !== "auto") {
-    reasons.push("min-block-size")
-  }
-
-  const containIntrinsicSize = getCascadeValue(declarations, "contain-intrinsic-size")
-  const hasContainIntrinsicSize = containIntrinsicSize !== null
-  if (hasContainIntrinsicSize) {
-    reasons.push("contain-intrinsic-size")
-  }
-
-  const aspectRatio = getCascadeValue(declarations, "aspect-ratio")
-  const hasUsableAspectRatio = aspectRatio !== null && aspectRatio !== "auto"
-
-  const width = getCascadeValue(declarations, "width")
-  const inlineSize = getCascadeValue(declarations, "inline-size")
-  const hasDeclaredInlineDimension = (width !== null && width !== "auto") || (inlineSize !== null && inlineSize !== "auto")
-  const hasDeclaredBlockDimension = height !== null && height !== "auto"
-
-  if (hasUsableAspectRatio && hasDeclaredInlineDimension) {
-    if (width !== null) reasons.push("aspect-ratio+width")
-    if (inlineSize !== null) reasons.push("aspect-ratio+inline-size")
-  }
-
-  return {
-    hasReservedSpace: reasons.length > 0,
-    reasons,
-    hasContainIntrinsicSize,
-    hasUsableAspectRatio,
-    hasDeclaredInlineDimension,
-    hasDeclaredBlockDimension,
-  }
-}
-
-function computeScrollContainerFact(declarations: ReadonlyMap<string, CascadedDeclaration>): ScrollContainerFact {
-  const overflow = getCascadeValue(declarations, "overflow")
-  const overflowY = getCascadeValue(declarations, "overflow-y")
-
-  let axis = 0
-  let isScrollContainer = false
-  let hasConditionalScroll = false
-  let hasUnconditionalScroll = false
-
-  if (overflow !== null && SCROLLABLE_VALUES.has(overflow)) {
-    isScrollContainer = true
-    axis = 3 // both
-    const decl = declarations.get("overflow")
-    if (decl && decl.guardProvenance.kind === SignalGuardKind.Conditional) {
-      hasConditionalScroll = true
-    } else {
-      hasUnconditionalScroll = true
-    }
-  }
-
-  if (overflowY !== null && SCROLLABLE_VALUES.has(overflowY)) {
-    isScrollContainer = true
-    if (axis === 0) axis = 2 // vertical only
-    const decl = declarations.get("overflow-y")
-    if (decl && decl.guardProvenance.kind === SignalGuardKind.Conditional) {
-      hasConditionalScroll = true
-    } else {
-      hasUnconditionalScroll = true
-    }
-  }
-
-  return {
-    isScrollContainer,
-    axis,
-    overflow,
-    overflowY,
-    hasConditionalScroll,
-    hasUnconditionalScroll,
-  }
-}
-
-function computeFlowParticipationFact(declarations: ReadonlyMap<string, CascadedDeclaration>): FlowParticipationFact {
-  const position = getCascadeValue(declarations, "position")
-  const isOutOfFlow = position !== null && OUT_OF_FLOW_POSITIONS.has(position)
-
-  let hasConditionalOutOfFlow = false
-  let hasUnconditionalOutOfFlow = false
-
-  if (isOutOfFlow) {
-    const decl = declarations.get("position")
-    if (decl && decl.guardProvenance.kind === SignalGuardKind.Conditional) {
-      hasConditionalOutOfFlow = true
-    } else {
-      hasUnconditionalOutOfFlow = true
-    }
-  }
-
-  return {
-    inFlow: !isOutOfFlow,
-    position,
-    hasConditionalOutOfFlow,
-    hasUnconditionalOutOfFlow,
   }
 }
 
 function computeContainingBlockFact(
   elementId: number,
   allElements: readonly ElementNode[],
-  getCascadeForElement: (id: number) => ReadonlyMap<string, CascadedDeclaration>,
+  getSnapshotForElement: (id: number) => SignalSnapshot,
 ): ContainingBlockFact {
-  // Walk up the parent chain to find the nearest positioned ancestor
   let current: ElementNode | null = null
   for (let i = 0; i < allElements.length; i++) {
     const el = allElements[i]
@@ -1184,10 +1059,11 @@ function computeContainingBlockFact(
 
   let ancestor = current.parentElementNode
   while (ancestor !== null) {
-    const ancestorCascade = getCascadeForElement(ancestor.elementId)
-    const pos = getCascadeValue(ancestorCascade, "position")
+    const ancestorSnapshot = getSnapshotForElement(ancestor.elementId)
+    const posSignal = ancestorSnapshot.signals.get("position")
+    const pos = posSignal && posSignal.kind === 0 /* Known */ ? posSignal.normalized : null
     if (pos !== null && pos !== "static") {
-      const reservedFact = computeReservedSpaceFact(ancestorCascade)
+      const reservedFact = computeReservedSpaceFact(ancestorSnapshot)
       return {
         nearestPositionedAncestorKey: ancestor.key,
         nearestPositionedAncestorHasReservedSpace: reservedFact.hasReservedSpace,
