@@ -167,17 +167,28 @@ function commonAncestor(files: readonly string[]): string {
 }
 
 async function tryDaemonLint(
-  options: LintOptions, projectRoot: string, filesToLint: readonly string[], _log: Logger,
+  options: LintOptions, projectRoot: string, filesToLint: readonly string[], log: Logger,
 ): Promise<readonly Diagnostic[] | null> {
-  const socket = await ensureDaemon(projectRoot).catch(() => null);
+  const socket = await ensureDaemon(projectRoot).catch((err) => {
+    log.warning(`daemon: failed to connect: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  });
   if (socket === null) return null;
   try {
+    log.info("daemon: connected, sending lint request");
     const base = { projectRoot, files: filesToLint, exclude: options.exclude, crossFile: options.crossFile, noEslintConfig: options.noEslintConfig, logLevel: options.logLevel };
     const params: LintRequestParams = options.eslintConfig !== undefined ? { ...base, eslintConfigPath: options.eslintConfig } : base;
     const response = await requestLint(socket, params);
-    if (response.kind === "lint-response") return response.diagnostics;
+    if (response.kind === "lint-response") {
+      log.info(`daemon: received ${response.diagnostics.length} diagnostics`);
+      return response.diagnostics;
+    }
+    log.warning(`daemon: unexpected response kind: ${response.kind}`);
     return null;
-  } catch { return null; } finally { socket.destroy(); }
+  } catch (err) {
+    log.warning(`daemon: request failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  } finally { socket.destroy(); }
 }
 
 export async function runLint(args: readonly string[]): Promise<void> {

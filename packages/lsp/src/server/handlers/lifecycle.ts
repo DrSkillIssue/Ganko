@@ -23,6 +23,8 @@ import type { ServerContext } from "../server";
 import type { PhaseEnriched } from "../session";
 import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
 import { buildFullCompilation } from "../../core/compilation-builder";
+import { createCompilationDiagnosticProducer } from "../../core/compilation-diagnostic-producer";
+import type { Diagnostic } from "@drskillissue/ganko";
 import { createCompilationTracker } from "@drskillissue/ganko";
 import { createCancellationSource } from "../cancellation";
 import { SessionMutator } from "../session-mutator";
@@ -263,6 +265,14 @@ export async function handleInitialized(
       logger: log,
     });
     context.graphCache = createCompilationTracker(compilation);
+
+    // Run cross-file analysis and cache results so didOpen reads instantly
+    const crossProducer = createCompilationDiagnosticProducer();
+    const crossByFile = crossProducer.runAll(compilation, state.config.ruleOverrides);
+    const crossFlat: Diagnostic[] = [];
+    for (const [, diags] of crossByFile) { for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) crossFlat.push(d); } }
+    context.graphCache.setCachedCrossFileResults(crossFlat);
+    if (log.isLevelEnabled(Level.Info)) log.info(`cross-file cache: ${crossFlat.length} diagnostics`);
   }
 
   // Rebuild session with enrichment data (file sets, tailwind, etc.)

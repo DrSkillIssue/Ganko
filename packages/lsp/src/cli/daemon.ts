@@ -179,6 +179,7 @@ async function handleLintRequest(
   }
 
   const allDiagnostics: Diagnostic[] = [];
+  const t0 = performance.now();
 
   // ── Sync solid files into TS project + detect changes ──
 
@@ -224,6 +225,9 @@ async function handleLintRequest(
     }
   }
 
+  const tSync = performance.now();
+  log.info(`file sync: ${solidPathsToSync.length} solid + ${allCSSContent.length} css, changed=${anyFileChanged} in ${(tSync - t0).toFixed(0)}ms`);
+
   // ── Resolve inputs BEFORE compilation build ──
 
   // External custom properties (may change independently of file content)
@@ -255,6 +259,9 @@ async function handleLintRequest(
     }
   }
 
+  const tResolve = performance.now();
+  log.info(`resolve inputs: ${(tResolve - tSync).toFixed(0)}ms`);
+
   // ── Build compilation when anything changed ──
   // Full rebuild via buildFullCompilation. The CompilationTracker wraps the
   // compilation and caches cross-file diagnostics across invocations.
@@ -285,7 +292,10 @@ async function handleLintRequest(
     });
     state.tracker = createCompilationTracker(compilation);
     state.session = state.mutator.buildSession(state);
+    log.info(`compilation build: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css in ${(performance.now() - tResolve).toFixed(0)}ms`);
   }
+
+  const tAnalysis = performance.now();
 
   // ── Single-file solid analysis ──
 
@@ -303,6 +313,9 @@ async function handleLintRequest(
     runSolidRules(tree, sourceFile, emit);
     for (let j = 0; j < results.length; j++) { const d = results[j]; if (d) allDiagnostics.push(d); }
   }
+
+  const tCrossFile = performance.now();
+  log.info(`single-file: ${allDiagnostics.length} diagnostics in ${(tCrossFile - tAnalysis).toFixed(0)}ms`);
 
   // ── Cross-file analysis via AnalysisDispatcher ──
 
@@ -348,6 +361,7 @@ async function handleLintRequest(
     }
   }
 
+  log.info(`analysis: ${allDiagnostics.length} diagnostics in ${(performance.now() - tAnalysis).toFixed(0)}ms (total: ${(performance.now() - t0).toFixed(0)}ms)`);
   return { kind: "lint-response", id: request.id, diagnostics: allDiagnostics };
 }
 

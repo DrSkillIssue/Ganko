@@ -32,8 +32,9 @@ import {
   ALL_EXTENSIONS,
   prefixLogger,
   createLogger,
+  parseLogLevel,
 } from "@drskillissue/ganko-shared";
-import type { WorkspaceLayout } from "@drskillissue/ganko-shared";
+import type { LogLevel, WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { FilteredTextDocuments } from "./filtered-documents";
 import type { Project } from "../core/project";
 import type { FileRegistry } from "../core/file-registry";
@@ -155,6 +156,7 @@ export interface ServerContext {
 /** Options for server creation. */
 interface CreateServerOptions {
   readonly logFile?: string | undefined
+  readonly logLevel?: LogLevel | undefined
   readonly enableTsDiagnostics?: boolean | undefined
   readonly warningsAsErrors?: boolean | undefined
 }
@@ -162,12 +164,13 @@ interface CreateServerOptions {
 export function createServer(options?: CreateServerOptions): ServerContext {
   const connection = createConnection(ProposedFeatures.all);
 
+  const logLevel: LogLevel = options?.logLevel ?? "info";
   let log: LeveledLogger;
   if (options?.logFile !== undefined) {
     const file = createFileWriter(options.logFile);
-    log = createLogger(createCompositeWriter(createLspWriter(connection), file.writer));
+    log = createLogger(createCompositeWriter(createLspWriter(connection), file.writer), logLevel);
   } else {
-    log = createLogger(createLspWriter(connection));
+    log = createLogger(createLspWriter(connection), logLevel);
   }
 
   log.info("ganko server starting");
@@ -189,12 +192,7 @@ export function createServer(options?: CreateServerOptions): ServerContext {
   const identity = createResourceIdentity();
   const docManager = new DocumentTracker(identity);
   const diagManager = new DiagnosticsManager(identity, (uri, diags) => {
-    const tracked = docManager.getByUri(uri);
-    connection.sendDiagnostics(
-      tracked?.version !== undefined
-        ? { uri, diagnostics: [...diags], version: tracked.version }
-        : { uri, diagnostics: [...diags] },
-    );
+    connection.sendDiagnostics({ uri, diagnostics: [...diags] });
   });
   let tsService: TsService | null = null;
 
@@ -281,18 +279,22 @@ export function startServer(context: ServerContext): void {
 export function main(): void {
   const args = process.argv.slice(2);
   let logFile: string | undefined;
+  let logLevel: LogLevel | undefined;
   let enableTsDiagnostics = false;
   let warningsAsErrors = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--log-file" && args[i + 1] !== undefined) {
       logFile = args[i + 1];
       i++;
+    } else if (args[i] === "--log-level") {
+      const next = args[i + 1];
+      if (next !== undefined) { logLevel = parseLogLevel(next, "info"); i++; }
     } else if (args[i] === "--enable-ts") {
       enableTsDiagnostics = true;
     } else if (args[i] === "--warnings-as-errors") {
       warningsAsErrors = true;
     }
   }
-  const context = createServer({ logFile, enableTsDiagnostics, warningsAsErrors });
+  const context = createServer({ logFile, logLevel, enableTsDiagnostics, warningsAsErrors });
   startServer(context);
 }

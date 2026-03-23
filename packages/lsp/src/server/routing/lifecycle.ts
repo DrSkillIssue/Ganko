@@ -178,7 +178,7 @@ function rediagnoseAllOpen(context: ServerContext): void {
   const phase = context.phase;
   if (phase.tag !== "running" && phase.tag !== "enriched") return;
 
-  context.graphCache.setCachedCrossFileResults([]);
+  context.graphCache.invalidateCrossFileResults();
   const openPaths = context.docManager.openPaths() as string[];
   if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(`rediagnoseAllOpen: ${openPaths.length} open files`);
 

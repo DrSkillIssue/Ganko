@@ -53,58 +53,74 @@ export function runDiagnosticPipeline(opts: DiagnosticPipelineOptions): void {
   const kind = classifyFile(key);
   const log = context.log;
 
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.enter: path=${key} kind=${kind} includeCrossFile=${includeCrossFile} hasContent=${content !== undefined}`);
+
   // ── Phase 1: Single-file ganko diagnostics ──
   const resolvedContent = content
     ?? (kind !== "unknown" ? context.resolveContent(key) ?? undefined : undefined);
 
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase1: resolvedContent=${resolvedContent !== undefined}`);
+
   const t0 = performance.now();
   const singleFile = runSingleFileDiagnostics(project, key, resolvedContent, context.serverState.config.ruleOverrides, log);
 
-  if (token.isCancelled) return;
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase1.done: ${singleFile.length} diagnostics in ${(performance.now() - t0).toFixed(1)}ms`);
 
-  // All phases publish in a single batch so the client receives ONE
-  // combined notification with ganko + cross-file + TypeScript diagnostics.
+  if (token.isCancelled) { if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.cancelled: after phase1"); return; }
+
   context.diagManager.beginBatch();
   try {
-    // Phase 1 result
     context.diagManager.update(key, DiagnosticKind.Ganko, convertDiagnostics(singleFile, context.serverState.config.warningsAsErrors), singleFile);
 
-    if (token.isCancelled) return;
+    if (token.isCancelled) { if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.cancelled: after phase1 update"); return; }
 
-    // ── Phase 2: Cross-file ganko diagnostics via IncrementalAnalyzer ──
+    // ── Phase 2: Cross-file ganko diagnostics ──
     const phase = context.phase;
-    if (includeCrossFile && phase.tag === "enriched") {
-      const analyzer = createIncrementalAnalyzer();
-      const compilation = context.graphCache.currentCompilation;
-      // Run full analysis — cross-file rules need all files (CSS rules need
-      // solid trees for element dispatch, solid rules need CSS scope).
-      // analyzeAffected with just [key] misses rules that fire on other files
-      // but produce diagnostics attributed to key.
-      const crossByFile = analyzer.analyzeAll(compilation, context.serverState.config.ruleOverrides);
-      const crossFile = crossByFile.get(key) ?? [];
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase2: phase=${phase.tag}`);
 
-      if (!token.isCancelled && crossFile.length > 0) {
+    if (phase.tag === "enriched") {
+      const cachedResults = context.graphCache.getCachedCrossFileResults();
+      if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase2: cacheHit=${cachedResults !== null}`);
+
+      if (cachedResults !== null) {
+        const crossFile = cachedResults.get(key) ?? [];
+        if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase2.cached: ${crossFile.length} diagnostics for ${key}`);
         context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
-      }
-    } else if (phase.tag === "enriched") {
-      const crossFile = context.graphCache.getCachedCrossFileDiagnostics(key);
-      if (crossFile.length > 0) {
-        context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
+      } else if (includeCrossFile) {
+        if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.phase2.recompute: starting full analysis");
+        const t2 = performance.now();
+        const analyzer = createIncrementalAnalyzer();
+        const compilation = context.graphCache.currentCompilation;
+        const crossByFile = analyzer.analyzeAll(compilation, context.serverState.config.ruleOverrides);
+        const crossFlat: Diagnostic[] = [];
+        for (const [, diags] of crossByFile) { for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) crossFlat.push(d); } }
+        context.graphCache.setCachedCrossFileResults(crossFlat);
+        if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase2.recompute.done: ${crossFlat.length} total in ${(performance.now() - t2).toFixed(0)}ms`);
+
+        const crossFile = crossByFile.get(key) ?? [];
+        if (!token.isCancelled) {
+          context.diagManager.update(key, DiagnosticKind.CrossFile, convertDiagnostics(crossFile, context.serverState.config.warningsAsErrors), crossFile);
+        }
+      } else {
+        if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.phase2.skip: no cache and includeCrossFile=false");
       }
     }
 
-    if (token.isCancelled) return;
+    if (token.isCancelled) { if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.cancelled: after phase2"); return; }
 
     // ── Phase 3: TypeScript diagnostics (sync per-file portion) ──
     if (context.serverState.config.enableTsDiagnostics && (phase.tag === "running" || phase.tag === "enriched") && kind === "solid") {
       if (resolvedContent !== undefined) {
+        if (log.isLevelEnabled(Level.Trace)) log.trace("pipeline.phase3: collecting TS diagnostics");
         const ls = project.getLanguageService();
         const tsDiags = collectTsDiagnosticsForFile(ls, key, true);
         context.diagManager.update(key, DiagnosticKind.TypeScript, tsDiags);
+        if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.phase3.done: ${tsDiags.length} TS diagnostics`);
       }
     }
   } finally {
     context.diagManager.endBatch();
+    if (log.isLevelEnabled(Level.Trace)) log.trace(`pipeline.endBatch: ${key}`);
   }
 
   if (log.isLevelEnabled(Level.Debug)) {
@@ -123,6 +139,7 @@ export function runDiagnosticPipelineBatch(
   includeCrossFile: boolean,
   token: CancellationToken,
 ): void {
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`pipelineBatch.enter: ${paths.length} files includeCrossFile=${includeCrossFile}`);
   for (let i = 0; i < paths.length; i++) {
     if (token.isCancelled) return;
     const path = paths[i];
@@ -135,6 +152,7 @@ export function runDiagnosticPipelineBatch(
       token,
     });
   }
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`pipelineBatch.done: ${paths.length} files`);
 }
 
 /**
@@ -155,6 +173,8 @@ export function runDiagnosticPipelineImmediate(
 ): LSPDiagnostic[] {
   const key = canonicalPath(path);
   const kind = classifyFile(key);
+
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`pipelineImmediate.enter: path=${key} kind=${kind}`);
 
   if (kind === "unknown") return [];
 
@@ -213,6 +233,7 @@ export function propagateTsDiagnosticsAsync(
   exclude: ReadonlySet<string>,
   token: CancellationToken,
 ): void {
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`propagateTs.enter: enableTs=${context.serverState.config.enableTsDiagnostics} phase=${context.phase.tag}`);
   if (!context.serverState.config.enableTsDiagnostics) return;
   if (context.phase.tag !== "running" && context.phase.tag !== "enriched") return;
 
@@ -257,6 +278,7 @@ export function publishTier1Diagnostics(
   path: string,
   content: string,
 ): void {
+  if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`tier1.enter: path=${path} rootPath=${context.serverState.rootPath ?? "null"}`);
   if (!context.serverState.rootPath) return;
 
   const t0 = performance.now();

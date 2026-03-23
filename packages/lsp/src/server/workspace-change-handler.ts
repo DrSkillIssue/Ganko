@@ -75,10 +75,10 @@ export function createWorkspaceChangeHandler(): WorkspaceChangeHandler {
 
         // Invalidate tracker regardless of enrichment state
         if (event.kind === "deleted") {
-          context.graphCache.setCachedCrossFileResults([]);
+          context.graphCache.invalidateCrossFileResults();
         } else {
           context.diagManager.evict(key);
-          context.graphCache.setCachedCrossFileResults([]);
+          context.graphCache.invalidateCrossFileResults();
         }
       }
 
@@ -106,7 +106,7 @@ export function createWorkspaceChangeHandler(): WorkspaceChangeHandler {
     },
 
     processRegistryRebuild(context, _newRegistry, _newLayout) {
-      context.graphCache.setCachedCrossFileResults([]);
+      context.graphCache.invalidateCrossFileResults();
       context.diagManager.clear();
 
       const mutator = new SessionMutator();

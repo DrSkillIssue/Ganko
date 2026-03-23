@@ -191,7 +191,7 @@ export function setupFeatureHandlers(context: ServerContext): void {
     if (content !== undefined && content !== existing) {
       project.updateFile(key, content);
       context.diagManager.evict(key);
-      context.graphCache.setCachedCrossFileResults([]);
+      context.graphCache.invalidateCrossFileResults();
     }
 
     // Run full analysis inline via pipeline

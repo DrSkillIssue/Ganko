@@ -18,7 +18,7 @@
  */
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import type { Logger } from "@drskillissue/ganko-shared";
-import { Level } from "@drskillissue/ganko-shared";
+import { Level, getRuntime } from "@drskillissue/ganko-shared";
 
 export interface WorkspaceEvalRequest {
   readonly id: number
@@ -141,7 +141,7 @@ export interface WorkspaceEvaluator {
  * @returns Evaluator with request/response interface
  */
 export function spawnWorkspaceEvaluator(cwd: string, log?: Logger): WorkspaceEvaluator {
-  const proc = nodeSpawn("bun", ["-e", EVAL_SCRIPT], {
+  const proc = nodeSpawn(getRuntime(), ["-e", EVAL_SCRIPT], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -276,7 +276,7 @@ process.stdout.write(JSON.stringify(res));
 `;
 
   try {
-    const result = nodeSpawnSync("bun", ["-e", script], { cwd, encoding: "utf-8", timeout: 30000 });
+    const result = nodeSpawnSync(getRuntime(), ["-e", script], { cwd, encoding: "utf-8", timeout: 30000 });
     if (result.status !== 0 && (!result.stdout || result.stdout.length === 0)) return null;
     const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
     if (text.length === 0) return null;

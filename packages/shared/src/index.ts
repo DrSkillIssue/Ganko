@@ -79,6 +79,9 @@ export {
   type RuleSeveritySettingValue,
 } from "./config";
 
+// Runtime detection
+export { getRuntime } from "./runtime";
+
 // Cross-file dependency model
 export { CROSS_FILE_DEPENDENTS } from "./cross-file";
 

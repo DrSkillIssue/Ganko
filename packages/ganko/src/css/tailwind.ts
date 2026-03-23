@@ -15,7 +15,7 @@
 import { dirname, join, sep } from "node:path"
 import { existsSync } from "node:fs"
 import { spawnSync } from "node:child_process"
-import { Level } from "@drskillissue/ganko-shared"
+import { Level, getRuntime } from "@drskillissue/ganko-shared"
 import type { Logger } from "@drskillissue/ganko-shared"
 
 /**
@@ -451,7 +451,7 @@ function defaultSyncEvaluator(
   ].join("\n")
 
   try {
-    const result = spawnSync("bun", ["-e", script], { cwd: params.entryBase, encoding: "utf-8", timeout: 30000 })
+    const result = spawnSync(getRuntime(), ["-e", script], { cwd: params.entryBase, encoding: "utf-8", timeout: 30000 })
     if (result.status !== 0) return null
     const text = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "")
     if (text.length === 0) return null

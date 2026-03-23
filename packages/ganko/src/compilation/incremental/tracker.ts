@@ -54,6 +54,7 @@ export interface CompilationTracker {
   setCachedCrossFileDiagnostics(filePath: string, diagnostics: readonly Diagnostic[]): void
   getCachedCrossFileResults(): ReadonlyMap<string, readonly Diagnostic[]> | null
   setCachedCrossFileResults(allDiagnostics: readonly Diagnostic[]): void
+  invalidateCrossFileResults(): void
 }
 
 export interface CompilationTrackerOptions {
@@ -331,6 +332,12 @@ function createTrackerFromState(state: TrackerState): CompilationTracker {
       for (const [file, diagnostics] of byFile) {
         state.crossFileDiagnostics.set(file, diagnostics)
       }
+    },
+
+    invalidateCrossFileResults() {
+      ;(state as { crossFileResults: ReadonlyMap<string, readonly Diagnostic[]> | null }).crossFileResults = null
+      ;(state as { crossFileResultsGeneration: number }).crossFileResultsGeneration = -1
+      state.crossFileDiagnostics.clear()
     },
   }
 }

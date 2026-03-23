@@ -24,11 +24,12 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
   function processChangesCallback(): void {
     const phase = context.phase;
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`processChangesCallback.enter: phase=${phase.tag}`);
     const project = phase.tag === "running" || phase.tag === "enriched" ? phase.project : context.serverState.project;
-    if (!project) return;
+    if (!project) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("processChangesCallback: no project"); return; }
 
     const changes = docManager.drainPendingChanges();
-    if (changes.length === 0) return;
+    if (changes.length === 0) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("processChangesCallback: no pending changes"); return; }
 
     // Cancel any in-flight diagnostic pipeline
     context.diagnosticCancellation?.cancel();
@@ -97,33 +98,38 @@ export function setupDocumentHandlers(context: ServerContext): void {
 
   documents.onDidOpen(async (event) => {
     const uri = event.document.uri;
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`didOpen.enter: uri=${uri}`);
     const path = context.identity.uriToPath(uri);
     const result = docManager.open(uri, path, event.document.version, event.document.getText());
-    if (!result) return;
+    if (!result) { if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("didOpen: docManager.open returned null"); return; }
     await context.ready;
 
     const key = canonicalPath(result.path);
     const openPhase = context.phase;
-    if (context.log.isLevelEnabled(Level.Debug)) context.log.debug(
-      `didOpen: uri=${uri} path=${key} phase=${openPhase.tag} version=${event.document.version} openDocs=${docManager.openCount}`,
-    );
+    if (context.log.isLevelEnabled(Level.Trace)) context.log.trace(`didOpen: path=${key} phase=${openPhase.tag} version=${event.document.version} openDocs=${docManager.openCount}`);
 
     if (openPhase.tag !== "running" && openPhase.tag !== "enriched") {
+      if (context.log.isLevelEnabled(Level.Trace)) context.log.trace("didOpen: phase not ready, tier1 only");
       if (classifyFile(key) === "solid") {
         publishTier1Diagnostics(context, key, event.document.getText());
       }
       return;
     }
 
-    // Immediate diagnosis on open — no coalescing delay
-    runDiagnosticPipeline({
-      context,
-      project: openPhase.project,
-      path: key,
-      content: event.document.getText(),
-      includeCrossFile: true,
-      token: createCancellationSource().token,
-    });
+    openPhase.project.updateFile(key, event.document.getText());
+
+    try {
+      runDiagnosticPipeline({
+        context,
+        project: openPhase.project,
+        path: key,
+        content: event.document.getText(),
+        includeCrossFile: true,
+        token: createCancellationSource().token,
+      });
+    } catch (err) {
+      context.log.error(`didOpen pipeline error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+    }
   });
 
   // ── didChange ──

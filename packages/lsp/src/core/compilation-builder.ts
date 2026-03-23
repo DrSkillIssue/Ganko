@@ -19,7 +19,7 @@ import {
   createCSSInput,
 } from "@drskillissue/ganko";
 import type { StyleCompilation, TailwindValidator, SolidSyntaxTree } from "@drskillissue/ganko";
-import { canonicalPath, contentHash } from "@drskillissue/ganko-shared";
+import { canonicalPath, contentHash, Level } from "@drskillissue/ganko-shared";
 import type { Logger } from "@drskillissue/ganko-shared";
 import type ts from "typescript";
 
@@ -47,6 +47,8 @@ export interface CompilationBuildResult {
  */
 export function buildFullCompilation(options: FullBuildOptions): CompilationBuildResult {
   const { solidFiles, cssFiles, getProgram, tailwindValidator, externalCustomProperties, resolveContent, logger } = options;
+
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`buildFullCompilation.enter: ${solidFiles.size} solid, ${cssFiles.size} css`);
 
   let compilation = createStyleCompilation();
   const solidTreeMap = new Map<string, SolidSyntaxTree>();

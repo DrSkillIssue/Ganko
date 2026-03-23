@@ -49,6 +49,7 @@ export async function runEnrichment(
 ): Promise<EnrichmentResult> {
   const { log } = deps;
 
+  if (log.isLevelEnabled(Level.Trace)) log.trace(`enrichment.enter: rootPath=${rootPath}`);
   const root = acceptProjectRoot(rootPath);
   const layout = buildWorkspaceLayout(root, log);
   const registry = createFileRegistry(layout, excludes, log);

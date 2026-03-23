@@ -11,7 +11,7 @@ import {
   allRules,
 } from "@drskillissue/ganko";
 import type { Diagnostic, TailwindValidator, CompilationTracker } from "@drskillissue/ganko";
-import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { canonicalPath, classifyFile, Level } from "@drskillissue/ganko-shared";
 import type { Logger, RuleOverrides } from "@drskillissue/ganko-shared";
 import type { Project } from "./project";
 import type { FileRegistry } from "./file-registry";
@@ -35,13 +35,25 @@ export function runSingleFileDiagnostics(
   const key = canonicalPath(path);
   const kind = classifyFile(key);
 
-  if (content === undefined) return project.run([key]);
+  if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile.enter: path=${key} kind=${kind} hasContent=${content !== undefined}`);
+
+  if (content === undefined) {
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace("runSingleFile: no content, delegating to project.run");
+    return project.run([key]);
+  }
 
   if (kind === "solid") {
     const { results, emit } = createEmit(overrides);
     const program = project.getProgram();
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace("runSingleFile: got program, creating solid input");
+    const sourceFile = program.getSourceFile(key);
+    if (!sourceFile) {
+      if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile: sourceFile NOT FOUND for ${key}`);
+      return [];
+    }
     const input = createSolidInput(key, program, logger);
     analyzeInput(input, emit);
+    if (logger?.isLevelEnabled(Level.Trace)) logger.trace(`runSingleFile.done: ${results.length} diagnostics`);
     return results;
   }
 
