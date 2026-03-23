@@ -184,6 +184,7 @@ function checkDimension(
 
   if (px === null) return
   if (px >= min) return
+  if (px === 0 && (signal === "min-width" || signal === "min-height")) return
 
   emit(createDiagnostic(
     element.solidFile, element.jsxEntity.node, semanticModel.solidTree.sourceFile,
