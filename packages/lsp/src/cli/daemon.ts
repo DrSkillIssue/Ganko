@@ -18,7 +18,7 @@ import {
   scanDependencyCustomProperties,
   setActivePolicy,
 } from "@drskillissue/ganko";
-import type { Diagnostic, TailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+import type { Diagnostic, BatchableTailwindValidator, CompilationTracker } from "@drskillissue/ganko";
 import { buildFullCompilation } from "../core/compilation-builder";
 import { SessionMutator } from "../server/session-mutator";
 import { createServerConfig, type ServerConfig } from "../server/handlers/lifecycle";
@@ -26,6 +26,7 @@ import { createCompilationDiagnosticProducer, type CompilationDiagnosticProducer
 import type { ServerSession } from "../server/session";
 import type { ServerInfrastructure } from "../server/server-infrastructure";
 import { evaluateWorkspace } from "../core/workspace-eval";
+import { batchValidateTailwindClasses } from "../core/enrichment";
 import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult, type WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createFileRegistry, type FileRegistry } from "../core/file-registry";
@@ -67,7 +68,7 @@ interface DaemonState extends ServerInfrastructure {
 
   // ServerInfrastructure mutable state
   fileIndex: FileRegistry | null
-  tailwind: TailwindValidator | null
+  tailwind: BatchableTailwindValidator | null
   externalCustomProperties: ReadonlySet<string> | null
   layout: WorkspaceLayout | null
   config: ServerConfig
@@ -241,9 +242,9 @@ async function handleLintRequest(
 
   // Tailwind re-resolution (must happen before compilation build so CSS
   // trees are parsed with the correct validator)
+  const wsPackagePaths = Array.from(daemonLayout.packagePaths);
+  const twParams = prepareTailwindEval(allCSSContent, projectRoot, wsPackagePaths, log);
   if (anyFileChanged) {
-    const wsPackagePaths = Array.from(daemonLayout.packagePaths);
-    const twParams = prepareTailwindEval(allCSSContent, projectRoot, wsPackagePaths, log);
     if (twParams !== null) {
       const twResponse = await evaluateWorkspace(projectRoot, {
         type: "tailwind-init",
@@ -293,6 +294,10 @@ async function handleLintRequest(
     state.tracker = createCompilationTracker(compilation);
     state.session = state.mutator.buildSession(state);
     log.info(`compilation build: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css in ${(performance.now() - tResolve).toFixed(0)}ms`);
+
+    if (state.tailwind !== null && "preloadBatch" in state.tailwind && twParams !== null) {
+      await batchValidateTailwindClasses(compilation, state.tailwind, twParams, projectRoot, null, log);
+    }
   }
 
   const tAnalysis = performance.now();

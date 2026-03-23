@@ -14,6 +14,7 @@ import {
   allRules,
   scanDependencyCustomProperties,
   resolveTailwindValidatorSync,
+  prepareTailwindEval,
 } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile, buildWorkspaceLayout, acceptProjectRoot } from "@drskillissue/ganko-shared";
@@ -22,6 +23,7 @@ import { createFileRegistry } from "../core/file-registry";
 import { buildFullCompilation, findProjectRoot as findProjectRootShared } from "../core/compilation-builder";
 import { loadESLintConfig, EMPTY_ESLINT_RESULT } from "../core/eslint-config";
 import { createEmit } from "../core/analyze";
+import { batchValidateTailwindClasses } from "../core/enrichment";
 import { formatText, formatJSON, countDiagnostics } from "./format";
 import { createStderrWriter, createFileWriter, createCompositeWriter, noopLogger, type Logger } from "../core/logger";
 import { createLogger, parseLogLevel, type LogLevel } from "@drskillissue/ganko-shared";
@@ -267,8 +269,10 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
     // ── Build compilation ONCE with all trees ─────────────────────────
     let tailwind = null;
+    const cssContent = fileRegistry.loadAllCSSContent();
+    const twParams = prepareTailwindEval(cssContent, projectRoot, Array.from(workspaceLayout.packagePaths), log);
     try {
-      tailwind = resolveTailwindValidatorSync(fileRegistry.loadAllCSSContent(), projectRoot);
+      tailwind = resolveTailwindValidatorSync(cssContent, projectRoot);
       if (tailwind) log.info("tailwind: resolved");
       else log.info("tailwind: not found");
     } catch (err) {
@@ -290,6 +294,11 @@ export async function runLint(args: readonly string[]): Promise<void> {
 
     const tBuild = performance.now();
     log.info(`compilation: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css trees in ${(tBuild - t0).toFixed(0)}ms`);
+
+    // ── Batch-validate Tailwind arbitrary classes before rules run ─────
+    if (tailwind !== null && "preloadBatch" in tailwind && twParams !== null) {
+      await batchValidateTailwindClasses(compilation, tailwind, twParams, projectRoot, null, log);
+    }
 
     // ── Solid rules on targeted files (trees already in compilation) ──
     for (let i = 0; i < filesToLint.length; i++) {

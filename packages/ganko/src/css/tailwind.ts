@@ -476,7 +476,7 @@ export function resolveTailwindValidatorSync(
   files: readonly { path: string; content: string }[],
   rootPath?: string,
   workspacePackagePaths?: readonly string[],
-): TailwindValidator | null {
+): BatchableTailwindValidator | null {
   const effectiveRoot = rootPath ?? findNearestPackageRoot(dirname(files[0]?.path ?? "."))
   const params = prepareTailwindEval(files, effectiveRoot, workspacePackagePaths ?? [])
   if (params === null) return null

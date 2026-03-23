@@ -6,7 +6,7 @@
  * can batch-validate arbitrary value classes before rule execution.
  */
 import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
-import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker } from "@drskillissue/ganko";
+import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, StyleCompilation, TailwindEvalParams } from "@drskillissue/ganko";
 /** Minimal diagnostic eviction interface. */
 export interface DiagnosticEviction {
   evict(path: string): void
@@ -107,46 +107,67 @@ export async function runEnrichment(
 }
 
 /**
- * Batch-validate Tailwind class names via the persistent evaluator.
+ * Batch-validate Tailwind arbitrary classes from a compilation's solid trees.
  *
- * Collects all class names that miss the CSS classNameIndex, sends them
- * to the evaluator's candidatesToCss in one request, and preloads the
- * results into the BatchableTailwindValidator's cache.
+ * Collects class tokens from all solid trees that aren't in the CSS symbol
+ * table or the static validator, sends them to the Tailwind design system
+ * via candidatesToCss, and preloads results into the validator's batch cache.
  *
- * Call this AFTER building SolidSyntaxTrees and CSSGraph, BEFORE running cross-file rules.
+ * Call AFTER buildFullCompilation, BEFORE running analysis rules.
+ * Used by CLI lint, daemon, and LSP enrichment.
  *
- * @param classNames - Class names to validate
- * @param validator - Batchable validator to preload
- * @param evaluator - Persistent workspace evaluator
- * @param log - Logger
+ * If `evaluator` is provided (LSP path), uses it directly — assumes tailwind
+ * is already initialized. If null, spawns a temporary evaluator, inits
+ * tailwind from `twParams`, validates, and disposes.
  */
-export async function preloadTailwindBatch(
-  classNames: readonly string[],
+export async function batchValidateTailwindClasses(
+  compilation: StyleCompilation,
   validator: BatchableTailwindValidator,
-  evaluator: WorkspaceEvaluator,
+  twParams: TailwindEvalParams,
+  projectRoot: string,
+  evaluator: WorkspaceEvaluator | null,
   log?: Logger,
 ): Promise<void> {
-  if (classNames.length === 0) return;
-
-  const unknowns: string[] = [];
-  for (let i = 0; i < classNames.length; i++) {
-    const name = classNames[i];
-    if (name !== undefined && !validator.has(name)) {
-      unknowns.push(name);
+  const cssClassNames = compilation.symbolTable.classNames;
+  const unknowns = new Set<string>();
+  for (const [, solidTree] of compilation.solidTrees) {
+    for (const [, idx] of solidTree.staticClassTokensByElementId) {
+      for (let i = 0; i < idx.tokens.length; i++) {
+        const t = idx.tokens[i];
+        if (t && !cssClassNames.has(t) && !validator.has(t)) unknowns.add(t);
+      }
     }
   }
 
-  if (unknowns.length === 0) return;
+  if (unknowns.size === 0) return;
 
-  if (log?.isLevelEnabled(Level.Debug)) log.debug(`tailwind: batch validating ${unknowns.length} unknown class names`);
+  const classNames = Array.from(unknowns);
+  if (log?.isLevelEnabled(Level.Debug)) log.debug(`tailwind batch: validating ${classNames.length} unknown class names`);
 
-  const response = await evaluator.request({
-    id: 0,
-    type: "tailwind-validate",
-    classNames: unknowns,
-  }).catch(() => null);
-
-  if (response !== null && response.validation !== undefined) {
-    validator.preloadBatch(unknowns, response.validation);
+  const ownedEvaluator = evaluator === null;
+  const eval_ = evaluator ?? spawnWorkspaceEvaluator(projectRoot, log);
+  try {
+    if (ownedEvaluator) {
+      await eval_.request({
+        id: 0,
+        type: "tailwind-init",
+        tailwindModulePath: twParams.modulePath,
+        tailwindEntryCss: twParams.entryCss,
+        tailwindEntryBase: twParams.entryBase,
+      });
+    }
+    const result = await eval_.request({
+      id: ownedEvaluator ? 1 : 0,
+      type: "tailwind-validate",
+      classNames,
+    });
+    if (result.validation !== undefined) {
+      validator.preloadBatch(classNames, result.validation);
+      if (log?.isLevelEnabled(Level.Info)) log.info(`tailwind batch: ${classNames.length} classes validated`);
+    }
+  } catch {
+    if (log?.isLevelEnabled(Level.Warning)) log.warning("tailwind batch: validation failed, falling back to static set");
+  } finally {
+    if (ownedEvaluator) eval_.dispose();
   }
 }

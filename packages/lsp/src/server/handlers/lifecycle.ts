@@ -24,6 +24,8 @@ import type { PhaseEnriched } from "../session";
 import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
 import { buildFullCompilation } from "../../core/compilation-builder";
 import { createCompilationDiagnosticProducer } from "../../core/compilation-diagnostic-producer";
+import { batchValidateTailwindClasses } from "../../core/enrichment";
+import { prepareTailwindEval } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { createCompilationTracker } from "@drskillissue/ganko";
 import { createCancellationSource } from "../cancellation";
@@ -265,6 +267,19 @@ export async function handleInitialized(
       logger: log,
     });
     context.graphCache = createCompilationTracker(compilation);
+
+    // Batch-validate Tailwind arbitrary classes before cross-file analysis
+    if (enrichment.batchableValidator !== null && enrichedPhase.tailwindState !== null) {
+      const twParams = prepareTailwindEval(
+        enrichment.registry.loadAllCSSContent(),
+        rootPath,
+        Array.from(enrichment.layout.packagePaths),
+        log,
+      );
+      if (twParams !== null) {
+        await batchValidateTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
+      }
+    }
 
     // Run cross-file analysis and cache results so didOpen reads instantly
     const crossProducer = createCompilationDiagnosticProducer();
