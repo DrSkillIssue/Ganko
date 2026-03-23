@@ -45,7 +45,7 @@ export interface WorkspaceEvalResponse {
     readonly utilities: string[]
     readonly variants: { name: string; values: string[]; hasDash: boolean; isArbitrary: boolean }[]
   }
-  readonly validation?: readonly (boolean)[]
+  readonly validation?: readonly (string | null)[]
   readonly resolution?: string | null
   readonly error?: string
 }
@@ -113,7 +113,7 @@ for await (const line of rl) {
 
     if (req.type === "tailwind-validate" && design && req.classNames) {
       const results = design.candidatesToCss(req.classNames);
-      res.validation = results.map(r => r !== null);
+      res.validation = results;
     }
 
     if (req.type === "tailwind-resolve" && design && req.className) {

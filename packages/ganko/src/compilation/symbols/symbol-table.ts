@@ -870,7 +870,24 @@ export function buildSymbolTable(trees: readonly CSSSyntaxTree[], tailwindValida
       return classNameSymbols.has(name) || (twValidator !== null && twValidator.has(name))
     },
     getClassName(name: string): ClassNameSymbol | null {
-      return classNameSymbols.get(name) ?? null
+      const existing = classNameSymbols.get(name)
+      if (existing !== undefined) return existing
+      if (twValidator === null || !twValidator.has(name)) return null
+      const resolvedCSS = twValidator.resolve(name)
+      const symbol: ClassNameSymbol = {
+        symbolKind: "className",
+        name,
+        filePath: null,
+        source: {
+          kind: "tailwind",
+          candidate: { raw: name, variants: [], utility: name, value: null, modifier: null, important: false, negative: false },
+          resolvedCSS,
+          declarations: [],
+          diagnostics: [],
+        },
+      }
+      classNameSymbols.set(name, symbol)
+      return symbol
     },
     getSelectorsByClassName(name: string): readonly SelectorSymbol[] {
       return selectorSymbolsByClassName.get(name) ?? EMPTY_SELECTOR_SYMBOLS

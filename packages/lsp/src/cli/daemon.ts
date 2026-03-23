@@ -26,7 +26,7 @@ import { createCompilationDiagnosticProducer, type CompilationDiagnosticProducer
 import type { ServerSession } from "../server/session";
 import type { ServerInfrastructure } from "../server/server-infrastructure";
 import { evaluateWorkspace } from "../core/workspace-eval";
-import { batchValidateTailwindClasses } from "../core/enrichment";
+import { batchResolveTailwindClasses } from "../core/enrichment";
 import { canonicalPath, classifyFile, contentHash, createLogger, type ESLintConfigResult, type WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createProject, type Project } from "../core/project";
 import { createFileRegistry, type FileRegistry } from "../core/file-registry";
@@ -281,7 +281,7 @@ async function handleLintRequest(
       return null;
     };
 
-    const { compilation } = buildFullCompilation({
+    let { compilation } = buildFullCompilation({
       solidFiles: fileIndex.solidFiles,
       cssFiles: fileIndex.cssFiles,
       getProgram: () => project.getProgram(),
@@ -291,13 +291,14 @@ async function handleLintRequest(
       resolveContent,
       logger: log,
     });
-    state.tracker = createCompilationTracker(compilation);
-    state.session = state.mutator.buildSession(state);
     log.info(`compilation build: ${compilation.solidTrees.size} solid + ${compilation.cssTrees.size} css in ${(performance.now() - tResolve).toFixed(0)}ms`);
 
     if (state.tailwind !== null && "preloadBatch" in state.tailwind && twParams !== null) {
-      await batchValidateTailwindClasses(compilation, state.tailwind, twParams, projectRoot, null, log);
+      compilation = await batchResolveTailwindClasses(compilation, state.tailwind, twParams, projectRoot, null, log);
     }
+
+    state.tracker = createCompilationTracker(compilation);
+    state.session = state.mutator.buildSession(state);
   }
 
   const tAnalysis = performance.now();

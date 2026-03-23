@@ -320,7 +320,7 @@ export function prepareTailwindEval(
  * and preloads the results before rule execution.
  */
 export interface BatchableTailwindValidator extends TailwindValidator {
-  preloadBatch(classNames: readonly string[], results: readonly boolean[]): void
+  preloadBatch(classNames: readonly string[], results: readonly (string | null)[]): void
 }
 
 /**
@@ -341,30 +341,32 @@ export function buildTailwindValidatorFromEval(
   logger?.info(`tailwind: design system loaded (${utilitySet.size} utilities, ${variantSet.size} variants)`)
 
   const staticValidator = createStaticValidator(utilitySet, variantSet)
-  const batchCache = new Map<string, boolean>()
+  const batchCache = new Map<string, string | null>()
 
   return {
     has(className: string): boolean {
       if (staticValidator.has(className)) return true
       const cached = batchCache.get(className)
-      if (cached !== undefined) return cached
+      if (cached !== undefined) return cached !== null
       return false
     },
-    resolve(): string | null {
+    resolve(className: string): string | null {
+      const cached = batchCache.get(className)
+      if (cached !== undefined) return cached
       return null
     },
-    preloadBatch(classNames: readonly string[], results: readonly boolean[]): void {
+    preloadBatch(classNames: readonly string[], results: readonly (string | null)[]): void {
       for (let i = 0; i < classNames.length; i++) {
         const name = classNames[i]
-        const valid = results[i]
-        if (name !== undefined && valid !== undefined) {
-          batchCache.set(name, valid)
+        const css = results[i]
+        if (name !== undefined && css !== undefined) {
+          batchCache.set(name, css)
         }
       }
       if (logger?.isLevelEnabled(Level.Debug)) {
         let validCount = 0
         for (let i = 0; i < results.length; i++) {
-          if (results[i]) validCount++
+          if (results[i] !== null) validCount++
         }
         logger.debug(`tailwind: preloaded ${classNames.length} candidates (${validCount} valid)`)
       }

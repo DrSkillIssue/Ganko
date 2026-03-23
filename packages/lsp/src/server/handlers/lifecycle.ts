@@ -24,7 +24,7 @@ import type { PhaseEnriched } from "../session";
 import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
 import { buildFullCompilation } from "../../core/compilation-builder";
 import { createCompilationDiagnosticProducer } from "../../core/compilation-diagnostic-producer";
-import { batchValidateTailwindClasses } from "../../core/enrichment";
+import { batchResolveTailwindClasses } from "../../core/enrichment";
 import { prepareTailwindEval } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { createCompilationTracker } from "@drskillissue/ganko";
@@ -257,7 +257,7 @@ export async function handleInitialized(
   // The tracker starts empty — it must be populated with all workspace
   // solid + CSS trees so that IncrementalAnalyzer can run cross-file rules.
   {
-    const { compilation } = buildFullCompilation({
+    let { compilation } = buildFullCompilation({
       solidFiles: enrichment.registry.solidFiles,
       cssFiles: enrichment.registry.cssFiles,
       getProgram: () => project.getProgram(),
@@ -266,10 +266,9 @@ export async function handleInitialized(
       resolveContent: context.resolveContent,
       logger: log,
     });
-    context.graphCache = createCompilationTracker(compilation);
 
-    // Batch-validate Tailwind arbitrary classes before cross-file analysis
-    if (enrichment.batchableValidator !== null && enrichedPhase.tailwindState !== null) {
+    // Batch-resolve Tailwind classes and build synthetic CSS tree BEFORE tracker/analysis
+    if (enrichment.batchableValidator !== null) {
       const twParams = prepareTailwindEval(
         enrichment.registry.loadAllCSSContent(),
         rootPath,
@@ -277,9 +276,11 @@ export async function handleInitialized(
         log,
       );
       if (twParams !== null) {
-        await batchValidateTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
+        compilation = await batchResolveTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
       }
     }
+
+    context.graphCache = createCompilationTracker(compilation);
 
     // Run cross-file analysis and cache results so didOpen reads instantly
     const crossProducer = createCompilationDiagnosticProducer();
