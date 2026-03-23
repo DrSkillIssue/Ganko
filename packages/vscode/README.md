@@ -1,6 +1,6 @@
 # ganko-vscode
 
-VS Code extension for Solid.js language support, powered by `ganko` and `ganko`.
+VS Code extension for Solid.js language support, powered by `@drskillissue/ganko` and `@drskillissue/ganko-lsp`.
 
 ## Features
 
@@ -47,6 +47,7 @@ VS Code extension for Solid.js language support, powered by `ganko` and `ganko`.
 | `solid.accessibilityPolicy` | string | `"wcag-aa"` | Policy template for CSS/JSX style linting (`wcag-aa`, `wcag-aaa`, `mobile-first`, `dense-ui`, `large-text`) |
 | `solid.eslintConfig.enable` | boolean | `true` | Read rule overrides from ESLint config |
 | `solid.eslintConfig.path` | string | - | Custom ESLint config path (relative to workspace root). Uses auto-discovery if not set. |
+| `solid.enableTypeScriptDiagnostics` | boolean | `false` | Push TypeScript diagnostics alongside ganko diagnostics |
 | `solid.lsp.env` | object | `{}` | Environment variables passed to the LSP process |
 
 ### Rule Overrides

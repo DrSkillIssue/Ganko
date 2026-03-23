@@ -9,7 +9,8 @@ Language Server Protocol (LSP) server for Solid.js projects. `ganko` powers diag
 - Signature help, document highlight, linked editing, folding ranges, selection ranges
 - Document symbols and workspace symbols
 - Semantic tokens and inlay hints for reactive constructs
-- Custom request: `solid/showReactiveGraph` (Mermaid + DOT graph payload)
+- Pull diagnostics (LSP 3.17 `textDocument/diagnostic`) for non-interactive clients
+- Custom requests: `solid/showReactiveGraph` (Mermaid + DOT graph payload), `solid/memoryUsage`
 
 Supported source extensions:
 
@@ -66,6 +67,9 @@ ganko
 # Write server logs to a file (for debugging)
 ganko --log-file /tmp/ganko.log
 
+# Push TypeScript diagnostics alongside ganko diagnostics
+ganko --enable-ts
+
 # CLI helpers
 ganko --help
 ganko --version
@@ -115,6 +119,7 @@ ganko lint --no-daemon
 | `--no-eslint-config` | Ignore ESLint config |
 | `--exclude <glob>` | Exclude files matching glob pattern (repeatable) |
 | `--no-daemon` | Skip daemon, run analysis in-process |
+| `--max-workers <n>` | Max parallel workers for lint (default: auto) |
 | `--verbose`, `-v` | Enable debug-level log output |
 | `--log-level <level>` | Set log level: `trace`, `debug`, `info`, `warning`, `error`, `critical`, `off` |
 | `--log-file <path>` | Write logs to a file (in addition to stderr) |
