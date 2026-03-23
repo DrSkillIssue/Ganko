@@ -416,12 +416,12 @@ describe("pipeline: stability", () => {
   let client: LSPClient;
 
   beforeAll(async () => {
-    const files: Record<string, string> = {};
+    const files = new Map<string, string>();
     for (let i = 0; i < 10; i++) {
-      files[`Batch${i}.tsx`] = `import { createSignal } from "solid-js";
-function Batch${i}() { const [c] = createSignal(${i}); return <div>{c${i % 2 === 0 ? "" : "()"}}</div>; }`;
+      files.set(`Batch${i}.tsx`, `import { createSignal } from "solid-js";
+function Batch${i}() { const [c] = createSignal(${i}); return <div>{c${i % 2 === 0 ? "" : "()"}}</div>; }`);
     }
-    dir = createTempDir(files);
+    dir = createTempDir(Object.fromEntries(files));
     client = new LSPClient(dir);
     await client.initialize();
   }, 15000);
