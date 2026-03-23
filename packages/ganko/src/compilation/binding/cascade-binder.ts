@@ -1083,8 +1083,16 @@ function computeReservedSpaceFact(declarations: ReadonlyMap<string, CascadedDecl
 
   const width = getCascadeValue(declarations, "width")
   const inlineSize = getCascadeValue(declarations, "inline-size")
-  const hasDeclaredInlineDimension = (width !== null && width !== "auto") || (inlineSize !== null && inlineSize !== "auto")
-  const hasDeclaredBlockDimension = height !== null && height !== "auto"
+  const hasMinWidth = getCascadeValue(declarations, "min-width")
+  const flexBasis = getCascadeValue(declarations, "flex-basis")
+  const hasDeclaredInlineDimension = (width !== null && width !== "auto")
+    || (inlineSize !== null && inlineSize !== "auto")
+    || (hasMinWidth !== null && hasMinWidth !== "0" && hasMinWidth !== "0px" && hasMinWidth !== "auto")
+    || (flexBasis !== null && flexBasis !== "auto" && flexBasis !== "0" && flexBasis !== "0px")
+  const hasDeclaredBlockDimension = (height !== null && height !== "auto")
+    || (blockSize !== null && blockSize !== "auto")
+    || (minHeight !== null && minHeight !== "0" && minHeight !== "0px" && minHeight !== "auto")
+    || (minBlockSize !== null && minBlockSize !== "0" && minBlockSize !== "0px" && minBlockSize !== "auto")
 
   if (hasUsableAspectRatio && hasDeclaredInlineDimension) {
     if (width !== null) reasons.push("aspect-ratio+width")
