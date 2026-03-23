@@ -18,6 +18,7 @@
 import ts from "typescript"
 import type { VariableEntity } from "../../entities"
 import { defineSolidRule } from "../../rule"
+import { getFunctionBodyExpression } from "../util"
 import { createDiagnostic, resolveMessage } from "../../../diagnostic"
 import { getCallsByPrimitive, getVariableByNameInScope } from "../../queries"
 
@@ -106,7 +107,9 @@ export const selfReferencingStore = defineSolidRule({
 
         // Check if the value references the store variable or any alias
         // For function updaters: setStore("key", (prev) => store)
-        const nodeToCheck = getUpdaterBody(lastArg) ?? lastArg
+        const nodeToCheck = ts.isArrowFunction(lastArg) || ts.isFunctionExpression(lastArg)
+          ? (getFunctionBodyExpression(lastArg) ?? lastArg)
+          : lastArg
         if (containsAnyIdentifier(nodeToCheck, storeNames)) {
           emit(
             createDiagnostic(
@@ -130,34 +133,6 @@ interface StoreDestructure {
   setterName: string
   storeVar: VariableEntity
   setterVar: VariableEntity
-}
-
-/**
- * If a node is a function updater (arrow/function expression), return its body
- * for inspection. For expression bodies, returns the expression. For block
- * bodies, returns the last return statement's argument. Returns null if not
- * an updater pattern.
- */
-function getUpdaterBody(node: ts.Node): ts.Node | null {
-  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null
-
-  if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) {
-    return node.body
-  }
-
-  const body = ts.isArrowFunction(node) ? node.body : node.body
-  if (ts.isBlock(body)) {
-    const statements = body.statements
-    for (let i = statements.length - 1; i >= 0; i--) {
-      const stmt = statements[i]
-      if (!stmt) continue
-      if (ts.isReturnStatement(stmt)) {
-        return stmt.expression ?? null
-      }
-    }
-  }
-
-  return null
 }
 
 /**
@@ -221,4 +196,3 @@ function containsAnyIdentifier(node: ts.Node, names: Set<string>): boolean {
 
   return false
 }
-

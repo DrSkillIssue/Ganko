@@ -478,6 +478,10 @@ describe("signal-in-loop", () => {
   const sl9 = batch.add(`import { createSignal } from "solid-js"; function List() { const [label, setLabel] = createSignal("test"); return (<For each={[1, 2, 3]}>{(item) => <div class={label()}>{item}</div>}</For>); }`)
   const sl10 = batch.add(`import { createSignal } from "solid-js"; function List() { return (<For each={[1, 2, 3]}>{(item) => { const [local, setLocal] = createSignal(0); return <div>{local()}</div>; }}</For>); }`)
   const sl11 = batch.add(`import { createSignal, splitProps } from "solid-js"; function List(props) { const [local] = splitProps(props, ["label"]); const getLabel = () => local.label; return (<For each={[1, 2, 3]}>{(item) => <div title={getLabel()}>{item}</div>}</For>); }`)
+  const sl12 = batch.add(`import { createSignal, For } from "solid-js"; function Grid(props) { const [values, setValues] = createSignal<Record<string, string>>({}); const update = (key: string, value: string) => setValues(prev => ({ ...prev, [key]: value })); return (<For each={props.fields}>{(field) => <div>{values()[field.key] ?? ""}</div>}</For>); }`)
+  const sl13 = batch.add(`import { createSignal, For } from "solid-js"; function Grid(props) { const [values, setValues] = createSignal<Record<string, string>>({}); const overwrite = (next: Record<string, string>) => setValues(next); return (<For each={props.fields}>{(field) => <div>{values()[field.key] ?? ""}</div>}</For>); }`)
+  const sl14 = batch.add(`import { createSignal, For } from "solid-js"; function Grid(props) { const [values, setValues] = createSignal<Record<string, string>>({}); const update = (key: string, value: string) => setValues(prev => ({ ...prev, staticKey: value })); return (<For each={props.fields}>{(field) => <div>{values()[field.key] ?? ""}</div>}</For>); }`)
+  const sl15 = batch.add(`import { createSignal, For } from "solid-js"; function Grid(props) { const [values, setValues] = createSignal<Record<string, string>>({}); const update = (key: string, value: string) => setValues(prev => ({ ...prev, [key]: value })); return (<For each={props.fields}>{(field) => <div>{(values().staticKey ?? "") + field.key}</div>}</For>); }`)
 
   it("metadata", () => { expect(signalInLoop.id).toBe("signal-in-loop") })
 
@@ -491,6 +495,9 @@ describe("signal-in-loop", () => {
     expect(batch.result(sl6).diagnostics.filter(d => d.messageId === "derivedCallInvariant")).toHaveLength(0)
     expect(batch.result(sl7).diagnostics).toHaveLength(0)
     expect(batch.result(sl8).diagnostics).toHaveLength(0)
+    expect(batch.result(sl13).diagnostics).toHaveLength(0)
+    expect(batch.result(sl14).diagnostics).toHaveLength(0)
+    expect(batch.result(sl15).diagnostics).toHaveLength(0)
   })
 
   it("reports loop-invariant signals and signals created in loops", () => {
@@ -505,6 +512,10 @@ describe("signal-in-loop", () => {
     const d11 = batch.result(sl11).diagnostics
     expect(d11).toHaveLength(1)
     expect(at(d11, 0).messageId).toBe("derivedCallInvariant")
+
+    const d12 = batch.result(sl12).diagnostics
+    expect(d12).toHaveLength(1)
+    expect(at(d12, 0).messageId).toBe("signalIndexedByLoop")
   })
 })
 
