@@ -207,7 +207,7 @@ function findFunctionRootJSXElement(fn: FunctionEntity, ctx: SolidBuildContext):
 function findJSXElementFromExpression(expr: ts.Expression, ctx: SolidBuildContext): JSXElementEntity | null {
   let current: ts.Expression = expr
   while (ts.isAsExpression(current) || ts.isParenthesizedExpression(current) || ts.isNonNullExpression(current)) {
-    current = (current as ts.AsExpression | ts.ParenthesizedExpression | ts.NonNullExpression).expression
+    current = current.expression
   }
 
   if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current)) {
@@ -280,7 +280,11 @@ function containsChildrenReference(expression: ts.Expression): boolean {
       for (let j = 0; j < current.arguments.length; j++) { const a = current.arguments[j]; if (a) queue.push(a) }
       continue
     }
-    ts.forEachChild(current, (child) => { queue.push(child) })
+    const children = current.getChildren()
+    for (let j = 0; j < children.length; j++) {
+      const child = children[j]
+      if (child) queue.push(child)
+    }
   }
   return false
 }

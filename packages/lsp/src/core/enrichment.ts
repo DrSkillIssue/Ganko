@@ -5,7 +5,7 @@
  * module resolution. The evaluator stays alive so Tailwind's candidatesToCss
  * can batch-resolve classes and build synthetic CSS trees before rule execution.
  */
-import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties } from "@drskillissue/ganko";
+import { prepareTailwindEval, buildTailwindValidatorFromEval, scanDependencyCustomProperties, createCompilationTracker } from "@drskillissue/ganko";
 import type { TailwindValidator, BatchableTailwindValidator, CompilationTracker, StyleCompilation, TailwindEvalParams } from "@drskillissue/ganko";
 /** Minimal diagnostic eviction interface. */
 export interface DiagnosticEviction {
@@ -17,6 +17,8 @@ import type { Logger, WorkspaceLayout } from "@drskillissue/ganko-shared";
 import { createFileRegistry, type FileRegistry } from "./file-registry";
 import { createTailwindState, type TailwindState } from "./tailwind-state";
 import { spawnWorkspaceEvaluator, type WorkspaceEvaluator } from "./workspace-eval";
+import { buildFullCompilation } from "./compilation-builder";
+import type { Project } from "./project";
 
 export interface EnrichmentResult {
   readonly registry: FileRegistry
@@ -31,6 +33,18 @@ export interface EnrichmentResult {
 export interface EnrichmentDeps {
   readonly graphCache: CompilationTracker
   readonly diagnosticEviction: DiagnosticEviction
+  readonly log: Logger
+}
+
+export interface EnrichedCompilationDeps {
+  readonly project: Project
+  readonly registry: FileRegistry
+  readonly layout: WorkspaceLayout
+  readonly tailwindValidator: TailwindValidator | null
+  readonly batchableValidator: BatchableTailwindValidator | null
+  readonly externalCustomProperties: ReadonlySet<string> | undefined
+  readonly evaluator: WorkspaceEvaluator | null
+  readonly resolveContent: (path: string) => string | null
   readonly log: Logger
 }
 
@@ -101,7 +115,7 @@ export async function runEnrichment(
     if (log.isLevelEnabled(Level.Debug)) log.debug(`library analysis: ${externalProps.size} external custom properties`);
   }
 
-  const twState = createTailwindState(tailwindValidator);
+  const twState = createTailwindState(batchableValidator);
 
   return { registry, layout, tailwindValidator, batchableValidator, externalCustomProperties, tailwindState: twState, evaluator };
 }
@@ -179,4 +193,44 @@ export async function batchResolveTailwindClasses(
   } finally {
     if (ownedEvaluator) eval_.dispose();
   }
+}
+
+export async function buildEnrichedCompilationTracker(
+  deps: EnrichedCompilationDeps,
+): Promise<CompilationTracker> {
+  const {
+    project,
+    registry,
+    layout,
+    tailwindValidator,
+    batchableValidator,
+    externalCustomProperties,
+    evaluator,
+    resolveContent,
+    log,
+  } = deps;
+
+  const { compilation } = buildFullCompilation({
+    solidFiles: registry.solidFiles,
+    cssFiles: registry.cssFiles,
+    getProgram: () => project.getProgram(),
+    tailwindValidator,
+    externalCustomProperties,
+    resolveContent,
+    logger: log,
+  });
+
+  if (batchableValidator !== null) {
+    const twParams = prepareTailwindEval(
+      registry.loadAllCSSContent(),
+      layout.root.path,
+      Array.from(layout.packagePaths),
+      log,
+    );
+    if (twParams !== null) {
+      await batchResolveTailwindClasses(compilation, batchableValidator, twParams, layout.root.path, evaluator, log);
+    }
+  }
+
+  return createCompilationTracker(compilation);
 }

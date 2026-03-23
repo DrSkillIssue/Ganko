@@ -14,7 +14,7 @@ import type { SelectorSymbol, CompiledSelectorMatcher } from "../symbols/selecto
 import type { SymbolTable } from "../symbols/symbol-table"
 import type { ScopedSelectorIndex } from "./scope-resolver"
 import type { ElementNode } from "./element-builder"
-import type { LayoutSignalName } from "./signal-builder"
+import type { LayoutSignalName, SignalSnapshot } from "./signal-builder"
 import { isMonitoredSignal, MONITORED_SIGNAL_NAME_MAP } from "./signal-builder"
 
 
@@ -1029,9 +1029,9 @@ import { computeReservedSpaceFact, computeScrollContainerFact, computeFlowPartic
 export function computeLayoutFact<K extends LayoutFactKind>(
   factKind: K,
   elementId: number,
-  snapshot: import("./signal-builder").SignalSnapshot,
+  snapshot: SignalSnapshot,
   allElements: readonly ElementNode[],
-  getSnapshotForElement: (id: number) => import("./signal-builder").SignalSnapshot,
+  getSnapshotForElement: (id: number) => SignalSnapshot,
 ): LayoutFactMap[K] {
   switch (factKind) {
     case "reservedSpace": return computeReservedSpaceFact(snapshot) as LayoutFactMap[K]
@@ -1045,7 +1045,7 @@ export function computeLayoutFact<K extends LayoutFactKind>(
 function computeContainingBlockFact(
   elementId: number,
   allElements: readonly ElementNode[],
-  getSnapshotForElement: (id: number) => import("./signal-builder").SignalSnapshot,
+  getSnapshotForElement: (id: number) => SignalSnapshot,
 ): ContainingBlockFact {
   let current: ElementNode | null = null
   for (let i = 0; i < allElements.length; i++) {

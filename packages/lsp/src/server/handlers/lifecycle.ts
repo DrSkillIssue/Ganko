@@ -17,17 +17,13 @@ import { SolidPlugin, setActivePolicy } from "@drskillissue/ganko";
 import { pathToUri, projectRootFromUri, acceptProjectRoot, ServerSettingsSchema, Level, type RuleOverrides, type ConfigurationChangePayload, type AccessibilityPolicy } from "@drskillissue/ganko-shared";
 import { buildServerCapabilities } from "../capabilities";
 import { createProject, type Project } from "../../core/project";
-import { runEnrichment } from "../../core/enrichment";
+import { runEnrichment, buildEnrichedCompilationTracker } from "../../core/enrichment";
 import { loadESLintConfig, mergeOverrides, EMPTY_ESLINT_RESULT } from "../../core/eslint-config";
 import type { ServerContext } from "../server";
 import type { PhaseEnriched } from "../session";
 import { runDiagnosticPipelineBatch, propagateTsDiagnosticsAsync } from "../diagnostic-pipeline";
-import { buildFullCompilation } from "../../core/compilation-builder";
 import { createCompilationDiagnosticProducer } from "../../core/compilation-diagnostic-producer";
-import { batchResolveTailwindClasses } from "../../core/enrichment";
-import { prepareTailwindEval } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
-import { createCompilationTracker } from "@drskillissue/ganko";
 import { createCancellationSource } from "../cancellation";
 import { SessionMutator } from "../session-mutator";
 import type { Logger } from "../../core/logger";
@@ -211,6 +207,12 @@ export async function handleInitialized(
 
   if (log.isLevelEnabled(Level.Info)) log.info("Phase A: project created, ready gate resolved (Tier 1 active)");
 
+  const enrichmentPromise = runEnrichment(rootPath, effectiveExclude(state), {
+    graphCache: context.graphCache,
+    diagnosticEviction: context.diagManager,
+    log,
+  });
+
   /* ── Phase B: Full program build — re-diagnose with full TypeChecker ──
      The IncrementalTypeScriptService defers createProgram by one event loop
      tick via setImmediate. This allows any didOpen events queued during the
@@ -228,17 +230,13 @@ export async function handleInitialized(
      enrichment hasn't run). */
   {
     const phaseBToken = createCancellationSource().token;
-    const openPaths = context.docManager.openPaths() as string[];
+    const openPaths = context.docManager.openPaths();
     runDiagnosticPipelineBatch(context, project, openPaths, false, phaseBToken);
   }
 
   /* ── Phase C: Workspace enrichment (file index, Tailwind, cross-file) ── */
 
-  const enrichment = await runEnrichment(rootPath, effectiveExclude(state), {
-    graphCache: context.graphCache,
-    diagnosticEviction: context.diagManager,
-    log,
-  });
+  const enrichment = await enrichmentPromise;
   const enrichedPhase: PhaseEnriched = {
     tag: "enriched",
     project,
@@ -257,35 +255,21 @@ export async function handleInitialized(
   // The tracker starts empty — it must be populated with all workspace
   // solid + CSS trees so that IncrementalAnalyzer can run cross-file rules.
   {
-    const { compilation } = buildFullCompilation({
-      solidFiles: enrichment.registry.solidFiles,
-      cssFiles: enrichment.registry.cssFiles,
-      getProgram: () => project.getProgram(),
+    context.graphCache = await buildEnrichedCompilationTracker({
+      project,
+      registry: enrichment.registry,
+      layout: enrichment.layout,
       tailwindValidator: enrichment.tailwindValidator,
+      batchableValidator: enrichment.batchableValidator,
       externalCustomProperties: enrichment.externalCustomProperties,
+      evaluator: enrichment.evaluator,
       resolveContent: context.resolveContent,
-      logger: log,
+      log,
     });
-
-    // Batch-resolve Tailwind classes — preloads CSS into validator BEFORE
-    // symbolTable is constructed (tracker creation or rule dispatch).
-    if (enrichment.batchableValidator !== null) {
-      const twParams = prepareTailwindEval(
-        enrichment.registry.loadAllCSSContent(),
-        rootPath,
-        Array.from(enrichment.layout.packagePaths),
-        log,
-      );
-      if (twParams !== null) {
-        await batchResolveTailwindClasses(compilation, enrichment.batchableValidator, twParams, rootPath, enrichment.evaluator, log);
-      }
-    }
-
-    context.graphCache = createCompilationTracker(compilation);
 
     // Run cross-file analysis and cache results so didOpen reads instantly
     const crossProducer = createCompilationDiagnosticProducer();
-    const crossByFile = crossProducer.runAll(compilation, state.config.ruleOverrides);
+    const crossByFile = crossProducer.runAll(context.graphCache.currentCompilation, state.config.ruleOverrides);
     const crossFlat: Diagnostic[] = [];
     for (const [, diags] of crossByFile) { for (let i = 0; i < diags.length; i++) { const d = diags[i]; if (d) crossFlat.push(d); } }
     context.graphCache.setCachedCrossFileResults(crossFlat);
@@ -300,7 +284,7 @@ export async function handleInitialized(
   /* Re-diagnose ALL currently open files with cross-file results. */
   {
     const phaseCToken = createCancellationSource().token;
-    const currentOpenPaths = context.docManager.openPaths() as string[];
+    const currentOpenPaths = context.docManager.openPaths();
     runDiagnosticPipelineBatch(context, project, currentOpenPaths, true, phaseCToken);
     propagateTsDiagnosticsAsync(context, project, new Set(), phaseCToken);
   }

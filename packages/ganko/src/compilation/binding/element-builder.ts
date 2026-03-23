@@ -9,6 +9,7 @@ import ts from "typescript"
 import { ExportKind, type ExportEntity } from "../../solid/entities/export"
 import type { FunctionEntity } from "../../solid/entities/function"
 import type { JSXElementEntity } from "../../solid/entities/jsx"
+import type { ScopeEntity } from "../../solid/entities/scope"
 import type { VariableEntity } from "../../solid/entities/variable"
 import { buildSolidSyntaxTree } from "../../solid/impl"
 import { createSolidInput } from "../../solid/create-input"
@@ -583,7 +584,7 @@ function resolveComposedParentElementId(
   // Walk the scope chain to find the owning component's scope. If it's a member
   // of a compound component (Object.assign), the syntax tree carries the mapping
   // from scope ID → compound base's children-forwarding element ID.
-  let scope: import("../../solid/entities/scope").ScopeEntity | null = element.scope
+  let scope: ScopeEntity | null = element.scope
   while (scope !== null) {
     const compoundParent = compoundComponentParents.get(scope.id)
     if (compoundParent !== undefined) return compoundParent
