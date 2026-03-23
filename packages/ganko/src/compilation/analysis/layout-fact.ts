@@ -52,7 +52,7 @@ export interface ContainingBlockFact {
 // ── Constants ────────────────────────────────────────────────────────────
 
 const SCROLLABLE_VALUES: ReadonlySet<string> = new Set(["auto", "scroll"])
-const NON_RESERVING_DIMENSION_KEYWORDS = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch", "inherit", "initial", "unset", "revert", "revert-layer"])
+export const NON_RESERVING_DIMENSION_KEYWORDS: ReadonlySet<string> = new Set(["auto", "none", "fit-content", "min-content", "max-content", "stretch", "inherit", "initial", "unset", "revert", "revert-layer"])
 const BLOCK_LEVEL_DISPLAY_VALUES = new Set(["block", "flex", "grid", "table", "list-item", "flow-root", "table-row", "table-cell", "table-caption", "table-row-group", "table-header-group", "table-footer-group", "table-column", "table-column-group"])
 
 
