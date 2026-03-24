@@ -1,7 +1,7 @@
 {
   "name": "@drskillissue/ganko-shared",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Shared protocol types for the ganko toolchain",
   "license": "MIT",
   "type": "commonjs",
