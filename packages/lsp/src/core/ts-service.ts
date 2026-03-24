@@ -19,9 +19,9 @@
  */
 
 import ts from "typescript";
-import { dirname } from "node:path";
 import type { Diagnostic } from "@drskillissue/ganko";
 import type { Project } from "./project";
+import { readTsConfig } from "./tsconfig";
 
 export const enum TsServiceTier {
   /** Fast startup: per-file createProgram, no cross-module types. */
@@ -69,6 +69,12 @@ export interface TsService {
   dispose(): void
 }
 
+/**
+ * Create a layered TypeScript service for one project root.
+ *
+ * @param rootPath - Project root used to resolve tsconfig and program state
+ * @returns TypeScript service facade
+ */
 export function createTsService(rootPath: string): TsService {
   let compilerOptions: ts.CompilerOptions | null = null;
   let tier1Host: ts.CompilerHost | null = null;
@@ -78,11 +84,11 @@ export function createTsService(rootPath: string): TsService {
   // Lazily resolve tsconfig compiler options
   function ensureCompilerOptions(): ts.CompilerOptions | null {
     if (compilerOptions !== null) return compilerOptions;
-    const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
-    if (!tsconfigPath) return null;
-    const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, dirname(tsconfigPath));
-    compilerOptions = parsed.options;
+    try {
+      compilerOptions = readTsConfig(rootPath).options;
+    } catch {
+      return null;
+    }
     return compilerOptions;
   }
 

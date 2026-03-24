@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { readTsConfig } from "./tsconfig";
 
 export interface IncrementalTypeScriptService {
   readonly tsconfigPath: string
@@ -12,18 +13,21 @@ export interface IncrementalTypeScriptService {
   dispose(): void
 }
 
+/**
+ * Create an incremental TypeScript language service for one project root.
+ *
+ * @param rootPath - Project root used to locate tsconfig.json
+ * @returns Incremental TypeScript service
+ */
 export function createIncrementalProgram(rootPath: string): IncrementalTypeScriptService {
-  const tsconfigPath = ts.findConfigFile(rootPath, ts.sys.fileExists, "tsconfig.json");
-  if (!tsconfigPath) throw new Error(`No tsconfig.json found in ${rootPath}`);
-  const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, rootPath);
+  const tsconfig = readTsConfig(rootPath);
 
   const fileContents = new Map<string, string>();
   const fileVersions = new Map<string, number>();
 
   const servicesHost: ts.LanguageServiceHost = {
     getScriptFileNames: () => {
-      const base = parsedConfig.fileNames;
+      const base = [...tsconfig.fileNames];
       if (fileContents.size === 0) return base;
       const baseSet = new Set(base);
       const extra: string[] = [];
@@ -40,7 +44,7 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
       return ts.ScriptSnapshot.fromString(ts.sys.readFile(fileName) ?? "");
     },
     getCurrentDirectory: () => rootPath,
-    getCompilationSettings: () => parsedConfig.options,
+    getCompilationSettings: () => tsconfig.options,
     getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
     fileExists: (fileName) => fileContents.has(fileName) || ts.sys.fileExists(fileName),
     readFile: (fileName) => fileContents.get(fileName) ?? ts.sys.readFile(fileName),
@@ -72,7 +76,7 @@ export function createIncrementalProgram(rootPath: string): IncrementalTypeScrip
   });
 
   return {
-    tsconfigPath,
+    tsconfigPath: tsconfig.tsconfigPath,
     getProgram(): ts.Program {
       const program = languageService.getProgram();
       if (!program) throw new Error("Failed to get program from language service");

@@ -1,5 +1,10 @@
 {
   "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@drskillissue/ganko-shared": ["../shared/src/index.ts"]
+    }
+  },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["dist"]
 }

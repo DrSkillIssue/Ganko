@@ -4,8 +4,7 @@
  * Common infrastructure for bridging ganko's rule engine into
  * ESLint's plugin format. Used by each plugin's eslint-plugin.ts.
  */
-import type { TSESLint } from "@typescript-eslint/utils"
-import type ts from "typescript"
+import { ESLintUtils, type TSESLint } from "@typescript-eslint/utils"
 import type { Diagnostic, Fix, FixOperation, Suggestion } from "./diagnostic"
 import type { BaseRule, Emit } from "./graph"
 import type { SolidInput } from "./solid/input"
@@ -20,14 +19,12 @@ export type RuleContext = TSESLint.RuleContext<string, readonly unknown[]>
  * the source file and type checker for the current file.
  */
 export function buildSolidInputFromContext(context: RuleContext): SolidInput {
-  const parserServices = context.sourceCode.parserServices as
-    | { program?: ts.Program }
-    | undefined
-  const program = parserServices?.program
+  const parserServices = ESLintUtils.getParserServices(context)
+  const program = parserServices.program
   if (!program) {
     throw new Error(
       "ganko requires typed linting. Ensure your ESLint config uses " +
-      "typescript-eslint's typed parser with a `project` or `projectService` option.",
+      "typescript-eslint typed linting with `projectService: true`.",
     )
   }
   const sourceFile = program.getSourceFile(context.filename)

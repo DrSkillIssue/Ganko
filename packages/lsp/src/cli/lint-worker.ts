@@ -10,6 +10,7 @@ import ts from "typescript";
 import { buildSolidSyntaxTree, runSolidRules, createSolidInput, createOverrideEmit } from "@drskillissue/ganko";
 import type { Diagnostic } from "@drskillissue/ganko";
 import { canonicalPath, classifyFile } from "@drskillissue/ganko-shared";
+import { readTsConfig } from "../core/tsconfig";
 import type { WorkerTask, WorkerResult } from "./worker-pool";
 
 const port = parentPort;
@@ -23,17 +24,12 @@ port.on("message", (task: WorkerTask) => {
 });
 
 function runLintTask(task: WorkerTask): readonly WorkerResult[] {
-  const configFile = ts.readConfigFile(task.tsconfigPath, ts.sys.readFile);
-  const parsedConfig = ts.parseJsonConfigFileContent(
-    configFile.config,
-    ts.sys,
-    task.rootPath,
-  );
+  const tsconfig = readTsConfig(task.rootPath, task.tsconfigPath);
 
   /* Use task.files as rootNames — the main thread already discovered
      the actual files via FileIndex. The tsconfig may have `files: []`
      in monorepo setups where packages have their own tsconfigs. */
-  const program = ts.createProgram(task.files, parsedConfig.options);
+  const program = ts.createProgram(task.files, tsconfig.options);
 
   const hasOverrides = Object.keys(task.overrides).length > 0;
 

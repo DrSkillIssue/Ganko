@@ -1,13 +1,10 @@
 // @ts-check
-import path from "node:path";
 // @ts-ignore
 import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import stylistic from "@stylistic/eslint-plugin";
 import solid from "@drskillissue/ganko/eslint-plugin";
-
-const tsconfigPath = path.resolve("tsconfig.json");
 
 export default [
   {
@@ -38,7 +35,8 @@ export default [
       sourceType: "module",
       parser: tseslint.parser,
       parserOptions: {
-        project: tsconfigPath,
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
       globals: globals.node,
     },
