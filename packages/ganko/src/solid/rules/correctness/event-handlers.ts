@@ -100,7 +100,10 @@ type CommonEvent = (typeof COMMON_EVENTS)[number]
  * Map of lowercase event names to their properly-cased versions.
  */
 const COMMON_EVENTS_MAP = new Map<string, CommonEvent>(
-  COMMON_EVENTS.map((event) => [event.toLowerCase(), event]),
+  Array.from(COMMON_EVENTS, (event): readonly [string, CommonEvent] => {
+    const eventName = String(event)
+    return [eventName.toLowerCase(), event]
+  }),
 )
 
 /**

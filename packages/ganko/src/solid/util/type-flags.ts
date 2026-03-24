@@ -1,32 +1,29 @@
-/**
- * TypeScript Type Flag Constants
- *
- * Named constants for ts.TypeFlags values used in type analysis.
- * See: https://github.com/microsoft/TypeScript/blob/main/src/compiler/types.ts
- */
-
 import type ts from "typescript";
-import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree"
+import type { SolidSyntaxTree as SolidGraph } from "../../compilation/core/solid-syntax-tree";
+import {
+  TS_ANY_OR_UNKNOWN,
+  TS_BOOLEAN_LIKE,
+  TS_NUMBER_LIKE,
+  TS_OBJECT_LIKE,
+  TS_STRING_LIKE,
+} from "../typescript/type-flags";
 
-/** ts.TypeFlags.Any | ts.TypeFlags.Unknown */
-export const TS_ANY_OR_UNKNOWN = 1 | 2;
-
-/** ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral (16 | 512) */
-export const TS_BOOLEAN_LIKE = 528;
-
-/** ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral | ts.TypeFlags.BigIntLiteral + enum flags */
-export const TS_NUMBER_LIKE = 296;
-
-/** ts.TypeFlags.String | ts.TypeFlags.StringLiteral | ts.TypeFlags.TemplateLiteral + enum string flags */
-export const TS_STRING_LIKE = 402653316;
-
-/** ts.TypeFlags.Object */
-export const TS_OBJECT_LIKE = 524288;
+export {
+  TS_ANY_OR_UNKNOWN,
+  TS_BOOLEAN_LIKE,
+  TS_NUMBER_LIKE,
+  TS_OBJECT_LIKE,
+  TS_STRING_LIKE,
+};
 
 /**
  * Check if a node's TypeScript type is exclusively boolean.
  * Returns false for any/unknown, union types containing non-boolean members,
  * or nodes whose type cannot be resolved.
+ *
+ * @param solid - Solid syntax tree with a type resolver
+ * @param node - Node whose type should be checked
+ * @returns True when the type is exclusively boolean
  */
 export function isBooleanType(solid: SolidGraph, node: ts.Node): boolean {
   const info = solid.typeResolver.getType(node);
@@ -43,6 +40,10 @@ export function isBooleanType(solid: SolidGraph, node: ts.Node): boolean {
 /**
  * Check if a node's TypeScript type is definitively not boolean.
  * Returns false for any/unknown (ambiguous) or actual boolean types.
+ *
+ * @param solid - Solid syntax tree with a type resolver
+ * @param node - Node whose type should be checked
+ * @returns True when the type is definitively non-boolean
  */
 export function isDefinitelyNonBooleanType(solid: SolidGraph, node: ts.Node): boolean {
   const info = solid.typeResolver.getType(node);

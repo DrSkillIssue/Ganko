@@ -13,6 +13,11 @@ import type { Logger } from "@drskillissue/ganko-shared";
 import { noopLogger, Level } from "@drskillissue/ganko-shared";
 
 import type { ReactiveKind } from "../entities/variable";
+import {
+  TS_AMBIGUOUS_FLAGS,
+  TS_OBJECT_LIKE,
+  TS_PRIMITIVE_FLAGS,
+} from "./type-flags";
 
 /**
  * Type information for a node resolved from TypeScript.
@@ -42,24 +47,6 @@ export interface ObjectPropertyInfo {
   readonly type: string;
 }
 
-/**
- * TypeScript's internal type properties that exist at runtime but aren't
- * in the public type definitions.
- */
-export type TSTypeWithInternals = ts.Type & {
-  /** Type arguments for generic types */
-  typeArguments?: readonly ts.Type[];
-  /** Target type for instantiated generics (e.g., Array<T> -> Array) */
-  target?: TSObjectTypeWithInternals;
-  /** Resolved type arguments for tuples */
-  resolvedTypeArguments?: readonly ts.Type[];
-};
-
-export type TSObjectTypeWithInternals = ts.ObjectType & {
-  /** Type arguments on the target type */
-  typeArguments?: readonly ts.Type[];
-};
-
 const NULL_REACTIVE_RESULT: { kind: null; type: null } = Object.freeze({ kind: null, type: null });
 const COMPONENT_TYPE_NAMES = new Set([
   "Component",
@@ -77,6 +64,12 @@ export class TypeResolver {
   private solidSymbolCache = new Map<ts.Symbol, boolean>();
   readonly logger: Logger;
 
+  /**
+   * Create a resolver backed by a TypeScript type checker.
+   *
+   * @param checker - Type checker used for all type queries
+   * @param logger - Optional logger for debug output
+   */
   constructor(checker: ts.TypeChecker, logger?: Logger) {
     this.checker = checker;
     this.logger = logger ?? noopLogger;
@@ -262,14 +255,7 @@ export class TypeResolver {
   }
 
   private checkIsStrictArrayType(tsType: ts.Type): boolean {
-    if (tsType.flags & 524288) { // TypeFlags.Object
-      const objFlags = getObjectFlags(tsType);
-      if (objFlags & 8) return true; // Tuple
-      if (objFlags & 4) { // Reference (Array<T>, ReadonlyArray<T>)
-        const name = tsType.getSymbol()?.getName();
-        if (name === "Array" || name === "ReadonlyArray") return true;
-      }
-    }
+    if (this.checker.isArrayType(tsType) || this.checker.isTupleType(tsType)) return true;
     if (tsType.isUnion()) {
       for (const t of tsType.types) {
         if (this.checkIsStrictArrayType(t)) return true;
@@ -279,24 +265,9 @@ export class TypeResolver {
   }
 
   private checkIsArrayType(tsType: ts.Type): boolean {
-    // Check if it's an object type first
-    if (tsType.flags & 524288) { // TypeFlags.Object
-      const objFlags = getObjectFlags(tsType);
+    if (this.checkIsStrictArrayType(tsType)) return true;
 
-      // Tuple type (ObjectFlags.Tuple = 8)
-      if (objFlags & 8) return true;
-
-      // Reference type like Array<T> (ObjectFlags.Reference = 4)
-      if (objFlags & 4) {
-        const symbol = tsType.getSymbol();
-        const name = symbol?.getName();
-        if (name === "Array" || name === "ReadonlyArray") return true;
-      }
-
-      // Check for array-like via type checker
-      const indexType = this.checker.getIndexTypeOfType(tsType, ts.IndexKind.Number);
-      if (indexType) return true;
-    }
+    if (this.checker.getIndexTypeOfType(tsType, ts.IndexKind.Number) !== undefined) return true;
 
     // Union types - check if any constituent is array
     if (tsType.isUnion()) {
@@ -453,7 +424,7 @@ export class TypeResolver {
     // so the extraction logic below handles them correctly.
 
     // Must be an object type (or intersection of object types)
-    if (!(tsType.flags & (524288 | 2097152))) return null; // TypeFlags.Object | TypeFlags.Intersection
+    if (!isObjectLikeForSpread(tsType)) return null;
 
     // Check for index signatures - can't expand dynamic keys
     const stringIndex = this.checker.getIndexTypeOfType(tsType, ts.IndexKind.String);
@@ -601,21 +572,23 @@ export class TypeResolver {
     }
 
     // Structural check: [Accessor<T>, Setter<T>] tuple from createSignal
-    if (isTupleType(tsType)) {
-      const typeArgs = getTypeArguments(tsType);
-      if (typeArgs?.length === 2) {
-        const first = typeArgs[0];
-        const second = typeArgs[1];
-        if (!first || !second) return false;
-        const firstSymbol = first.aliasSymbol ?? first.getSymbol();
-        const secondSymbol = second.aliasSymbol ?? second.getSymbol();
+    if (this.checker.isTupleType(tsType)) {
+      const firstProperty = this.checker.getPropertyOfType(tsType, "0");
+      const secondProperty = this.checker.getPropertyOfType(tsType, "1");
+      if (!firstProperty || !secondProperty) return false;
+      const firstDeclaration = firstProperty.valueDeclaration ?? firstProperty.declarations?.[0];
+      const secondDeclaration = secondProperty.valueDeclaration ?? secondProperty.declarations?.[0];
+      if (!firstDeclaration || !secondDeclaration) return false;
+      const first = this.checker.getTypeOfSymbolAtLocation(firstProperty, firstDeclaration);
+      const second = this.checker.getTypeOfSymbolAtLocation(secondProperty, secondDeclaration);
+      const firstSymbol = first.aliasSymbol ?? first.getSymbol();
+      const secondSymbol = second.aliasSymbol ?? second.getSymbol();
 
-        if (
-          this.isSolidSymbol(firstSymbol, "Accessor") &&
-          this.isSolidSymbol(secondSymbol, "Setter")
-        ) {
-          return true;
-        }
+      if (
+        this.isSolidSymbol(firstSymbol, "Accessor") &&
+        this.isSolidSymbol(secondSymbol, "Setter")
+      ) {
+        return true;
       }
     }
 
@@ -658,22 +631,6 @@ export class TypeResolver {
 }
 
 /**
- * Check if a type is a tuple type.
- *
- * @param type - The TypeScript type to check
- * @returns True if the type is a tuple type
- */
-function isTupleType(type: ts.Type): boolean {
-  const internals = getTypeInternals(type);
-  // TypeScript's internal check for tuple types
-  const target = internals.target;
-  return !!(
-    type.flags & 1 /* TypeFlags.Any */ ||
-    (target && (target.objectFlags ?? 0) & 8) /* ObjectFlags.Tuple */
-  );
-}
-
-/**
  * Check if a type is an array type and get its element type.
  *
  * @param type - The TypeScript type to check
@@ -681,71 +638,18 @@ function isTupleType(type: ts.Type): boolean {
  * @returns The element type if array, null otherwise
  */
 function getArrayElementType(type: ts.Type, typeChecker: ts.TypeChecker): ts.Type | null {
-  // Check for Array<T> or T[] via type reference
-  const internals = getTypeInternals(type);
+  const indexType = typeChecker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  if (indexType !== undefined) return indexType;
 
-  // Array types have a symbol named "Array" and type arguments
-  const symbol = type.getSymbol();
-  if (symbol) {
-    const name = symbol.getName();
-    if (name === "Array" || name === "ReadonlyArray") {
-      const typeArgs = getTypeArguments(type);
-      if (typeArgs && typeArgs.length === 1) {
-         return typeArgs[0] ?? null;
-      }
+  if (type.isUnion()) {
+    for (const memberType of type.types) {
+      const memberIndexType = getArrayElementType(memberType, typeChecker);
+      if (memberIndexType !== null) return memberIndexType;
     }
-  }
-
-  // Check target for instantiated generics (handles User[] syntax)
-  const target = internals.target;
-  if (target) {
-    const targetSymbol = type.getSymbol?.();
-    if (targetSymbol) {
-      const targetName = targetSymbol.getName();
-      if (targetName === "Array" || targetName === "ReadonlyArray") {
-        const typeArgs = getTypeArguments(type);
-        if (typeArgs && typeArgs.length === 1) {
-          return typeArgs[0] ?? null;
-        }
-      }
-    }
-  }
-
-  // Try getNumberIndexType for array-like types
-  const indexType = typeChecker.getIndexTypeOfType(type, 1 /* IndexKind.Number */);
-  if (indexType) {
-    return indexType;
   }
 
   return null;
 }
-
-// TypeScript type flag constants (from ts.TypeFlags)
-const TS_STRING_LIKE = 402653316; // String | StringLiteral | TemplateLiteral
-const TS_NUMBER_LIKE = 296; // Number | NumberLiteral
-const TS_BIGINT_LIKE = 2112; // BigInt | BigIntLiteral
-const TS_BOOLEAN_LIKE = 528; // Boolean | BooleanLiteral
-const TS_ES_SYMBOL_LIKE = 12288; // ESSymbol | UniqueESSymbol
-const TS_VOID = 16384;
-const TS_UNDEFINED = 32768;
-const TS_NULL = 65536;
-const TS_NEVER = 131072;
-const TS_UNKNOWN = 2;
-const TS_ANY = 1;
-
-const TS_PRIMITIVE_FLAGS =
-  TS_STRING_LIKE |
-  TS_NUMBER_LIKE |
-  TS_BIGINT_LIKE |
-  TS_BOOLEAN_LIKE |
-  TS_ES_SYMBOL_LIKE |
-  TS_VOID |
-  TS_UNDEFINED |
-  TS_NULL |
-  TS_NEVER;
-
-// Flags that indicate ambiguous types (shouldn't warn)
-const TS_AMBIGUOUS_FLAGS = TS_UNKNOWN | TS_ANY;
 
 /**
  * Classify a type as primitive, object, or unknown.
@@ -793,93 +697,49 @@ function classifyTypeKind(type: ts.Type): "primitive" | "object" | "unknown" {
     return hasPrimitive ? "primitive" : "object";
   }
 
-  // Object types (interfaces, classes, object literals, etc.)
-  // TypeFlags.Object = 524288
-  if (flags & 524288) {
+  if (type.isIntersection()) {
+    const types = type.types;
+    let hasPrimitive = false;
+    let hasObject = false;
+
+    for (let i = 0, len = types.length; i < len; i++) {
+      const memberType = types[i];
+      if (!memberType) continue;
+      const memberKind = classifyTypeKind(memberType);
+      if (memberKind === "unknown") {
+        return "unknown";
+      }
+      if (memberKind === "primitive") {
+        hasPrimitive = true;
+      } else {
+        hasObject = true;
+      }
+    }
+
+    if (hasPrimitive && hasObject) {
+      return "unknown";
+    }
+
+    return hasPrimitive ? "primitive" : "object";
+  }
+
+  if (flags & TS_OBJECT_LIKE) {
     return "object";
   }
 
   return "unknown";
 }
 
-/**
- * Get type arguments from a type reference.
- *
- * @param type - The TypeScript type to extract arguments from
- * @returns The type arguments if present, undefined otherwise
- */
-function getTypeArguments(type: ts.Type): readonly ts.Type[] | undefined {
-  const internals = getTypeInternals(type);
-
-  if (internals.typeArguments) {
-    return internals.typeArguments;
-  }
-
-  if (internals.target?.typeArguments) {
-    return internals.target.typeArguments;
-  }
-
-  if (internals.resolvedTypeArguments) {
-    return internals.resolvedTypeArguments;
-  }
-  return undefined;
-}
-
-/**
- * Get objectFlags from a type safely.
- *
- * @param type - TypeScript type
- * @returns The objectFlags value or 0
- */
-function getObjectFlags(type: ts.Type): number {
-  if ("objectFlags" in type && typeof type.objectFlags === "number") {
-    return type.objectFlags;
-  }
-  return 0;
-}
-
-/**
- * Get internal type properties safely.
- *
- * @param type - TypeScript type
- * @returns Object with internal properties
- */
-function getTypeInternals(type: ts.Type): {
-  typeArguments?: readonly ts.Type[];
-  target?: { objectFlags?: number; typeArguments?: readonly ts.Type[] };
-  resolvedTypeArguments?: readonly ts.Type[];
-} {
-  const result: {
-    typeArguments?: readonly ts.Type[];
-    target?: { objectFlags?: number; typeArguments?: readonly ts.Type[] };
-    resolvedTypeArguments?: readonly ts.Type[];
-  } = {};
-
-  if ("typeArguments" in type && Array.isArray(type.typeArguments)) {
-    result.typeArguments = type.typeArguments;
-  }
-
-  if ("target" in type && typeof type.target === "object" && type.target !== null) {
-    const target = type.target;
-    result.target = {};
-    if ("objectFlags" in target && typeof target.objectFlags === "number") {
-      result.target.objectFlags = target.objectFlags;
-    }
-    if ("typeArguments" in target && Array.isArray(target.typeArguments)) {
-      result.target.typeArguments = target.typeArguments;
-    }
-  }
-
-  if ("resolvedTypeArguments" in type && Array.isArray(type.resolvedTypeArguments)) {
-    result.resolvedTypeArguments = type.resolvedTypeArguments;
-  }
-
-  return result;
+function isObjectLikeForSpread(type: ts.Type): boolean {
+  if ((type.getFlags() & ts.TypeFlags.Object) !== 0) return true;
+  if (!type.isIntersection()) return false;
+  return type.types.every(memberType => (memberType.getFlags() & ts.TypeFlags.Object) !== 0);
 }
 
 /**
  * Create a new TypeResolver instance.
  *
+ * @param checker - Type checker used for type resolution
  * @param logger - Logger for debug output
  * @returns New TypeResolver
  */

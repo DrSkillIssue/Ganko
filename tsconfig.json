@@ -2,7 +2,9 @@
   "extends": "@tsconfig/bun/tsconfig.json",
   "compilerOptions": {
     "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "6.0",
     "isolatedModules": true,
+    "types": ["bun", "node"],
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false,
     "noPropertyAccessFromIndexSignature": true,

@@ -33,11 +33,53 @@ concurrency:
 
 jobs:
   check:
+    name: >-
+      CI (${{ matrix.typescript-label }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - typescript-label: ts-latest-6
+            typescript-spec: ^6
+            experimental: false
+          - typescript-label: ts-6.0.2
+            typescript-spec: 6.0.2
+            experimental: false
+          - typescript-label: ts-next
+            typescript-spec: next
+            experimental: true
     steps:
       - uses: actions/checkout@v6
 
       - uses: ./.github/actions/setup
+
+      - name: Resolve TypeScript version
+        id: resolve-typescript
+        shell: bash
+        env:
+          TYPESCRIPT_SPEC: ${{ matrix.typescript-spec }}
+        run: |
+          VERSION=$(node <<'NODE'
+          const { execSync } = require('node:child_process');
+
+          const spec = process.env.TYPESCRIPT_SPEC;
+          if (!spec) {
+            throw new Error('TYPESCRIPT_SPEC is required');
+          }
+
+          const version = execSync(`npm view "typescript@${spec}" version`, {
+            encoding: 'utf8',
+          }).trim();
+
+          process.stdout.write(version);
+          NODE
+          )
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set TypeScript version
+        run: bun add --dev --exact typescript@${{ steps.resolve-typescript.outputs.version }}
 
       - run: bun run ci
